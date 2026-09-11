@@ -1,0 +1,58 @@
+# Phase 1 — reference systemd sandboxing profile.
+# Copy to /etc/systemd/system/<name>.service, fill in ExecStart, then:
+#   systemctl daemon-reload && systemctl enable --now <name>.service
+#
+# Apply this same [Service] block (or the subset that fits) to every
+# long-running service on the host — telemetryd, node_exporter, etc.
+
+[Unit]
+Description=<REPLACE: one-line service description>
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=<REPLACE: /usr/local/bin/your-service --flag>
+Restart=on-failure
+RestartSec=5s
+
+# --- Identity: never run as root unless truly unavoidable ---
+User=<REPLACE: dedicated-service-user>
+Group=<REPLACE: dedicated-service-group>
+
+# --- Filesystem isolation ---
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=yes
+ReadWritePaths=<REPLACE: only the directories this service must write to>
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+
+# --- Privilege escalation ---
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=true
+RemoveIPC=true
+
+# --- Memory / execution ---
+MemoryDenyWriteExecute=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=true
+
+# --- Network (tighten per-service; UnixOnly for local-only daemons) ---
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=<REPLACE: any, or a specific deny-list>
+
+# --- Syscalls ---
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

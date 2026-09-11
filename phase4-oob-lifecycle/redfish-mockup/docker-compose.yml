@@ -1,0 +1,26 @@
+# Runs this repo's stateful Redfish mock server in its own isolated
+# bridge network, standing in for the BMC's dedicated management segment.
+#
+# Usage: docker compose up -d
+#        curl -k https://localhost:8443/redfish/v1/Systems/System.Embedded.1
+#
+# (Serves plain HTTP internally; if you need TLS on 8443 to mirror a real
+# BMC, put this behind a TLS-terminating sidecar such as stunnel or nginx —
+# not included here to keep the mock dependency-free.)
+
+services:
+  redfish-mock:
+    image: python:3.12-slim
+    container_name: redfish-mock-bmc
+    working_dir: /app
+    volumes:
+      - ./redfish_mock_server.py:/app/redfish_mock_server.py:ro
+    command: ["python3", "redfish_mock_server.py", "--host", "0.0.0.0", "--port", "8443"]
+    ports:
+      - "8443:8443"
+    networks:
+      - bmc-mgmt
+
+networks:
+  bmc-mgmt:
+    driver: bridge

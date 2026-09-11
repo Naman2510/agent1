@@ -1,0 +1,53 @@
+# Phase 3 — telemetryd systemd unit.
+# Install to: /etc/systemd/system/telemetryd.service
+# Requires the `telemetry` service user (create with: useradd --system --no-create-home telemetry)
+#
+#   systemctl daemon-reload
+#   systemctl enable --now telemetryd.service
+#
+# Sandboxing profile mirrors phase1-host-provisioning/systemd/hardened.service.template,
+# with the one deliberate exception this service needs: CAP_SYS_RAWIO, so it
+# can issue SCSI/NVMe pass-through queries (via smartctl) without running as root.
+
+[Unit]
+Description=Hardware telemetry daemon (S.M.A.R.T. / thermal / MCE-ECC-AER)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/telemetryd/telemetryd.py --config /etc/telemetryd/config.yaml
+Restart=on-failure
+RestartSec=5s
+
+User=telemetry
+Group=telemetry
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=yes
+ReadWritePaths=/var/lib/node_exporter/textfile_collector
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_SYS_RAWIO
+AmbientCapabilities=CAP_SYS_RAWIO
+RestrictSUIDSGID=true
+RemoveIPC=true
+
+MemoryDenyWriteExecute=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=true
+
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

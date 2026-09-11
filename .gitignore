@@ -1,0 +1,11 @@
+# Ephemeral output from phase2/phase5 diagnostic scripts (default OUT_DIR is cwd-relative)
+netcheck-*/
+thermal-profile-*/
+
+__pycache__/
+*.pyc
+
+# Local secrets/config someone copied from the *.example templates
+phase3-telemetry/telemetryd/config.yaml
+phase3-telemetry/prometheus/prometheus.yml
+phase3-telemetry/alertmanager/alertmanager.yml

@@ -1,0 +1,4 @@
+# telemetryd itself only needs PyYAML for config parsing — everything else
+# (asyncio, subprocess, urllib) is Python 3 stdlib, deliberately, so the
+# daemon has no dependency surface beyond the interpreter and smartmontools.
+PyYAML>=6.0

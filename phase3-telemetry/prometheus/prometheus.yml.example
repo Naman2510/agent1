@@ -1,0 +1,24 @@
+# Phase 3 — Prometheus scrape configuration.
+# Install to: /etc/prometheus/prometheus.yml (merge with any existing config)
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert.rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["localhost:9093"]
+
+scrape_configs:
+  - job_name: "node_exporter"
+    static_configs:
+      - targets: ["10.10.100.10:9100"]
+        labels:
+          host: "edge-server-01"
+    # node_exporter must be started with:
+    #   --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
+    # so telemetryd's hardware.prom is picked up automatically.
