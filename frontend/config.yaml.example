@@ -1,0 +1,28 @@
+# Dashboard backend configuration.
+# Install to: /etc/edge-dashboard/config.yaml (or pass --config directly)
+
+port: 8080
+
+# Same path as textfile_collector_path in
+# phase3-telemetry/telemetryd/config.yaml.example — the dashboard reads
+# telemetryd's output directly, it never talks to the daemon itself.
+textfile_collector_path: "/var/lib/node_exporter/textfile_collector/hardware.prom"
+
+# Same Redfish endpoint oob_control.py talks to — a real BMC, or one of
+# the options in phase4-oob-lifecycle/redfish-mockup/. The bundled mock
+# server (redfish_mock_server.py) speaks plain HTTP; switch this to
+# https:// for a real BMC or the DMTF mockup server run behind TLS.
+redfish_base_url: "http://127.0.0.1:8443"
+redfish_user: null
+redfish_password: null
+redfish_insecure: true   # set false once you've pinned a real BMC's CA
+redfish_system: "System.Embedded.1"
+redfish_chassis: "System.Embedded.1"
+
+# Relative paths here are resolved against the repo root (not the CWD the
+# server happens to be launched from), so this works whether you run
+# `make dashboard` from the repo root or `python3 server.py` from inside
+# frontend/.
+fault_drill_script: "phase4-oob-lifecycle/fault_drill.sh"
+
+max_alerts: 200

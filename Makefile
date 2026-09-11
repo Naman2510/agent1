@@ -7,10 +7,14 @@
 #   make lint       — syntax/compile checks only (subset of simulate).
 #   make telemetry-test — runs telemetryd.py in --mock --once mode.
 #   make oob-test   — spins up the local Redfish mock and exercises oob_control.py.
+#   make dashboard  — runs the full local stack (Redfish mock + telemetryd
+#                      mock + dashboard backend) so http://localhost:8080
+#                      is browsable with live mock data. Foreground; Ctrl-C
+#                      stops all three.
 #   make clean      — removes scratch output from the targets above.
 
 SHELL := /bin/bash
-.PHONY: simulate lint telemetry-test oob-test clean
+.PHONY: simulate lint telemetry-test oob-test dashboard clean
 
 lint:
 	@echo "== bash -n on every script =="
@@ -19,6 +23,8 @@ lint:
 	@python3 -m py_compile phase3-telemetry/telemetryd/telemetryd.py
 	@python3 -m py_compile phase4-oob-lifecycle/oob_control.py
 	@python3 -m py_compile phase4-oob-lifecycle/redfish-mockup/redfish_mock_server.py
+	@python3 -m py_compile frontend/server.py
+	@command -v node >/dev/null && node --check frontend/static/app.js || echo "node not installed, skipped JS syntax check"
 	@echo "== YAML/JSON config validation =="
 	@python3 -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('**/*.yml', recursive=True) + glob.glob('**/*.yaml', recursive=True)]"
 	@python3 -c "import json; json.load(open('phase3-telemetry/grafana/dashboard.json'))"
@@ -55,6 +61,17 @@ oob-test:
 	python3 phase4-oob-lifecycle/oob_control.py --insecure --base-url http://127.0.0.1:8443 power-status; \
 	python3 phase4-oob-lifecycle/oob_control.py --insecure --base-url http://127.0.0.1:8443 power-cycle --reset-type cycle; \
 	kill $$SRV
+
+dashboard:
+	@echo "Starting Redfish mock (8443), telemetryd --mock, and the dashboard (8080)."
+	@echo "Open http://localhost:8080/  —  Ctrl-C stops all three."
+	@trap 'kill $$(jobs -p) 2>/dev/null' EXIT; \
+	python3 phase4-oob-lifecycle/redfish-mockup/redfish_mock_server.py --port 8443 & \
+	python3 phase3-telemetry/telemetryd/telemetryd.py --mock \
+		--config phase3-telemetry/telemetryd/config.yaml.example & \
+	sleep 1; \
+	python3 frontend/server.py --config frontend/config.yaml.example; \
+	wait
 
 clean:
 	rm -rf netcheck-* thermal-profile-* /var/lib/node_exporter

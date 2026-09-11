@@ -9,3 +9,4 @@ __pycache__/
 phase3-telemetry/telemetryd/config.yaml
 phase3-telemetry/prometheus/prometheus.yml
 phase3-telemetry/alertmanager/alertmanager.yml
+frontend/config.yaml

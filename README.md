@@ -61,6 +61,7 @@ be validated before it ever touches a disk, a NIC, or a chassis.
 | `phase4-oob-lifecycle/` | 4 | `oob_control.py` Redfish CLI, `fault_drill.sh` fault-injection drill, mock/real BMC options |
 | `phase5-physical-dr/` | 5 | Thermal/power profiling script, hardware requirements |
 | `docs/` | 5 | Cabling standard, network topology reference, disaster-recovery runbook |
+| `frontend/` | — | Web dashboard: live power/RAID/thermal status, alert feed, Redfish OOB controls |
 | `lib/common.sh` | — | Shared bash helpers (logging, `SIMULATE=1`, root checks) used by every script |
 
 Each phase directory has its own `README.md` with exact commands. Start
@@ -74,13 +75,28 @@ Phase 1's RAID array exists).
 make simulate         # dry-runs every destructive script across all 5 phases
 make telemetry-test    # runs telemetryd.py in --mock mode, one poll cycle
 make oob-test          # spins up the local Redfish mock, exercises oob_control.py
+make dashboard         # full local stack: Redfish mock + telemetryd --mock +
+                        # the web dashboard, browsable at http://localhost:8080/
 ```
 
-All three have been run against this exact repo as part of building it —
+All four have been run against this exact repo as part of building it —
 `make simulate` dry-runs cleanly end to end, `telemetry-test` produces valid
 Prometheus textfile output and fires a webhook on a sliding-window thermal
-breach, and `oob-test` proves `power-cycle` actually flips `PowerState` on
-the mock BMC.
+breach, `oob-test` proves `power-cycle` actually flips `PowerState` on the
+mock BMC, and `make dashboard` serves a real dashboard with live (mock)
+power/telemetry data — every OOB button and the live alert feed were
+exercised end to end while building it.
+
+## Web dashboard
+
+`frontend/` is a single-page operations dashboard: power/RAID/thermal
+overview cards, S.M.A.R.T. and thermal detail tables, a live alert feed
+(fed by telemetryd's webhook), and buttons for Redfish power-cycle /
+boot-override / drive-LED control. It's a stdlib Python backend
+(`server.py`, no Flask/npm build step) plus plain HTML/CSS/JS, and it
+doesn't reimplement anything — it parses telemetryd's own Prometheus
+textfile output and imports `oob_control.py`'s `RedfishClient` directly.
+See `frontend/README.md` for the API and wiring details.
 
 ## Hardware requirements
 
