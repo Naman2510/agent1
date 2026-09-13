@@ -1,0 +1,296 @@
+diff --git a/web/src/compose_ui.ts b/web/src/compose_ui.ts
+index c3fefb7..c107c6a 100644
+--- a/web/src/compose_ui.ts
++++ b/web/src/compose_ui.ts
+@@ -685,7 +685,12 @@ export function handle_keydown(
+         event.preventDefault();
+     }
+ 
+-    if (isCmdOrCtrl && (key === "]" || key === "[")) {
++    // We exclude Shift here because Cmd+Shift+]/Cmd+Shift+[ are the
++    // browser's own "switch to next/previous tab" shortcuts on macOS.
++    // Some browsers still deliver those keydown events to the page,
++    // and without this check we'd indent/outdent the list the user is
++    // composing every time they merely switched tabs. See #40112.
++    if (isCmdOrCtrl && !event.shiftKey && (key === "]" || key === "[")) {
+         if (handle_list_indent($textarea, key === "]")) {
+             event.preventDefault();
+             event.stopPropagation();
+diff --git a/web/tests/compose_ui.test.cjs b/web/tests/compose_ui.test.cjs
+index c4ce05f..ff74167 100644
+--- a/web/tests/compose_ui.test.cjs
++++ b/web/tests/compose_ui.test.cjs
+@@ -1572,6 +1572,39 @@ run_test("handle_list_indent", ({override}) => {
+     }
+ });
+ 
++run_test("handle_keydown ignores Cmd/Ctrl+Shift+bracket", ({override}) => {
++    // Cmd+Shift+]/[ are the browser's own "switch tab" shortcuts on
++    // macOS; some browsers still deliver the keydown to the page, and
++    // we must not treat that as our (unshifted) list indent/outdent
++    // shortcut. See #40112.
++    override(text_field_edit, "setFieldText", (elt, val) => {
++        elt.value = val;
++    });
++
++    navigator.platform = "MacIntel";
++    init_textarea_state("- Item 1|");
++
++    const event = {
++        key: "]",
++        shiftKey: true,
++        metaKey: true,
++        ctrlKey: false,
++        stopPropagation: noop,
++        preventDefault: noop,
++    };
++
++    compose_ui.handle_keydown(event, $textarea);
++    assert.equal(get_textarea_state(), "- Item 1|");
++
++    // Sanity check: the same combo without Shift is the real shortcut
++    // and does indent the list.
++    event.shiftKey = false;
++    compose_ui.handle_keydown(event, $textarea);
++    assert.equal(get_textarea_state(), "  - Item 1|");
++
++    navigator.platform = "";
++});
++
+ run_test("maybe_set_compose_textarea_typeahead ignores edit box typeaheads", () => {
+     // First, set up the compose box's typeahead.
+     const $compose_textarea = $("textarea#compose-textarea");
+diff --git a/zerver/actions/users.py b/zerver/actions/users.py
+index 8855511..5aa01f2 100644
+--- a/zerver/actions/users.py
++++ b/zerver/actions/users.py
+@@ -47,6 +47,7 @@ from zerver.lib.streams import (
+ )
+ from zerver.lib.subscription_info import bulk_get_subscriber_peer_info
+ from zerver.lib.types import UserGroupMembersData, UserProfileChangeDict
++from zerver.lib.upload import delete_avatar_image
+ from zerver.lib.user_counts import realm_user_count_by_role
+ from zerver.lib.user_groups import (
+     convert_to_user_group_members_dict,
+@@ -58,9 +59,14 @@ from zerver.lib.users import (
+     user_access_restricted_in_realm,
+ )
+ from zerver.models import (
++    AlertWord,
++    CustomProfileFieldValue,
++    Device,
+     Draft,
++    EmailChangeStatus,
+     GroupGroupMembership,
+     NamedUserGroup,
++    PushDeviceToken,
+     Realm,
+     RealmAuditLog,
+     Recipient,
+@@ -70,6 +76,7 @@ from zerver.models import (
+     UserGroup,
+     UserGroupMembership,
+     UserProfile,
++    UserStatus,
+ )
+ from zerver.models.bots import get_bot_services
+ from zerver.models.messages import UserMessage
+@@ -121,6 +128,10 @@ def do_delete_user_core(
+ 
+     user_id = user_profile.id
+     realm = user_profile.realm
++    # We need the pre-deletion avatar_version to know which avatar
++    # image files (if any) to scrub from storage below; the overwrite
++    # a few lines down will reset this field to its default.
++    original_avatar_version = user_profile.avatar_version
+ 
+     # We create a temporary dummy UserProfile just to have a valid object with defaults
+     # set for all the various user settings. We can then copy them over onto the original
+@@ -195,6 +206,17 @@ def do_delete_user_core(
+             (SavedSnippet, "user_profile"),
+             (ScheduledMessage, "sender"),
+             (Draft, "user_profile"),
++            # The following tables can carry PII (bios, phone numbers,
++            # status text, alert words, device identifiers, and
++            # pending email changes) that would otherwise survive user
++            # deletion, since the UserProfile row itself is overwritten
++            # in place rather than deleted, so CASCADE never fires.
++            (CustomProfileFieldValue, "user_profile"),
++            (UserStatus, "user_profile"),
++            (AlertWord, "user_profile"),
++            (PushDeviceToken, "user"),
++            (Device, "user"),
++            (EmailChangeStatus, "user_profile"),
+         ]
+         for table, field_name in fks_to_delete:
+             table.objects.filter(**{field_name: user_profile}).delete()
+@@ -203,6 +225,14 @@ def do_delete_user_core(
+         # of this data is handled by do_deactivate_user already, so we don't need to do
+         # anything.
+ 
++        # Scrub any avatar image files the user had uploaded. The DB
++        # fields were already reset to the defaults by the
++        # overwrite_data update above, but the underlying files in
++        # storage (local disk or S3) are only removed by explicitly
++        # deleting them here.
++        for version in range(1, original_avatar_version + 1):
++            delete_avatar_image(user_profile, version)
++
+         # These audit logs can carry personal information in extra_data.
+         # We need to scrub that data in the process of user deletion.
+         audit_log_event_types_for_scrubbing = [
+diff --git a/zerver/tests/test_users.py b/zerver/tests/test_users.py
+index 3a25c7c..6f3c975 100644
+--- a/zerver/tests/test_users.py
++++ b/zerver/tests/test_users.py
+@@ -1,3 +1,4 @@
++import os
+ from collections.abc import Iterable
+ from datetime import timedelta
+ from email.headerregistry import Address
+@@ -14,6 +15,7 @@ from django.utils.timezone import now as timezone_now
+ 
+ from confirmation.models import Confirmation
+ from corporate.lib.stripe import get_latest_seat_count
++from zerver.actions.alert_words import do_add_alert_words
+ from zerver.actions.create_user import do_create_user, do_reactivate_user
+ from zerver.actions.custom_profile_fields import do_update_user_custom_profile_data_if_changed
+ from zerver.actions.invites import do_create_multiuse_invite_link, do_invite_users
+@@ -29,6 +31,7 @@ from zerver.actions.user_settings import (
+     do_change_full_name,
+     do_change_user_setting,
+ )
++from zerver.actions.user_status import do_update_user_status
+ from zerver.actions.user_topics import do_set_user_topic_visibility_policy
+ from zerver.actions.users import (
+     change_user_is_active,
+@@ -48,8 +51,9 @@ from zerver.lib.mention import silent_mention_syntax_for_user
+ from zerver.lib.send_email import clear_scheduled_emails, queue_scheduled_emails, send_future_email
+ from zerver.lib.stream_subscription import get_user_subscribed_streams
+ from zerver.lib.stream_topic import StreamTopicTarget
+-from zerver.lib.test_classes import ZulipTestCase
++from zerver.lib.test_classes import UploadSerializeMixin, ZulipTestCase
+ from zerver.lib.test_helpers import (
++    avatar_disk_path,
+     get_subscription,
+     get_test_image_file,
+     get_user_sent_message_ids,
+@@ -74,11 +78,15 @@ from zerver.lib.users import (
+ )
+ from zerver.lib.utils import assert_is_not_none
+ from zerver.models import (
++    AlertWord,
+     CustomProfileField,
+     CustomProfileFieldValue,
++    Device,
++    EmailChangeStatus,
+     Message,
+     OnboardingStep,
+     PreregistrationUser,
++    PushDeviceToken,
+     RealmAuditLog,
+     RealmDomain,
+     RealmUserDefault,
+@@ -88,6 +96,7 @@ from zerver.models import (
+     Subscription,
+     UserGroupMembership,
+     UserProfile,
++    UserStatus,
+     UserTopic,
+ )
+ from zerver.models.clients import get_client
+@@ -4185,6 +4194,94 @@ class DeleteUserTest(ZulipTestCase):
+             original_messages_from_hamlet_count,
+         )
+ 
++    def test_do_delete_user_scrubs_pii(self) -> None:
++        """
++        do_delete_user_core overwrites the UserProfile row in place rather
++        than deleting it, so Django's CASCADE machinery never fires for
++        rows in other tables that reference the user. Verify that we
++        explicitly clean up tables that can carry personally identifying
++        information about the deleted user.
++        """
++        hamlet = self.example_user("hamlet")
++        hamlet_user_id = hamlet.id
++        realm = hamlet.realm
++
++        phone_field = CustomProfileField.objects.get(name="Phone number", realm=realm)
++        CustomProfileFieldValue.objects.create(
++            user_profile=hamlet, field=phone_field, value="+1-555-0100"
++        )
++        self.assertTrue(CustomProfileFieldValue.objects.filter(user_profile=hamlet).exists())
++
++        client = get_client("website")
++        do_update_user_status(
++            user_profile=hamlet,
++            away=None,
++            status_text="on vacation",
++            client_id=client.id,
++            emoji_name=None,
++            emoji_code=None,
++            reaction_type=None,
++        )
++        self.assertTrue(UserStatus.objects.filter(user_profile=hamlet).exists())
++
++        do_add_alert_words(hamlet, ["secretproject"])
++        self.assertTrue(AlertWord.objects.filter(user_profile=hamlet).exists())
++
++        PushDeviceToken.objects.create(user=hamlet, token="deadbeef", kind=PushDeviceToken.FCM)
++        self.assertTrue(PushDeviceToken.objects.filter(user=hamlet).exists())
++
++        Device.objects.create(user=hamlet)
++        self.assertTrue(Device.objects.filter(user=hamlet).exists())
++
++        EmailChangeStatus.objects.create(
++            new_email="hamlet-new@zulip.com",
++            old_email=hamlet.delivery_email,
++            user_profile=hamlet,
++            realm=realm,
++        )
++        self.assertTrue(EmailChangeStatus.objects.filter(user_profile=hamlet).exists())
++
++        do_delete_user(hamlet, acting_user=None)
++        hamlet.refresh_from_db()
++
++        self.assertFalse(
++            CustomProfileFieldValue.objects.filter(user_profile_id=hamlet_user_id).exists()
++        )
++        self.assertFalse(UserStatus.objects.filter(user_profile_id=hamlet_user_id).exists())
++        self.assertFalse(AlertWord.objects.filter(user_profile_id=hamlet_user_id).exists())
++        self.assertFalse(PushDeviceToken.objects.filter(user_id=hamlet_user_id).exists())
++        self.assertFalse(Device.objects.filter(user_id=hamlet_user_id).exists())
++        self.assertFalse(EmailChangeStatus.objects.filter(user_profile_id=hamlet_user_id).exists())
++
++
++class DeleteUserAvatarTest(UploadSerializeMixin, ZulipTestCase):
++    def test_do_delete_user_scrubs_avatar_images(self) -> None:
++        """
++        do_delete_user_core resets the UserProfile's avatar fields back
++        to their defaults, but that alone leaves the previously uploaded
++        avatar image files behind in storage. Verify they get deleted.
++        """
++        hamlet = self.example_user("hamlet")
++        hamlet.avatar_source = UserProfile.AVATAR_FROM_USER
++        hamlet.save()
++
++        with get_test_image_file("img.png") as image_file:
++            upload_avatar_image(image_file, hamlet, content_type="image/png", future=False)
++
++        avatar_path_id = avatar_disk_path(hamlet)
++        avatar_original_path_id = avatar_disk_path(hamlet, original=True)
++        avatar_medium_path_id = avatar_disk_path(hamlet, medium=True)
++
++        self.assertTrue(os.path.isfile(avatar_path_id))
++        self.assertTrue(os.path.isfile(avatar_original_path_id))
++        self.assertTrue(os.path.isfile(avatar_medium_path_id))
++
++        do_delete_user(hamlet, acting_user=None)
++
++        self.assertFalse(os.path.isfile(avatar_path_id))
++        self.assertFalse(os.path.isfile(avatar_original_path_id))
++        self.assertFalse(os.path.isfile(avatar_medium_path_id))
++
+ 
+ class FakeEmailDomainTest(ZulipTestCase):
+     def test_get_fake_email_domain(self) -> None:
