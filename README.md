@@ -66,6 +66,7 @@ ai-riscv/
 ./scripts/check_env.sh   # verify required tools are installed
 make sim_cpu              # assemble + run the Phase 2 CPU testbench
                            # (Icarus Verilog and Verilator, both must pass)
+make test_isa              # run the Phase 3 directed instruction test suite
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -87,6 +88,7 @@ container with no FPGA or other physical hardware attached.
 - [`docs/riscv.md`](docs/riscv.md) — the RV32I ISA subset this project implements (registers, instruction formats, encodings). **Start here.**
 - `docs/architecture.md` — overall system architecture and phase-by-phase design rationale.
 - `docs/datapath.md` — single-cycle CPU datapath (Phase 2+).
+- `docs/testing.md` — directed instruction test convention and coverage (Phase 3+).
 - `docs/pipeline.md` — five-stage pipeline design (Phase 5+).
 - `docs/hazards.md` — hazard detection, forwarding, stalling (Phase 6+).
 - `docs/soc.md` — SoC memory map and peripherals (Phase 8+).
@@ -111,7 +113,7 @@ Tracked phase-by-phase; each phase below is only checked once it compiles, simul
 
 - [x] Phase 1 — RISC-V ISA foundation (this document set)
 - [x] Phase 2 — Basic single-cycle RISC-V CPU
-- [ ] Phase 3 — Instruction execution tests
+- [x] Phase 3 — Instruction execution tests
 - [ ] Phase 4 — Execute a real compiled C program
 - [ ] Phase 5 — Five-stage pipeline
 - [ ] Phase 6 — Pipeline hazards (forwarding/stalling/flushing)

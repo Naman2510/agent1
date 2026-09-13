@@ -40,7 +40,23 @@ module riscv_cpu
   // -----------------------------------------------------------------
   // Program counter
   // -----------------------------------------------------------------
-  logic [31:0] pc, next_pc, pc_plus4, pc_target;
+  // `pc` is given an explicit initial value (rather than relying solely
+  // on the synchronous reset below) so that instruction fetch has a
+  // well-defined address from time 0, not an X that only resolves at
+  // the first posedge of clk. Without this, `pc` is X for the brief
+  // window between simulation start and the first clock edge; that X
+  // propagates through imem's address decode into `instr`/`opcode`,
+  // and the control unit's `case (opcode)` correctly (but misleadingly)
+  // falls through to its `illegal` default for an X opcode. Two
+  // simulators can order that transient differently relative to
+  // anything sampling `illegal` on the very first clock edge, which is
+  // exactly the kind of simulator-dependent race a testbench should
+  // never be able to observe. The synchronous reset (`if (!rst_n)`
+  // below) remains the real, synthesizable reset behavior; this
+  // initializer only removes an artificial pre-reset X window that
+  // exists purely because this is a simulation, not real silicon.
+  logic [31:0] pc = 32'b0;
+  logic [31:0] next_pc, pc_plus4, pc_target;
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) pc <= 32'b0;

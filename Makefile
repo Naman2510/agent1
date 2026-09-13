@@ -6,13 +6,15 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu
+.PHONY: check-env help sim_cpu test_isa
 
 help:
 	@echo "Available targets:"
 	@echo "  check-env  - verify required toolchain is installed (scripts/check_env.sh)"
 	@echo "  sim_cpu    - assemble and run the Phase 2 single-cycle CPU testbench"
 	@echo "               under both Icarus Verilog and Verilator"
+	@echo "  test_isa   - run the Phase 3 directed instruction test suite"
+	@echo "               (sim/programs/tests/) under both simulators"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -22,3 +24,6 @@ check-env:
 
 sim_cpu:
 	@./scripts/run_sim_phase2.sh
+
+test_isa:
+	@python3 scripts/run_directed_tests.py

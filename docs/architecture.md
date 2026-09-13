@@ -99,4 +99,59 @@ test in Phase 3, which is the real verification gate for this document
 — a spec with a typo in an encoding would be caught the moment Phase 2's
 decoder is tested against it.
 
+## Phase 2 — Basic Single-Cycle RISC-V CPU
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** a complete single-cycle RV32I datapath in `rtl/`
+(PC/adders, instruction memory, decoder, control unit, register file,
+immediate generator, ALU, branch unit, data memory, writeback mux),
+documented block-by-block with rationale in `docs/datapath.md`, verified
+by `sim/testbenches/tb_riscv_cpu.sv` under both Icarus Verilog and
+Verilator (`make sim_cpu`).
+
+**Verification for this phase:** a hand-written bring-up program
+exercising most of the ISA subset, checked against 19 hand-computed
+expected register values. Cross-validating against two independent
+simulators specifically ruled out an Icarus Verilog compiler diagnostic
+being a masked correctness bug (see `docs/datapath.md`).
+
+## Phase 3 — Instruction Execution Tests
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** nine self-checking directed test programs under
+`sim/programs/tests/`, one generic testbench
+(`sim/testbenches/tb_directed_test.sv`) compiled once and re-run against
+each via a runtime `+HEXFILE=` plusarg, and a Python runner
+(`scripts/run_directed_tests.py`, `make test_isa`) that reports a
+pass/fail summary under both simulators. Every instruction in
+`docs/riscv.md` section 3 has at least one directed assertion; every
+required test category from the task spec (arithmetic, logical,
+immediate ops, loads, stores, branches, jumps, register dependencies,
+negative numbers, signed comparisons, zero-register behavior) is
+explicitly covered -- see the table in `docs/testing.md`.
+
+**Verification for this phase found two real bugs**, which is the
+point of building this test suite before moving on:
+
+1. A **simulator-dependent reset race** in `riscv_cpu.sv`: `pc` had no
+   explicit initial value, so it read as X for the window before the
+   first clock edge, which propagated into a transient (but concrete)
+   `illegal=1` that Icarus Verilog and Verilator latched differently
+   depending on internal event-ordering. Fixed at the source (`pc`
+   given an explicit initial value; the synchronous reset itself was
+   never the problem) rather than by loosening the test. See
+   `CHANGELOG.md` Phase 3 entry for the full root-cause explanation.
+2. An **arithmetic mistake in a test program itself**
+   (`tests/upper_imm.s` miscounted the instruction distance between two
+   `auipc`s used for a relative-address check). Caught because both
+   simulators agreed with each other and disagreed with the test's own
+   expectation -- a reminder that test programs are code too and need
+   the same scrutiny as the RTL.
+
+Both are documented in detail rather than silently fixed, per this
+project's rule against hiding what was actually found and how it was
+resolved.
+
 Later phases append their own sections here as they land.
