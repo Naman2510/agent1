@@ -211,3 +211,56 @@ This is not a commit log — it records *why*, not just *what*.
   `a0 = 30` (`10 + 20`), matching the C program's return value exactly,
   identically under both Icarus Verilog and Verilator. Full trace and
   explanation in `docs/c_program_demo.md`.
+
+## Phase 5 — Five-Stage Pipeline (2026-09-13)
+
+- **Decision: a new top-level module (`riscv_cpu_pipeline`), not a
+  rewrite of `riscv_cpu.sv`.** Reuses every Phase 2 submodule
+  (decoder, control_unit, regfile, imm_gen, alu, branch_unit, imem,
+  dmem) unchanged, wired across four new pipeline registers
+  (`rtl/pipeline/`). Keeps Phases 2-4's tests passing against the
+  original single-cycle CPU unmodified, and keeps both
+  microarchitectures available for later comparison (Phase 11
+  benchmarking). See `docs/pipeline.md`.
+
+- **Decision: Phase 5 does not implement forwarding, load-use
+  stalling, or branch/jump flush.** Per the task's own split between
+  Phase 5 ("implement pipeline registers... document what information
+  is stored in every pipeline register") and Phase 6 ("Control
+  hazards: branches must correctly flush or redirect the pipeline"),
+  those are explicitly out of scope here. Branch/JAL/JALR target
+  computation and PC redirection ARE implemented and correct in EX;
+  what's missing is discarding the 2 instructions already fetched from
+  the wrong path before that redirect lands. Phase 5's own test
+  program therefore contains no branches or jumps at all, and instead
+  ends without a halt loop, with the testbench running a precisely
+  bounded cycle count -- documented in full, including why even an
+  unconditional `j halt` would exercise the exact unhandled case, in
+  `sim/programs/pipeline_straightline.s` and `docs/pipeline.md`.
+
+- **Bug found and fixed: a wrong assumption about how many
+  instructions of gap a RAW dependency needs with no forwarding
+  hardware.** The initial test program used a 2-instruction gap,
+  reasoning from the classic "write in the first half of the cycle,
+  read in the second half" textbook pipelined-register-file behavior.
+  That reasoning does not apply here: `regfile.sv`'s write and
+  `id_ex_reg`'s capture of the corresponding read both happen via
+  nonblocking assignment on `posedge clk` -- the *same* edge, when a
+  producer's WB and a consumer's ID land in the same cycle -- and
+  Verilog resolves that race to the pre-edge value for every block
+  sensitive to the edge, not just the one asserting the write. Running
+  the test caught this immediately: 6 of 19 checks failed, every
+  failure being exactly a 2-instruction-gap dependency, while every
+  3-instruction-gap dependency in the same file passed. Fixed by
+  requiring a 3-instruction gap and rerunning to confirm all 19 checks
+  pass under both simulators; the (previously wrong) explanatory
+  comment in `riscv_cpu_pipeline.sv` was corrected to match, not just
+  the test. Full account in `docs/pipeline.md`.
+
+- **Result:** the pipelined CPU correctly executes straight-line RV32I
+  code (R-type/I-type ALU ops including shifts, LUI, AUIPC, a
+  store/load round-trip, x0 hard-wire behavior) with instructions
+  genuinely overlapping across all five stages, verified identically
+  under Icarus Verilog and Verilator (`make sim_pipeline`). Data
+  hazards closer than 3 instructions apart, and all branches/jumps,
+  are known-unhandled by design and are Phase 6's job.

@@ -177,4 +177,30 @@ directed-test suite's coverage was representative of what a real
 compiler actually emits, not just of the instructions I happened to
 think to test.
 
+## Phase 5 — Five-Stage Pipeline
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** `rtl/cpu/riscv_cpu_pipeline.sv`, a five-stage
+(IF/ID/EX/MEM/WB) pipelined CPU reusing every Phase 2 submodule
+unchanged, wired through four new pipeline registers in `rtl/pipeline/`.
+The original single-cycle CPU (`rtl/cpu/riscv_cpu.sv`) is untouched.
+Full stage-by-stage explanation, register contents, and an explicit
+account of what this phase deliberately does not yet handle (forwarding,
+stalling, branch/jump flush -- all Phase 6) in `docs/pipeline.md`.
+
+**Verification for this phase found a real bug in the test's own
+assumptions, not the RTL's logic, but one that would have produced a
+silently-wrong verification result if not caught:** the first attempt
+at `pipeline_straightline.s` assumed a classic pipelined-register-file
+textbook result (2 instructions of gap is enough with no forwarding)
+that does not hold for this specific implementation, because this
+regfile's write and the consuming pipeline register's capture both
+happen via nonblocking assignment on the same clock edge in that case --
+a same-edge race Verilog resolves to the pre-write value. Running the
+test caught it immediately (6 of 19 checks failed, every one exactly a
+2-instruction-gap case); the fix was requiring a 3-instruction gap, not
+loosening or removing the check. See `docs/pipeline.md` and
+`CHANGELOG.md` for the full account.
+
 Later phases append their own sections here as they land.

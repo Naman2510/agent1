@@ -6,17 +6,19 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline
 
 help:
 	@echo "Available targets:"
-	@echo "  check-env  - verify required toolchain is installed (scripts/check_env.sh)"
-	@echo "  sim_cpu    - assemble and run the Phase 2 single-cycle CPU testbench"
-	@echo "               under both Icarus Verilog and Verilator"
-	@echo "  test_isa   - run the Phase 3 directed instruction test suite"
-	@echo "               (sim/programs/tests/) under both simulators"
-	@echo "  run_c_demo - Phase 4: compile software/baremetal/add_test.c with the"
-	@echo "               real RISC-V GCC toolchain and run it on the CPU"
+	@echo "  check-env    - verify required toolchain is installed (scripts/check_env.sh)"
+	@echo "  sim_cpu      - assemble and run the Phase 2 single-cycle CPU testbench"
+	@echo "                 under both Icarus Verilog and Verilator"
+	@echo "  test_isa     - run the Phase 3 directed instruction test suite"
+	@echo "                 (sim/programs/tests/) under both simulators"
+	@echo "  run_c_demo   - Phase 4: compile software/baremetal/add_test.c with the"
+	@echo "                 real RISC-V GCC toolchain and run it on the CPU"
+	@echo "  sim_pipeline - Phase 5: assemble and run the pipelined CPU testbench"
+	@echo "                 under both Icarus Verilog and Verilator"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -32,3 +34,6 @@ test_isa:
 
 run_c_demo:
 	@./scripts/run_c_program.sh add_test 30
+
+sim_pipeline:
+	@./scripts/run_sim_pipeline.sh

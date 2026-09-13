@@ -68,6 +68,7 @@ make sim_cpu              # assemble + run the Phase 2 CPU testbench
                            # (Icarus Verilog and Verilator, both must pass)
 make test_isa              # run the Phase 3 directed instruction test suite
 make run_c_demo            # Phase 4: compile and run a real C program (GCC -> CPU)
+make sim_pipeline          # Phase 5: assemble + run the pipelined CPU testbench
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -91,7 +92,7 @@ container with no FPGA or other physical hardware attached.
 - `docs/datapath.md` — single-cycle CPU datapath (Phase 2+).
 - `docs/testing.md` — directed instruction test convention and coverage (Phase 3+).
 - `docs/c_program_demo.md` — real C program compiled and executed end-to-end (Phase 4).
-- `docs/pipeline.md` — five-stage pipeline design (Phase 5+).
+- `docs/pipeline.md` — five-stage pipeline design, register contents, and what Phase 5 does/doesn't yet handle (Phase 5+).
 - `docs/hazards.md` — hazard detection, forwarding, stalling (Phase 6+).
 - `docs/soc.md` — SoC memory map and peripherals (Phase 8+).
 - `docs/accelerator.md` — accelerator architecture and MMIO interface (Phase 9+).
@@ -117,7 +118,7 @@ Tracked phase-by-phase; each phase below is only checked once it compiles, simul
 - [x] Phase 2 — Basic single-cycle RISC-V CPU
 - [x] Phase 3 — Instruction execution tests
 - [x] Phase 4 — Execute a real compiled C program
-- [ ] Phase 5 — Five-stage pipeline
+- [x] Phase 5 — Five-stage pipeline
 - [ ] Phase 6 — Pipeline hazards (forwarding/stalling/flushing)
 - [ ] Phase 7 — Performance counters / CPI
 - [ ] Phase 8 — SoC (memory map, peripherals)
