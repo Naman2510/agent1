@@ -154,4 +154,27 @@ Both are documented in detail rather than silently fixed, per this
 project's rule against hiding what was actually found and how it was
 resolved.
 
+## Phase 4 — Execute a Real Compiled C Program
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** `software/baremetal/add_test.c` (the exact program
+named in the task spec), a minimal real-assembly startup stub
+(`software/runtime/start.S`) and linker script
+(`software/runtime/link.ld`), a build pipeline through the actual
+`riscv64-unknown-elf-gcc`/`ld`/`objcopy` toolchain
+(`scripts/build_c_program.sh`), and a testbench
+(`sim/testbenches/tb_c_program.sv`) that runs the resulting machine code
+on the unmodified Phase 2 CPU. Full walkthrough with the real compiler
+output and execution trace in `docs/c_program_demo.md`.
+
+**Verification for this phase:** the CPU produced `a0 = 30`, matching
+`10 + 20` exactly, under both Icarus Verilog and Verilator, with **no
+RTL changes** -- GCC's output for this program used only instructions
+Phase 2/3 had already implemented and verified. That is a meaningful
+validation of Phase 2/3, not just a Phase 4 result: it means the
+directed-test suite's coverage was representative of what a real
+compiler actually emits, not just of the instructions I happened to
+think to test.
+
 Later phases append their own sections here as they land.

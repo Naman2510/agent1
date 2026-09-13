@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa
+.PHONY: check-env help sim_cpu test_isa run_c_demo
 
 help:
 	@echo "Available targets:"
@@ -15,6 +15,8 @@ help:
 	@echo "               under both Icarus Verilog and Verilator"
 	@echo "  test_isa   - run the Phase 3 directed instruction test suite"
 	@echo "               (sim/programs/tests/) under both simulators"
+	@echo "  run_c_demo - Phase 4: compile software/baremetal/add_test.c with the"
+	@echo "               real RISC-V GCC toolchain and run it on the CPU"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -27,3 +29,6 @@ sim_cpu:
 
 test_isa:
 	@python3 scripts/run_directed_tests.py
+
+run_c_demo:
+	@./scripts/run_c_program.sh add_test 30

@@ -174,3 +174,40 @@ This is not a commit log — it records *why*, not just *what*.
 - **Result:** all 9 directed test files (covering every instruction in
   `docs/riscv.md` section 3) pass under both Icarus Verilog and
   Verilator (`make test_isa`).
+
+## Phase 4 — Execute a Real Compiled C Program (2026-09-13)
+
+- **Decision: use the real `riscv64-unknown-elf-gcc` toolchain
+  end-to-end, not this project's own `scripts/asm_to_hex.py`.** The
+  task requires "do not simply emulate the C program in Python" --
+  `scripts/asm_to_hex.py` exists only for this project's own
+  hand-written directed test programs (Phases 2-3). Phase 4's C program
+  goes through the real cross-compiler, real linker, and real
+  `objcopy`; only the final binary-to-`$readmemh`-hex conversion
+  (`scripts/bin_to_hex.py`) is this project's own code, and it does no
+  semantic transformation -- it is a byte-format converter, not part of
+  compilation.
+
+- **Decision: write a minimal real-assembly startup stub
+  (`software/runtime/start.S`) rather than relying on GCC's default
+  startup.** There is no OS and, per Phase 1, no trap/CSR architecture,
+  so `-nostartfiles` is required and something has to set up `sp` before
+  `main` runs and something has to happen when `main` returns (there is
+  nowhere to return to). `start.S` sets `sp` near the top of the
+  4096-byte simulated data memory and parks in an infinite loop after
+  `main` returns, exactly mirroring how a real bare-metal RISC-V system
+  would boot.
+
+- **Result, and why it matters beyond Phase 4 itself:** GCC (targeting
+  `-march=rv32i -mabi=ilp32`, no extensions) compiled
+  `software/baremetal/add_test.c` using only instructions Phase 2/3
+  already implemented and verified (`addi`, `sw`, `lw`, `add`, plus the
+  standard `li`/`mv`/`ret`/`j` pseudo-instructions, which expand to
+  `addi`/`jalr`/`jal`). **No RTL changes were required for this phase.**
+  That is itself evidence that Phases 2-3 implemented a correct, broad
+  enough RV32I subset -- real, unmodified compiler output running
+  correctly on the first attempt is a stronger signal than any
+  additional hand-written test could provide. The CPU produced
+  `a0 = 30` (`10 + 20`), matching the C program's return value exactly,
+  identically under both Icarus Verilog and Verilator. Full trace and
+  explanation in `docs/c_program_demo.md`.
