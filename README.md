@@ -64,6 +64,8 @@ ai-riscv/
 
 ```bash
 ./scripts/check_env.sh   # verify required tools are installed
+make sim_cpu              # assemble + run the Phase 2 CPU testbench
+                           # (Icarus Verilog and Verilator, both must pass)
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -108,7 +110,7 @@ container with no FPGA or other physical hardware attached.
 Tracked phase-by-phase; each phase below is only checked once it compiles, simulates, is tested, and is documented.
 
 - [x] Phase 1 — RISC-V ISA foundation (this document set)
-- [ ] Phase 2 — Basic single-cycle RISC-V CPU
+- [x] Phase 2 — Basic single-cycle RISC-V CPU
 - [ ] Phase 3 — Instruction execution tests
 - [ ] Phase 4 — Execute a real compiled C program
 - [ ] Phase 5 — Five-stage pipeline
