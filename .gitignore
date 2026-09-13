@@ -1,0 +1,25 @@
+# Simulation artifacts
+*.vcd
+*.vvp
+sim/waveforms/*.vcd
+obj_dir/
+
+# Compiled C / ELF artifacts
+*.o
+*.elf
+*.bin
+*.hex
+*.map
+
+# Synthesis outputs (raw Yosys dumps; committed *reports* live under results/)
+*.dot
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Misc
+.DS_Store
+*.log
