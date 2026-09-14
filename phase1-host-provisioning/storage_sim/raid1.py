@@ -81,24 +81,43 @@ class RAID1Array:
     needs and keeps the state machine easy to reason about and verify —
     see storage_sim/README.md, "Why exactly 2 members"."""
 
-    def __init__(self, members: List[Optional[BlockDevice]], labels: Optional[List[str]] = None):
+    def __init__(
+        self,
+        members: List[Optional[BlockDevice]],
+        labels: Optional[List[str]] = None,
+        block_size: Optional[int] = None,
+        num_blocks: Optional[int] = None,
+    ):
         """`members` normally holds 2 BlockDevices. A slot may instead be
         `None`, meaning "this array is being constructed already missing
         a member" — the equivalent of `mdadm --assemble` only finding
         one of two expected disks and bringing the array up degraded
-        rather than refusing to start."""
+        rather than refusing to start.
+
+        `block_size`/`num_blocks` let a caller construct an array with
+        NO trusted members at all (a fully FAILED array is still a
+        meaningful, representable thing — see ArrayManager._assemble_group,
+        which hits exactly this when a metadata inconsistency leaves
+        nothing trustworthy on reassembly). Without an explicit override,
+        geometry is derived from whichever members are present; if none
+        are and no override was given, that's a genuine caller error."""
         if len(members) != 2:
             raise InvalidOperationError("RAID1Array in this project always has exactly 2 member slots")
         present = [m for m in members if m is not None]
-        if not present:
-            raise InvalidOperationError("cannot construct a RAID1Array with zero available members")
-        sizes = {(m.block_size, m.num_blocks) for m in present}
-        if len(sizes) != 1:
+        if present:
+            sizes = {(m.block_size, m.num_blocks) for m in present}
+            if len(sizes) != 1:
+                raise InvalidOperationError(
+                    f"member geometry mismatch: {sizes} — real mdadm refuses to create an "
+                    "array from members of different size/block_size too"
+                )
+            block_size, num_blocks = next(iter(sizes))
+        elif block_size is not None and num_blocks is not None:
+            pass  # constructing a fully FAILED array — geometry supplied explicitly
+        else:
             raise InvalidOperationError(
-                f"member geometry mismatch: {sizes} — real mdadm refuses to create an "
-                "array from members of different size/block_size too"
+                "cannot construct a RAID1Array with zero available members and no explicit geometry"
             )
-        block_size, num_blocks = next(iter(sizes))
         self.block_size = block_size
         self.num_blocks = num_blocks
         labels = labels or [f"disk{i}" for i in range(len(members))]
@@ -109,6 +128,7 @@ class RAID1Array:
         self._lock = threading.RLock()
         self._rebuild_thread: Optional[threading.Thread] = None
         self._rebuild_progress: Optional[RebuildProgress] = None
+        self._stop_rebuild = threading.Event()
         self.on_state_change: Optional[Callable[[str], None]] = None  # optional hook for the dashboard/CLI
 
     # -- status -------------------------------------------------------------
@@ -287,12 +307,37 @@ class RAID1Array:
             m.device = device
             m.state = MemberState.REBUILDING
             self._rebuild_progress = RebuildProgress(target_label=label, blocks_total=self.num_blocks)
+            self._stop_rebuild.clear()
             self._notify()
 
         self._rebuild_thread = threading.Thread(
             target=self._run_rebuild, args=(label, source.label, delay_per_block), daemon=True
         )
         self._rebuild_thread.start()
+
+    def request_rebuild_stop_and_join(self, timeout: Optional[float] = None) -> None:
+        """Cleanly stop an in-flight background rebuild and wait for its
+        thread to exit, before doing anything (like closing the
+        underlying devices) that the thread might still be using.
+
+        This exists because closing device file handles out from under
+        an *actively running* rebuild thread is a genuine race: the
+        thread can be mid `read_block`/`write_block` on the very object
+        being closed, and the resulting failure can propagate through
+        `_notify()` into metadata persistence at an inconvenient moment,
+        leaving different members with inconsistent event counts. A
+        real system has the same hazard on an unclean shutdown (power
+        loss between updating one member's superblock and the other's)
+        — the fix here is to prefer a *clean* stop whenever the caller
+        can afford one, exactly as a real shutdown sequence would signal
+        services to quiesce before cutting power to storage.
+
+        Call this before `ArrayManager.close_all()` (which does so
+        automatically) rather than relying on `wait_for_rebuild()`,
+        which blocks until *completion* rather than requesting a stop."""
+        self._stop_rebuild.set()
+        if self._rebuild_thread:
+            self._rebuild_thread.join(timeout=timeout)
 
     def _pick_rebuild_source(self) -> Optional[Member]:
         for m in self._members:
@@ -303,6 +348,16 @@ class RAID1Array:
     def _run_rebuild(self, target_label: str, source_label: str, delay_per_block: float) -> None:
         progress = self._rebuild_progress
         for i in range(self.num_blocks):
+            if self._stop_rebuild.is_set():
+                # A clean stop request (see request_rebuild_stop_and_join) —
+                # checked BEFORE touching any device, so there is no race
+                # with whoever asked us to stop then closing those devices
+                # right after. Left as REBUILDING, not FAILED: this models
+                # a controlled shutdown mid-resync, not a hardware fault —
+                # on reassembly it's correctly untrusted and needs a fresh
+                # `add`, but nothing here was actually broken.
+                progress.aborted_reason = "rebuild stopped (clean shutdown before completion)"
+                return
             with self._lock:
                 target = self._find(target_label)
                 source = self._find(source_label)

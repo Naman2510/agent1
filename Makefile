@@ -70,7 +70,7 @@ sim-test:
 	@rm -rf phase1-host-provisioning/storage_sim/data
 
 unit-test:
-	@echo "== storage_sim (48 tests) =="
+	@echo "== storage_sim (50 tests) =="
 	cd phase1-host-provisioning && python3 -W error::ResourceWarning -m unittest discover -s storage_sim/tests
 	@echo "== telemetryd (19 tests) =="
 	cd phase3-telemetry/telemetryd && python3 -W error::ResourceWarning -m unittest discover -s tests
@@ -78,7 +78,7 @@ unit-test:
 	cd phase4-oob-lifecycle && python3 -W error::ResourceWarning -m unittest discover -s tests
 	@echo "== dashboard (15 tests, real HTTP against a real server) =="
 	cd frontend && python3 -W error::ResourceWarning -m unittest discover -s tests
-	@echo "unit-test OK — 96 tests"
+	@echo "unit-test OK — 98 tests"
 
 telemetry-test:
 	python3 phase3-telemetry/telemetryd/telemetryd.py --mock --once -v \

@@ -106,6 +106,41 @@ has one).
 Full regression coverage:
 `tests/test_manager.py::TestArrayManagerCrossProcessLifecycle`.
 
+### Why `RAID1Array` has a cooperative rebuild-stop (a second real bug)
+`ArrayManager.close_all()` used to just close every device's file
+handle, unconditionally. If a background rebuild thread was still
+actively reading/writing one of those devices at that exact moment, its
+next `read_block`/`write_block` call would raise on the now-closed file
+— caught, but the resulting `_fail_member_locked` → `_notify()` →
+metadata-persist chain could run *while* `close_all()` was still
+iterating and closing the *other* device, so one member could receive a
+fresher event-count write than the other. On the next process's
+`assemble_all()`, that skew could make **both** members look untrustworthy
+at once (one for being mid-rebuild, one for being "stale" relative to the
+other) — which `RAID1Array`'s constructor rejected outright as an error
+instead of representing it, crashing the whole reassembly.
+
+Found by running the actual test suite in a loop (a plain single run
+passed almost every time — this was a genuine, low-probability race, not
+something a single green test run would ever reveal). Fixed two ways:
+`RAID1Array` now accepts being constructed with zero trusted members
+(an explicit `block_size`/`num_blocks` override lets geometry be known
+even then) so a pathological case correctly reports a FAILED array
+instead of crashing assembly; and `close_all()` now calls
+`RAID1Array.request_rebuild_stop_and_join()` first, so an in-flight
+rebuild is asked to stop cooperatively — checked *before* touching any
+device each iteration — and joined before any file handle is closed,
+eliminating the race rather than papering over its symptom. This also
+mirrors a real hazard: an unclean shutdown (power loss) between updating
+one RAID member's superblock and the other's is a genuine, known problem
+class in real metadata systems, which is exactly why a *clean* stop is
+preferable whenever a caller can afford one.
+
+Regression coverage: `test_request_rebuild_stop_and_join_stops_cleanly`
+and `test_close_all_during_active_rebuild_never_races` (the latter
+deliberately loops 15 times internally — a fixed race still deserves
+more than one lucky pass as evidence it's actually fixed).
+
 ### Why the block-level test surface, not a filesystem
 This simulation tests at the block-device/RAID layer — the layer real
 `mdadm` actually operates at — rather than implementing a toy filesystem
@@ -155,7 +190,7 @@ models exactly the one layout that matters, and no more.
 
 ```bash
 cd phase1-host-provisioning
-python3 -m unittest discover -s storage_sim/tests -v   # 48 tests as of this writing
+python3 -m unittest discover -s storage_sim/tests -v   # 50 tests as of this writing
 python3 -m storage_sim.cli demo                          # scripted, narrated, asserting walkthrough
 python3 -m storage_sim.cli create tank --num-blocks 4096 --block-size 4096
 python3 -m storage_sim.cli status tank
@@ -170,7 +205,7 @@ See `cli.py`'s module docstring for the full command reference.
 replacement, background rebuild (including one interrupted by a second
 failure), silent-corruption detection and self-heal, `scrub`, and
 cross-process persistence/reassembly (including the stale-event-count
-and untrusted-role-state cases) — via 48 real automated tests plus a
+and untrusted-role-state cases) — via 50 real automated tests plus a
 scripted demo, all actually executed, not just asserted to work.
 
 **Not tested, and cannot be, without real hardware:** real `mdadm`,

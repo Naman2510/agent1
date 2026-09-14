@@ -254,6 +254,33 @@ class TestArrayManagerCrossProcessLifecycle(unittest.TestCase):
             self.assertEqual(mgr.read_block("tank", i), pad_block(f"v{i}"))
         mgr.close_all()
 
+    def test_close_all_during_active_rebuild_never_races(self):
+        # Direct regression test for the exact bug this suite caught:
+        # ArrayManager.close_all() used to close device file handles
+        # while a background rebuild thread was still actively using
+        # them, which could leave one member's superblock updated and
+        # the other's not, producing an inconsistent event-count state
+        # that made the NEXT assemble_all() exclude every member and
+        # crash instead of correctly reporting a degraded/failed array.
+        # Run several times in one test, since a race — even a fixed
+        # one — deserves more than a single lucky pass as evidence.
+        for _ in range(15):
+            mgr = ArrayManager(self.tmpdir / f"run_{_}")
+            mgr.create_array("tank", num_blocks=32, block_size=32)
+            for i in range(32):
+                mgr.write_block("tank", i, pad_block(f"v{i}"))
+            mgr.fail("tank", "tank-0")
+            mgr.remove("tank", "tank-0")
+            mgr.add("tank", "tank-0", delay_per_block=0.02)
+            time.sleep(0.05)  # rebuild is definitely still in flight here
+            mgr.close_all()  # must never raise, and must leave consistent metadata
+
+            mgr2 = ArrayManager(self.tmpdir / f"run_{_}")
+            reports = mgr2.assemble_all()  # must never raise "zero available members"
+            self.assertEqual(len(reports), 1)
+            self.assertIn(mgr2.get("tank").status()["state"], ("degraded", "failed"))
+            mgr2.close_all()
+
 
 if __name__ == "__main__":
     unittest.main()

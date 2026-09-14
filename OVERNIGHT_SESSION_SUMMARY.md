@@ -44,10 +44,10 @@ a block device).
    original build (before tonight) had only manual, one-off verification
    for `telemetryd.py`, `oob_control.py`, and the dashboard. Per
    CLAUDE.md's testing rigor, that's a real gap, so it got closed:
-   automated suites for all three, plus storage_sim's own 48 tests.
-   **96 tests total, all genuinely executed** (`make unit-test`).
+   automated suites for all three, plus storage_sim's own 50 tests.
+   **98 tests total, all genuinely executed** (`make unit-test`).
 
-## Two real bugs found and fixed (not glossed over)
+## Three real bugs found and fixed (not glossed over)
 
 1. **Read-during-rebuild correctness.** A member being rebuilt still has
    old zeroed placeholder data (with a *valid* checksum) for blocks its
@@ -70,17 +70,34 @@ a block device).
    This also naturally closed a related gap: an interrupted rebuild is
    now correctly *not* trusted as complete after a restart either.
 
-I'm calling these out specifically because CLAUDE.md's Honesty section
-asks for it, and because "I ran the test suite once and it was green" is
-a weaker claim than "I ran it, then ran the actual CLI the way a human
-would, found it broken, and fixed the real gap" — the second one is what
-actually happened.
+3. **A genuine race, found only by running the test suite in a loop.**
+   After committing everything above, I ran the full suite a final time
+   before writing this summary — and it failed, once, on a test that had
+   passed every time before. A single flaky failure is exactly the kind
+   of thing it would be easy to shrug off as "probably nothing" and
+   move on; instead I re-ran it in a loop (~20-40 iterations) until it
+   reproduced twice, got a real traceback, and traced it to
+   `ArrayManager.close_all()` closing a rebuild's device file handles
+   out from under the background thread still actively using them —
+   a race that could leave two members with inconsistent metadata and,
+   in the worst case, make the *next* process's reassembly crash outright
+   instead of reporting a degraded array. Fixed at the root (a
+   cooperative rebuild-stop, joined before any device closes — not a
+   sleep or a retry), then stress-tested 40+ times with zero further
+   failures before moving on. Full story: `storage_sim/README.md`'s "Why
+   `RAID1Array` has a cooperative rebuild-stop".
+
+I'm calling all three out specifically because CLAUDE.md's Honesty
+section asks for it, and because "I ran the test suite once and it was
+green" is a much weaker claim than "I ran it repeatedly, including after
+I thought I was done, caught a real intermittent failure, and didn't
+stop until I understood why" — the second one is what actually happened.
 
 ## Honest testing status (see `PROJECT_SPEC.md`'s full ledger)
 
 Everything above is **simulation-tested or mock-tested**, not
 **VM/hardware-tested**. Nothing tonight touched a real or virtual block
-device. `make unit-test` (96 tests) and `make simulate` (dry-run every
+device. `make unit-test` (98 tests) and `make simulate` (dry-run every
 destructive shell script) both pass cleanly right now if you want to
 verify before reading further.
 

@@ -91,7 +91,7 @@ where no single drive failure crashes the host or leaves it unbootable.
 
 Implementation: `phase1-host-provisioning/scripts/` (the real, destructive
 shell scripts above — hardware/VM-only, `SIMULATE=1`-dry-run-tested so
-far) and `phase1-host-provisioning/storage_sim/` (a from-scratch, 48-test
+far) and `phase1-host-provisioning/storage_sim/` (a from-scratch, 50-test
 software model of the RAID1 mirror itself — see its own README for the
 architecture and the full mapping onto the real `mdadm` concepts above).
 
@@ -206,7 +206,7 @@ CLAUDE.md's Virtualization section:
 | Phase | Tier | What has been genuinely tested, and where |
 | --- | --- | --- |
 | 1 — Storage/Boot (real scripts) | Simulation-tested (shell logic only) | `phase1-host-provisioning/scripts/*.sh` — `SIMULATE=1` dry runs only, in a cloud sandbox with **no real block devices**. Zero real `mdadm`/`sgdisk`/`grub-install` execution has occurred anywhere. |
-| 1 — Storage/Boot (RAID1 logic) | Simulation-tested (real, executed code) | `phase1-host-provisioning/storage_sim/` — 48 automated tests plus a scripted, asserting demo, all actually run: normal read/write, degraded mode, member fail/remove/add, background rebuild (including one interrupted by a second failure), silent-corruption detection + self-heal, `scrub`, and cross-process reassembly (stale-event-count exclusion, untrusted-role-state exclusion). This validates the *logic*; it is a software model, not mdadm, and says so throughout its own README. |
+| 1 — Storage/Boot (RAID1 logic) | Simulation-tested (real, executed code) | `phase1-host-provisioning/storage_sim/` — 50 automated tests plus a scripted, asserting demo, all actually run: normal read/write, degraded mode, member fail/remove/add, background rebuild (including one interrupted by a second failure), silent-corruption detection + self-heal, `scrub`, and cross-process reassembly (stale-event-count exclusion, untrusted-role-state exclusion). This validates the *logic*; it is a software model, not mdadm, and says so throughout its own README. |
 | 2 — Networking | Simulation-tested (config) + Simulation-tested (shell logic) | `nftables.conf` syntax-validated against a real `nft` binary. VLAN/netns/diagnostic scripts are `SIMULATE=1` dry-run only — no real interface was ever created. |
 | 3 — Telemetry | Mock-tested (automated suite: 19 tests) | `phase3-telemetry/telemetryd/tests/` — SlidingWindow math, Prometheus textfile output, WebhookSink dispatch (including a genuine unreachable-endpoint failure path), and a full TelemetryDaemon integration run, all as real automated tests. Two of those tests exercise code paths the *original* manual verification never actually reached: the real (non-mock) sysfs-thermal-glob path (via a configurable `base` added specifically to make this testable — see `ThermalCollector`) and the real (non-mock) `/dev/kmsg`-tailing fault-detection path (against a real temp file standing in for kmsg). Real `smartctl`/real `/dev/kmsg`/real sysfs on an actual machine have still never been exercised (not installed/available in this sandbox). |
 | 4 — OOB/Redfish | Mock-tested (automated suite: 14 tests) | `phase4-oob-lifecycle/tests/` — every RedfishClient action and CLI command path against the mock server running in-process, plus a consistency check that `oob_control.py`'s `RESET_TYPE_MAP` and the mock server's own reset-type table can't silently drift apart, plus real CLI argument-validation and unreachable-endpoint error-handling tests. No real BMC or OpenBMC/QEMU instance has ever been used. |

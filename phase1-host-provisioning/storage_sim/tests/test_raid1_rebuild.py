@@ -103,6 +103,36 @@ class TestRAID1Rebuild(StorageSimTestCase):
         with self.assertRaises(InvalidOperationError):
             arr.add_member("disk0", wrong_size)
 
+    def test_request_rebuild_stop_and_join_stops_cleanly(self):
+        # Regression test for a real race caught while building this:
+        # closing a device's file handle while a rebuild thread is still
+        # actively reading/writing it (e.g. from ArrayManager.close_all())
+        # could leave members with inconsistent metadata. The fix is a
+        # cooperative stop the rebuild thread checks BEFORE touching any
+        # device each iteration — this test proves the stop is clean
+        # (no exception, no FAILED state, thread genuinely exited) rather
+        # than just asserting the race doesn't happen (which, being a
+        # race, wouldn't reliably prove anything on its own).
+        arr, old_d0, d1 = self._degraded_array_with_data()
+        replacement = self.make_disk(
+            "disk0_replacement.img", num_blocks=NUM_BLOCKS, block_size=BLOCK_SIZE, role=0
+        )
+        arr.add_member("disk0", replacement, delay_per_block=0.05)
+
+        arr.request_rebuild_stop_and_join(timeout=5)
+
+        status = arr.status()
+        self.assertEqual(status["state"], "rebuilding")  # not failed — a clean stop, not a fault
+        self.assertFalse(status["rebuild"]["finished"])
+        self.assertIn("stopped", status["rebuild"]["aborted_reason"])
+        self.assertLess(status["rebuild"]["blocks_done"], NUM_BLOCKS)  # genuinely interrupted, not raced to completion
+
+        # The devices must now be safe to close without any exception —
+        # the thread has actually exited, not just been asked to.
+        old_d0.close()
+        d1.close()
+        replacement.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -190,7 +190,15 @@ class ArrayManager:
         for dev, _sb in excluded_stale:
             dev.close()
 
-        arr = RAID1Array(slots, labels=labels)
+        # Geometry is always derived from *some* superblock, trusted or
+        # not — even a fully-excluded entry's declared block_size/num_blocks
+        # is presumably accurate about itself. This guarantees
+        # RAID1Array can always be constructed here, even in the
+        # pathological case where every member ends up excluded (a
+        # metadata inconsistency should surface as a FAILED array
+        # status, not crash the whole assembly).
+        any_sb = entries[0][1]
+        arr = RAID1Array(slots, labels=labels, block_size=any_sb.block_size, num_blocks=any_sb.num_blocks)
         rec = _ArrayRecord(name=name, array=arr, raw_devices=raw_devices, event_count=max_event)
         self._records[array_uuid] = rec
         arr.on_state_change = self._make_async_state_hook(array_uuid)
@@ -351,6 +359,12 @@ class ArrayManager:
 
     def close_all(self) -> None:
         for rec in self._records.values():
+            # Stop any in-flight rebuild cleanly BEFORE closing devices —
+            # closing file handles out from under an actively running
+            # rebuild thread is a genuine race (see RAID1Array.
+            # request_rebuild_stop_and_join's docstring for the full
+            # explanation of what goes wrong without this).
+            rec.array.request_rebuild_stop_and_join(timeout=5)
             for dev in rec.raw_devices.values():
                 try:
                     dev.close()
