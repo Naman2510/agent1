@@ -390,3 +390,65 @@ This is not a commit log — it records *why*, not just *what*.
 - **Result:** `make test_perf` passes both benchmark correctness and
   counter checks under both simulators; full Phase 2-6 regression
   re-verified after the reset-sequencing fix.
+
+## Phase 8 — System-on-Chip Integration (2026-09-14)
+
+- **Refactored `rtl/cpu/riscv_cpu_pipeline.sv` into a data-bus master.**
+  Removed its internal `dmem` instantiation and `DMEM_DEPTH_WORDS`
+  parameter; added a plain bus-master port (`dbus_addr`, `dbus_wdata`,
+  `dbus_mem_read`, `dbus_mem_write` as outputs, `dbus_rdata` as input),
+  driven directly by the existing MEM-stage combinational assigns
+  (`dbus_addr = alu_result_mem`, etc.) and consumed by `mem_wb_reg` in
+  place of the old internal `dmem_rdata_mem` wire. This is a pure
+  port-list/wiring change -- no ALU, hazard, forwarding, or control
+  logic moved. Instruction memory (`imem`) is **not** part of this bus
+  and stays internal on its own dedicated fetch-only port, unchanged
+  since Phase 2 -- there is no requirement for the CPU to write program
+  memory over the data bus.
+
+- **Updated all four existing testbenches** that instantiate
+  `riscv_cpu_pipeline` directly (`tb_pipeline.sv`,
+  `tb_pipeline_directed_test.sv`, `tb_benchmark.sv`,
+  `tb_perf_counters.sv`, the last of which needed two independent
+  `dmem` instances for its two parallel DUTs) to wire a plain `dmem`
+  to the new `dbus_*` ports themselves -- functionally identical to
+  what the CPU module did internally before.
+
+- **Verified the refactor as a pure regression before writing any new
+  SoC code.** All four updated testbenches were re-run under both
+  Icarus Verilog and Verilator: every architectural register check,
+  all 3 pipeline hazard directed tests, and all 18 of
+  `tb_perf_counters.sv`'s exact counter assertions reproduced their
+  pre-refactor values unchanged (`sum_loop`: cycles=56 retired=34
+  stall=0 branch=10 branch_taken=9 load_use=0 forwarding=12 flush=10;
+  `array_sum`: cycles=51 retired=34 stall=5 branch=5 branch_taken=4
+  load_use=5 forwarding=17 flush=5). `make benchmarks` was re-run
+  afterward and reproduced the identical CPI figures; the only diff in
+  `results/performance_report.md` is its generated-timestamp line.
+
+- **Added the SoC memory map and bus:** `rtl/bus/soc_bus.sv` (a purely
+  combinational address decoder on `addr[31:28]` routing the CPU's
+  single bus-master port to RAM/UART/GPIO, with the accelerator region
+  `0x30000000` reserved-but-unpopulated for Phase 9), `rtl/bus/uart.sv`
+  (memory-mapped TX-only UART register interface: `TXDATA`/`STATUS`,
+  a real busy flag, no fabricated serial-line timing), `rtl/bus/gpio.sv`
+  (`GPIO_OUT`/`GPIO_IN` registers), and `rtl/cpu/riscv_soc.sv` (the
+  top-level SoC wiring CPU + bus + RAM + UART + GPIO together). RAM is
+  deliberately kept at `0x00000000` so every pre-Phase-8 test program's
+  `LW`/`SW` addresses keep working unmodified through the real decoder.
+  Full memory map and register tables in `docs/soc.md`.
+
+- **Added `sim/programs/soc/soc_demo.s` and `sim/testbenches/tb_soc.sv`.**
+  The test program is a real polling UART driver (write `TXDATA`, poll
+  `STATUS` until idle, twice) rather than back-to-back writes, because
+  `uart.sv`'s busy flag genuinely drops a write that arrives while
+  busy -- this was caught while designing the test, not left as an
+  untested edge case. The testbench drives `gpio_in` to a fixed pattern
+  before reset and observes `uart.sv`'s `tx_valid`/`tx_byte` ports
+  directly, printing every byte the CPU actually transmitted. Verified
+  identical under both simulators (`make sim_soc` /
+  `scripts/run_sim_soc.sh`); see `docs/soc.md`'s Verification section
+  for the actual captured console output.
+
+- **Result:** `make sim_soc` passes under both simulators; full Phase
+  2-7 regression re-verified clean after the bus-master refactor.

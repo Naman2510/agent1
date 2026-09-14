@@ -36,10 +36,21 @@ module tb_pipeline;
   logic        dbg_illegal;
   logic        dbg_stall, dbg_flush;
 
+  // Phase 8: riscv_cpu_pipeline no longer instantiates its own data
+  // memory -- it's a bus master (dbus_*) so riscv_soc.sv can route it
+  // to RAM/UART/GPIO instead. This testbench isn't an SoC, so it just
+  // wires a plain dmem straight to that bus, functionally identical to
+  // what the CPU module did internally before Phase 8.
+  logic [31:0] dbus_addr, dbus_wdata, dbus_rdata;
+  logic        dbus_mem_read, dbus_mem_write;
+
   riscv_cpu_pipeline #(
     .IMEM_INIT_FILE("sim/programs/pipeline_straightline.hex")
   ) dut (
     .clk(clk), .rst_n(rst_n),
+    .dbus_addr(dbus_addr), .dbus_wdata(dbus_wdata),
+    .dbus_mem_read(dbus_mem_read), .dbus_mem_write(dbus_mem_write),
+    .dbus_rdata(dbus_rdata),
     .dbg_if_pc(dbg_if_pc), .dbg_if_instr(dbg_if_instr),
     .dbg_id_pc(dbg_id_pc), .dbg_id_instr(dbg_id_instr),
     .dbg_ex_pc(dbg_ex_pc), .dbg_ex_instr(dbg_ex_instr),
@@ -47,6 +58,11 @@ module tb_pipeline;
     .dbg_wb_instr(dbg_wb_instr),
     .dbg_reg_write(dbg_reg_write), .dbg_rd_addr(dbg_rd_addr), .dbg_rd_data(dbg_rd_data),
     .dbg_illegal(dbg_illegal), .dbg_stall(dbg_stall), .dbg_flush(dbg_flush)
+  );
+
+  dmem dmem_inst (
+    .clk(clk), .addr(dbus_addr), .wdata(dbus_wdata),
+    .mem_read(dbus_mem_read), .mem_write(dbus_mem_write), .rdata(dbus_rdata)
   );
 
   initial begin

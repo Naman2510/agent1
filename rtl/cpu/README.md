@@ -1,2 +1,2 @@
 # rtl/cpu
-Top-level single-cycle CPU module (Phase 2) and, later, the pipelined CPU top-level (Phase 5). Instantiates the decoder, register file, ALU, branch unit, immediate generator, and memory interfaces from the sibling rtl/ directories.
+Top-level single-cycle CPU module (Phase 2), the pipelined CPU top-level (Phase 5, refactored in Phase 8 into a data-bus master -- see its header comment), performance counters (Phase 7), and the top-level SoC (`riscv_soc.sv`, Phase 8) that connects the pipelined CPU to `rtl/bus/`'s address decoder and peripherals. Instantiates the decoder, register file, ALU, branch unit, immediate generator, and memory interfaces from the sibling rtl/ directories.

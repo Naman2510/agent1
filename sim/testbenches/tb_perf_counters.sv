@@ -63,11 +63,18 @@ module tb_perf_counters;
   logic [4:0]  sl_rd_addr;
   logic [31:0] sl_cycle, sl_retired, sl_stall_cnt, sl_branch, sl_branch_taken;
   logic [31:0] sl_load_use, sl_fwd, sl_flush_cnt;
+  // Phase 8: see tb_pipeline.sv's header comment -- each riscv_cpu_pipeline
+  // instance is now a data-bus master and needs its own dmem wired up.
+  logic [31:0] sl_dbus_addr, sl_dbus_wdata, sl_dbus_rdata;
+  logic        sl_dbus_mem_read, sl_dbus_mem_write;
 
   riscv_cpu_pipeline #(
     .IMEM_INIT_FILE("sim/programs/benchmarks/sum_loop.hex")
   ) dut_sum_loop (
     .clk(clk), .rst_n(rst_n),
+    .dbus_addr(sl_dbus_addr), .dbus_wdata(sl_dbus_wdata),
+    .dbus_mem_read(sl_dbus_mem_read), .dbus_mem_write(sl_dbus_mem_write),
+    .dbus_rdata(sl_dbus_rdata),
     .dbg_if_pc(sl_if_pc), .dbg_if_instr(sl_if_instr),
     .dbg_id_pc(sl_id_pc), .dbg_id_instr(sl_id_instr),
     .dbg_ex_pc(sl_ex_pc), .dbg_ex_instr(sl_ex_instr),
@@ -80,6 +87,11 @@ module tb_perf_counters;
     .perf_forwarding_event_count(sl_fwd), .perf_flush_count(sl_flush_cnt)
   );
 
+  dmem sl_dmem_inst (
+    .clk(clk), .addr(sl_dbus_addr), .wdata(sl_dbus_wdata),
+    .mem_read(sl_dbus_mem_read), .mem_write(sl_dbus_mem_write), .rdata(sl_dbus_rdata)
+  );
+
   // ===================================================================
   // array_sum.s: load-heavy loop, 1 load-use stall per iteration.
   // ===================================================================
@@ -89,11 +101,16 @@ module tb_perf_counters;
   logic [4:0]  as_rd_addr;
   logic [31:0] as_cycle, as_retired, as_stall_cnt, as_branch, as_branch_taken;
   logic [31:0] as_load_use, as_fwd, as_flush_cnt;
+  logic [31:0] as_dbus_addr, as_dbus_wdata, as_dbus_rdata;
+  logic        as_dbus_mem_read, as_dbus_mem_write;
 
   riscv_cpu_pipeline #(
     .IMEM_INIT_FILE("sim/programs/benchmarks/array_sum.hex")
   ) dut_array_sum (
     .clk(clk), .rst_n(rst_n),
+    .dbus_addr(as_dbus_addr), .dbus_wdata(as_dbus_wdata),
+    .dbus_mem_read(as_dbus_mem_read), .dbus_mem_write(as_dbus_mem_write),
+    .dbus_rdata(as_dbus_rdata),
     .dbg_if_pc(as_if_pc), .dbg_if_instr(as_if_instr),
     .dbg_id_pc(as_id_pc), .dbg_id_instr(as_id_instr),
     .dbg_ex_pc(as_ex_pc), .dbg_ex_instr(as_ex_instr),
@@ -104,6 +121,11 @@ module tb_perf_counters;
     .perf_stall_count(as_stall_cnt), .perf_branch_count(as_branch),
     .perf_branch_taken_count(as_branch_taken), .perf_load_use_stall_count(as_load_use),
     .perf_forwarding_event_count(as_fwd), .perf_flush_count(as_flush_cnt)
+  );
+
+  dmem as_dmem_inst (
+    .clk(clk), .addr(as_dbus_addr), .wdata(as_dbus_wdata),
+    .mem_read(as_dbus_mem_read), .mem_write(as_dbus_mem_write), .rdata(as_dbus_rdata)
   );
 
   initial begin

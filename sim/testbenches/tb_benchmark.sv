@@ -27,8 +27,17 @@ module tb_benchmark;
   logic [31:0] perf_branch_count, perf_branch_taken_count, perf_load_use_stall_count;
   logic [31:0] perf_forwarding_event_count, perf_flush_count;
 
+  // Phase 8: see tb_pipeline.sv's header comment -- riscv_cpu_pipeline
+  // is now a data-bus master; this testbench wires a plain dmem
+  // straight to it (functionally identical to the old internal dmem).
+  logic [31:0] dbus_addr, dbus_wdata, dbus_rdata;
+  logic        dbus_mem_read, dbus_mem_write;
+
   riscv_cpu_pipeline dut (
     .clk(clk), .rst_n(rst_n),
+    .dbus_addr(dbus_addr), .dbus_wdata(dbus_wdata),
+    .dbus_mem_read(dbus_mem_read), .dbus_mem_write(dbus_mem_write),
+    .dbus_rdata(dbus_rdata),
     .dbg_if_pc(dbg_if_pc), .dbg_if_instr(dbg_if_instr),
     .dbg_id_pc(dbg_id_pc), .dbg_id_instr(dbg_id_instr),
     .dbg_ex_pc(dbg_ex_pc), .dbg_ex_instr(dbg_ex_instr),
@@ -43,6 +52,11 @@ module tb_benchmark;
     .perf_load_use_stall_count(perf_load_use_stall_count),
     .perf_forwarding_event_count(perf_forwarding_event_count),
     .perf_flush_count(perf_flush_count)
+  );
+
+  dmem dmem_inst (
+    .clk(clk), .addr(dbus_addr), .wdata(dbus_wdata),
+    .mem_read(dbus_mem_read), .mem_write(dbus_mem_write), .rdata(dbus_rdata)
   );
 
   initial begin

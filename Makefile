@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc
 
 help:
 	@echo "Available targets:"
@@ -27,6 +27,9 @@ help:
 	@echo "                 counters (sim/programs/benchmarks/) under both simulators"
 	@echo "  benchmarks   - Phase 7: run the benchmarks and write"
 	@echo "                 results/performance_report.md from real measured data"
+	@echo "  sim_soc      - Phase 8: assemble and run the top-level SoC testbench"
+	@echo "                 (RAM/UART/GPIO through the real address-decoded bus)"
+	@echo "                 under both Icarus Verilog and Verilator"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -57,3 +60,6 @@ test_perf:
 
 benchmarks:
 	@python3 scripts/run_benchmarks.py
+
+sim_soc:
+	@./scripts/run_sim_soc.sh

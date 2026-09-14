@@ -265,4 +265,39 @@ explanations, continuing this project's practice of treating directed
 testing as a real verification tool -- catching two more bugs here,
 after two in Phase 5 and two in Phase 6 -- rather than a formality.
 
+## Phase 8 — System-on-Chip Integration
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** a bus-master refactor of `rtl/cpu/riscv_cpu_pipeline.sv`
+(its data-memory interface is now an external `dbus_*` port instead of
+an internally-instantiated `dmem`), a new memory-mapped bus and address
+decoder (`rtl/bus/soc_bus.sv`), two new peripherals (`rtl/bus/uart.sv`,
+`rtl/bus/gpio.sv`), a top-level SoC (`rtl/cpu/riscv_soc.sv`) tying CPU +
+bus + RAM + UART + GPIO together, a real polling-driver test program
+(`sim/programs/soc/soc_demo.s`) exercising all three peripherals through
+the actual address decoder, and `sim/testbenches/tb_soc.sv`. Full detail,
+including the exact memory map and every register, is in `docs/soc.md`.
+
+**Why the CPU needed a refactor first, not just new peripherals:** the
+pre-Phase-8 `riscv_cpu_pipeline.sv` owned its `dmem` directly -- there
+was no bus for a UART or GPIO to share. Externalizing that interface as
+a plain bus-master port is a pure port-list/wiring change (no ALU,
+hazard, or control logic moved), which made it possible to verify as a
+strict regression: every pre-existing testbench that talks to the CPU
+directly was updated to wire a plain `dmem` to the new port itself
+(functionally identical to what the CPU did internally before) and
+re-run under both simulators, reproducing every one of Phase 7's exact
+counter values unchanged before any new SoC code was written. Only once
+that regression was clean did `soc_bus.sv`/`uart.sv`/`gpio.sv`/
+`riscv_soc.sv` get built on top of it -- the same "verify the foundation
+before building on it" discipline used for every prior phase.
+
+**Design choice worth calling out:** RAM stays at address `0x00000000`,
+not shifted to make room for peripherals at lower addresses, specifically
+so every test program from Phases 2-7 (whose `LW`/`SW` addresses all
+assume RAM starts at 0) keeps working unmodified through the real SoC
+address decoder -- verified, not just assumed (see `docs/soc.md`'s
+Verification section).
+
 Later phases append their own sections here as they land.

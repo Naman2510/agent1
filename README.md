@@ -73,6 +73,8 @@ make test_hazards          # Phase 6: run the pipeline hazard directed test suit
 make waves                 # Phase 6: generate GTKWave .vcd waveforms of the hazards
 make test_perf              # Phase 7: verify benchmark correctness + perf counters
 make benchmarks              # Phase 7: write results/performance_report.md
+make sim_soc                # Phase 8: assemble + run the top-level SoC testbench
+                              # (RAM/UART/GPIO through the real address-decoded bus)
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -98,7 +100,7 @@ container with no FPGA or other physical hardware attached.
 - `docs/c_program_demo.md` — real C program compiled and executed end-to-end (Phase 4).
 - `docs/pipeline.md` — five-stage pipeline design, register contents, and what Phase 5 does/doesn't yet handle (Phase 5+).
 - `docs/hazards.md` — data/load-use/control hazard handling, forwarding, stalling, flush, and the directed tests + waveforms that verify them (Phase 6).
-- `docs/soc.md` — SoC memory map and peripherals (Phase 8+).
+- [`docs/soc.md`](docs/soc.md) — SoC memory map, peripherals, and the CPU's bus-master refactor (Phase 8).
 - `docs/accelerator.md` — accelerator architecture and MMIO interface (Phase 9+).
 - `docs/custom_extension.md` — custom RISC-V instruction encoding (Phase 10+).
 - `docs/scheduler.md` — AI scheduler design (Phase 13+).
@@ -125,7 +127,7 @@ Tracked phase-by-phase; each phase below is only checked once it compiles, simul
 - [x] Phase 5 — Five-stage pipeline
 - [x] Phase 6 — Pipeline hazards (forwarding/stalling/flushing)
 - [x] Phase 7 — Performance counters / CPI
-- [ ] Phase 8 — SoC (memory map, peripherals)
+- [x] Phase 8 — SoC (memory map, peripherals)
 - [ ] Phase 9 — Hardware accelerator RTL
 - [ ] Phase 10 — Custom RISC-V extension for accelerator control
 - [ ] Phase 11 — CPU vs accelerator benchmarking

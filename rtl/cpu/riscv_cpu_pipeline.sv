@@ -17,32 +17,56 @@
 //   Phase 6 added data-hazard forwarding (rtl/pipeline/
 //     forwarding_unit.sv), the load-use stall, and the branch/JAL/JALR
 //     flush (both from rtl/pipeline/hazard_unit.sv).
-//   Phase 7 (this version) adds free-running performance counters
+//   Phase 7 added free-running performance counters
 //     (rtl/cpu/perf_counters.sv) -- purely observational, no feedback
 //     into the datapath -- and a `valid` bit threaded through every
 //     pipeline register (see id_ex_reg.sv's header comment) so
 //     "instructions retired" can be counted without miscounting
 //     bubbles.
+//   Phase 8 (this version) externalizes the data-memory interface as a
+//     bus-master port (dbus_*) instead of instantiating dmem directly:
+//     this module no longer decides what lives at a given address, it
+//     just issues a request and takes whatever rdata comes back one
+//     cycle later. rtl/cpu/riscv_soc.sv is what actually connects that
+//     bus to RAM/UART/GPIO through an address decoder
+//     (rtl/bus/soc_bus.sv) -- see docs/soc.md for the memory map. This
+//     is the CPU becoming usable as an SoC component rather than a
+//     change to the CPU's own instruction-level behavior; every prior
+//     phase's testbench now instantiates a plain dmem itself and wires
+//     it straight to dbus_*, which is functionally identical to what
+//     this module did internally before (see CHANGELOG.md).
 // Unlike Phase 2 -> Phase 5 (a genuinely different microarchitecture
-// kept side by side for comparison), Phases 6 and 7 evolve THIS SAME
-// pipeline in place, because the task frames both as completing this
+// kept side by side for comparison), Phases 6-8 evolve THIS SAME
+// pipeline in place, because the task frames each as completing this
 // pipeline, not building another one -- and Phase 5's own straight-line,
 // branch-free test program (sim/programs/pipeline_straightline.s)
 // continues to pass unchanged here, since it was constructed to have no
 // hazards for forwarding/stalling/flushing to ever engage on. See
-// docs/pipeline.md for the full explanation of all three phases,
-// including a same-clock-edge race found and fixed during Phase 5's own
+// docs/pipeline.md for the full explanation of Phases 5-7, including a
+// same-clock-edge race found and fixed during Phase 5's own
 // verification and the hazard-by-hazard account of Phase 6.
 
 module riscv_cpu_pipeline
   import riscv_pkg::*;
 #(
   parameter int IMEM_DEPTH_WORDS = 1024,
-  parameter      IMEM_INIT_FILE  = "",
-  parameter int DMEM_DEPTH_WORDS = 1024
+  parameter      IMEM_INIT_FILE  = ""
 ) (
   input  logic        clk,
   input  logic        rst_n,
+
+  // Data bus (Phase 8): this module is a bus MASTER only. It issues one
+  // request per MEM-stage cycle and expects dbus_rdata to reflect
+  // whatever dbus_addr pointed at, one cycle later, when mem_read was
+  // asserted -- exactly the timing rtl/memory/dmem.sv already provides,
+  // so anything wired here (dmem directly, or riscv_soc.sv's address
+  // decoder fanning out to RAM/UART/GPIO) must honor that same
+  // contract. See docs/soc.md.
+  output logic [31:0] dbus_addr,
+  output logic [31:0] dbus_wdata,
+  output logic        dbus_mem_read,
+  output logic        dbus_mem_write,
+  input  logic [31:0] dbus_rdata,
 
   // Debug/trace outputs: one (pc, instr) pair per stage, so a testbench
   // can show five different instructions occupying five different
@@ -351,16 +375,13 @@ module riscv_cpu_pipeline
   );
 
   // ===================================================================
-  // MEM stage
+  // MEM stage -- drives the external data bus instead of an internal
+  // dmem instance (Phase 8; see module header comment).
   // ===================================================================
-  logic [31:0] dmem_rdata_mem;
-
-  dmem #(
-    .DEPTH_WORDS(DMEM_DEPTH_WORDS)
-  ) dmem_inst (
-    .clk(clk), .addr(alu_result_mem), .wdata(rs2_data_mem),
-    .mem_read(mem_read_mem), .mem_write(mem_write_mem), .rdata(dmem_rdata_mem)
-  );
+  assign dbus_addr      = alu_result_mem;
+  assign dbus_wdata     = rs2_data_mem;
+  assign dbus_mem_read  = mem_read_mem;
+  assign dbus_mem_write = mem_write_mem;
 
   // ===================================================================
   // MEM/WB
@@ -371,7 +392,7 @@ module riscv_cpu_pipeline
 
   mem_wb_reg mem_wb_inst (
     .clk(clk), .rst_n(rst_n),
-    .pc_plus4_in(pc_plus4_mem), .alu_result_in(alu_result_mem), .mem_rdata_in(dmem_rdata_mem),
+    .pc_plus4_in(pc_plus4_mem), .alu_result_in(alu_result_mem), .mem_rdata_in(dbus_rdata),
     .rd_addr_in(rd_mem), .reg_write_in(reg_write_mem), .result_src_in(result_src_mem),
     .illegal_in(illegal_mem), .instr_dbg_in(instr_mem), .valid_in(valid_mem),
 
