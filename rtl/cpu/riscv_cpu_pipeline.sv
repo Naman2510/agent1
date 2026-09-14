@@ -11,22 +11,28 @@
 // it unmodified; this pipelined CPU is a separate top-level module, not
 // a replacement, per the task's "replace/extend" wording.
 //
-// This module is built up across two phases:
+// This module is built up across three phases:
 //   Phase 5 built the five stages and pipeline registers with NO hazard
 //     handling (see CHANGELOG.md and git history for that milestone).
-//   Phase 6 (this version) adds data-hazard forwarding
-//     (rtl/pipeline/forwarding_unit.sv), the load-use stall, and the
-//     branch/JAL/JALR flush (both from rtl/pipeline/hazard_unit.sv).
+//   Phase 6 added data-hazard forwarding (rtl/pipeline/
+//     forwarding_unit.sv), the load-use stall, and the branch/JAL/JALR
+//     flush (both from rtl/pipeline/hazard_unit.sv).
+//   Phase 7 (this version) adds free-running performance counters
+//     (rtl/cpu/perf_counters.sv) -- purely observational, no feedback
+//     into the datapath -- and a `valid` bit threaded through every
+//     pipeline register (see id_ex_reg.sv's header comment) so
+//     "instructions retired" can be counted without miscounting
+//     bubbles.
 // Unlike Phase 2 -> Phase 5 (a genuinely different microarchitecture
-// kept side by side for comparison), Phase 6 evolves THIS SAME pipeline
-// in place, because the task frames hazard handling as completing this
-// pipeline, not building a third one -- and Phase 5's own straight-line,
+// kept side by side for comparison), Phases 6 and 7 evolve THIS SAME
+// pipeline in place, because the task frames both as completing this
+// pipeline, not building another one -- and Phase 5's own straight-line,
 // branch-free test program (sim/programs/pipeline_straightline.s)
 // continues to pass unchanged here, since it was constructed to have no
 // hazards for forwarding/stalling/flushing to ever engage on. See
-// docs/pipeline.md for the full explanation of both phases, including a
-// same-clock-edge race found and fixed during Phase 5's own
-// verification, and the hazard-by-hazard account of Phase 6.
+// docs/pipeline.md for the full explanation of all three phases,
+// including a same-clock-edge race found and fixed during Phase 5's own
+// verification and the hazard-by-hazard account of Phase 6.
 
 module riscv_cpu_pipeline
   import riscv_pkg::*;
@@ -56,7 +62,19 @@ module riscv_cpu_pipeline
   output logic [31:0] dbg_rd_data,
   output logic        dbg_illegal,
   output logic        dbg_stall,
-  output logic        dbg_flush
+  output logic        dbg_flush,
+
+  // Phase 7 performance counters (rtl/cpu/perf_counters.sv) -- see
+  // docs/pipeline.md's Phase 7 section for what each one measures and
+  // how CPI is derived from them in software.
+  output logic [31:0] perf_cycle_count,
+  output logic [31:0] perf_instr_retired_count,
+  output logic [31:0] perf_stall_count,
+  output logic [31:0] perf_branch_count,
+  output logic [31:0] perf_branch_taken_count,
+  output logic [31:0] perf_load_use_stall_count,
+  output logic [31:0] perf_forwarding_event_count,
+  output logic [31:0] perf_flush_count
 );
 
   // ===================================================================
@@ -163,6 +181,15 @@ module riscv_cpu_pipeline
     .instr(instr_id), .imm_type(imm_type_id), .imm_out(imm_out_id)
   );
 
+  // Phase 7: true iff this is a real instruction, not a bubble. Every
+  // supported opcode (docs/riscv.md section 3.8) sets at least one of
+  // these five signals, and a bubble's control signals are all zero by
+  // construction -- see id_ex_reg.sv's header comment for the full
+  // reasoning and why this is computed once here and threaded through
+  // rather than re-derived at each stage.
+  logic valid_id;
+  assign valid_id = reg_write_id | mem_write_id | branch_id | jal_id | jalr_id;
+
   // ===================================================================
   // ID/EX
   // ===================================================================
@@ -170,7 +197,7 @@ module riscv_cpu_pipeline
   logic [4:0]  rd_ex, rs1_addr_ex, rs2_addr_ex;
   logic [2:0]  funct3_ex;
   logic        reg_write_ex, alu_src_a_ex, alu_src_b_ex, mem_read_ex, mem_write_ex;
-  logic        branch_ex, jal_ex, jalr_ex, illegal_ex;
+  logic        branch_ex, jal_ex, jalr_ex, illegal_ex, valid_ex;
   logic [3:0]  alu_op_ex;
   logic [1:0]  result_src_ex;
 
@@ -183,7 +210,7 @@ module riscv_cpu_pipeline
     .reg_write_in(reg_write_id), .alu_src_a_in(alu_src_a_id), .alu_src_b_in(alu_src_b_id),
     .alu_op_in(alu_op_id), .mem_read_in(mem_read_id), .mem_write_in(mem_write_id),
     .result_src_in(result_src_id), .branch_in(branch_id), .jal_in(jal_id),
-    .jalr_in(jalr_id), .illegal_in(illegal_id), .instr_dbg_in(instr_id),
+    .jalr_in(jalr_id), .illegal_in(illegal_id), .instr_dbg_in(instr_id), .valid_in(valid_id),
 
     .pc_out(pc_ex), .pc_plus4_out(pc_plus4_ex),
     .rs1_data_out(rs1_data_ex), .rs2_data_out(rs2_data_ex), .imm_out_out(imm_out_ex),
@@ -192,7 +219,7 @@ module riscv_cpu_pipeline
     .reg_write_out(reg_write_ex), .alu_src_a_out(alu_src_a_ex), .alu_src_b_out(alu_src_b_ex),
     .alu_op_out(alu_op_ex), .mem_read_out(mem_read_ex), .mem_write_out(mem_write_ex),
     .result_src_out(result_src_ex), .branch_out(branch_ex), .jal_out(jal_ex),
-    .jalr_out(jalr_ex), .illegal_out(illegal_ex), .instr_dbg_out(instr_ex)
+    .jalr_out(jalr_ex), .illegal_out(illegal_ex), .instr_dbg_out(instr_ex), .valid_out(valid_ex)
   );
 
   // ===================================================================
@@ -303,7 +330,7 @@ module riscv_cpu_pipeline
   // ===================================================================
   logic [31:0] pc_plus4_mem, alu_result_mem, rs2_data_mem, instr_mem;
   logic [4:0]  rd_mem;
-  logic        reg_write_mem, mem_read_mem, mem_write_mem, illegal_mem;
+  logic        reg_write_mem, mem_read_mem, mem_write_mem, illegal_mem, valid_mem;
   logic [1:0]  result_src_mem;
 
   // rs2_data_fwd (not the raw rs2_data_ex) is what SW's store data must
@@ -315,12 +342,12 @@ module riscv_cpu_pipeline
     .pc_plus4_in(pc_plus4_ex), .alu_result_in(alu_result_ex), .rs2_data_in(rs2_data_fwd),
     .rd_addr_in(rd_ex), .reg_write_in(reg_write_ex), .mem_read_in(mem_read_ex),
     .mem_write_in(mem_write_ex), .result_src_in(result_src_ex), .illegal_in(illegal_ex),
-    .instr_dbg_in(instr_ex),
+    .instr_dbg_in(instr_ex), .valid_in(valid_ex),
 
     .pc_plus4_out(pc_plus4_mem), .alu_result_out(alu_result_mem), .rs2_data_out(rs2_data_mem),
     .rd_addr_out(rd_mem), .reg_write_out(reg_write_mem), .mem_read_out(mem_read_mem),
     .mem_write_out(mem_write_mem), .result_src_out(result_src_mem), .illegal_out(illegal_mem),
-    .instr_dbg_out(instr_mem)
+    .instr_dbg_out(instr_mem), .valid_out(valid_mem)
   );
 
   // ===================================================================
@@ -339,18 +366,18 @@ module riscv_cpu_pipeline
   // MEM/WB
   // ===================================================================
   logic [31:0] pc_plus4_wb, alu_result_wb, mem_rdata_wb, instr_wb;
-  logic        illegal_wb;
+  logic        illegal_wb, valid_wb;
   logic [1:0]  result_src_wb;
 
   mem_wb_reg mem_wb_inst (
     .clk(clk), .rst_n(rst_n),
     .pc_plus4_in(pc_plus4_mem), .alu_result_in(alu_result_mem), .mem_rdata_in(dmem_rdata_mem),
     .rd_addr_in(rd_mem), .reg_write_in(reg_write_mem), .result_src_in(result_src_mem),
-    .illegal_in(illegal_mem), .instr_dbg_in(instr_mem),
+    .illegal_in(illegal_mem), .instr_dbg_in(instr_mem), .valid_in(valid_mem),
 
     .pc_plus4_out(pc_plus4_wb), .alu_result_out(alu_result_wb), .mem_rdata_out(mem_rdata_wb),
     .rd_addr_out(rd_addr_wb), .reg_write_out(reg_write_wb), .result_src_out(result_src_wb),
-    .illegal_out(illegal_wb), .instr_dbg_out(instr_wb)
+    .illegal_out(illegal_wb), .instr_dbg_out(instr_wb), .valid_out(valid_wb)
   );
 
   // ===================================================================
@@ -364,6 +391,29 @@ module riscv_cpu_pipeline
       default:    rd_wdata_wb = alu_result_wb;
     endcase
   end
+
+  // ===================================================================
+  // Performance counters (Phase 7)
+  // ===================================================================
+  perf_counters perf_counters_inst (
+    .clk(clk), .rst_n(rst_n),
+    .instr_retired  (valid_wb),
+    .stall          (pc_stall),
+    .branch_resolved(branch_ex && valid_ex),
+    .branch_taken   (branch_taken_ex),
+    .forward_a_active(forward_a != 2'b00),
+    .forward_b_active(forward_b != 2'b00),
+    .flush          (if_id_flush),
+
+    .cycle_count           (perf_cycle_count),
+    .instr_retired_count   (perf_instr_retired_count),
+    .stall_count            (perf_stall_count),
+    .branch_count            (perf_branch_count),
+    .branch_taken_count      (perf_branch_taken_count),
+    .load_use_stall_count    (perf_load_use_stall_count),
+    .forwarding_event_count  (perf_forwarding_event_count),
+    .flush_count             (perf_flush_count)
+  );
 
   // ===================================================================
   // Debug/trace outputs

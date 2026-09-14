@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks
 
 help:
 	@echo "Available targets:"
@@ -23,6 +23,10 @@ help:
 	@echo "                 (sim/programs/pipeline_tests/) under both simulators"
 	@echo "  waves        - Phase 6: generate GTKWave .vcd waveforms for the"
 	@echo "                 hazard directed tests (sim/waveforms/)"
+	@echo "  test_perf    - Phase 7: verify benchmark correctness + performance"
+	@echo "                 counters (sim/programs/benchmarks/) under both simulators"
+	@echo "  benchmarks   - Phase 7: run the benchmarks and write"
+	@echo "                 results/performance_report.md from real measured data"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -47,3 +51,9 @@ test_hazards:
 
 waves:
 	@./scripts/generate_waveforms.sh
+
+test_perf:
+	@./scripts/run_perf_counters.sh
+
+benchmarks:
+	@python3 scripts/run_benchmarks.py

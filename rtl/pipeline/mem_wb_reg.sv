@@ -17,6 +17,13 @@
 //   instr_dbg   - raw instruction word, carried through for simulation
 //                 trace visibility only (see id_ex_reg.sv's header
 //                 comment); not read by any functional logic.
+//   valid       - Phase 7: threaded straight through from ex_mem_reg
+//                 unchanged (see id_ex_reg.sv's header comment for how
+//                 it's derived). This is what
+//                 rtl/cpu/perf_counters.sv gates "instruction retired"
+//                 on -- a bubble reaching WB (pipeline fill, a
+//                 load-use bubble, or a flushed instruction) must never
+//                 count as a retired instruction.
 
 module mem_wb_reg
   import riscv_pkg::*;
@@ -32,6 +39,7 @@ module mem_wb_reg
   input  logic [1:0]  result_src_in,
   input  logic        illegal_in,
   input  logic [31:0] instr_dbg_in,
+  input  logic        valid_in,
 
   output logic [31:0] pc_plus4_out,
   output logic [31:0] alu_result_out,
@@ -40,7 +48,8 @@ module mem_wb_reg
   output logic        reg_write_out,
   output logic [1:0]  result_src_out,
   output logic        illegal_out,
-  output logic [31:0] instr_dbg_out
+  output logic [31:0] instr_dbg_out,
+  output logic        valid_out
 );
 
   always_ff @(posedge clk or negedge rst_n) begin
@@ -53,6 +62,7 @@ module mem_wb_reg
       result_src_out <= RESULT_ALU;
       illegal_out    <= 1'b0;
       instr_dbg_out  <= 32'b0;
+      valid_out      <= 1'b0;
     end else begin
       pc_plus4_out   <= pc_plus4_in;
       alu_result_out <= alu_result_in;
@@ -62,6 +72,7 @@ module mem_wb_reg
       result_src_out <= result_src_in;
       illegal_out    <= illegal_in;
       instr_dbg_out  <= instr_dbg_in;
+      valid_out      <= valid_in;
     end
   end
 

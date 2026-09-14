@@ -196,3 +196,81 @@ make sim_pipeline
 
 Like every other phase's simulation, this runs under **both** Icarus
 Verilog and Verilator, and both must (and do) agree exactly.
+
+## Performance counters (Phase 7)
+
+`rtl/cpu/perf_counters.sv`, instantiated in `riscv_cpu_pipeline.sv`,
+adds eight free-running counters: `cycle_count`, `instr_retired_count`,
+`stall_count`, `branch_count`, `branch_taken_count`,
+`load_use_stall_count`, `forwarding_event_count`, `flush_count`. It is
+purely observational -- every input is a signal the pipeline already
+computes for its own correctness, and nothing here feeds back into the
+datapath.
+
+**Counting retired instructions correctly needed a real fix, not a
+workaround.** A pipeline bubble's control signals are all zero, the same
+as several real conditions (see `docs/hazards.md` §4's account of why a
+naive "illegal opcode ever seen" check is the wrong tool here) -- so
+"did a real instruction reach WB this cycle" cannot be derived from
+WB-stage signals alone, because by WB most of the signals that would
+distinguish a bubble from a real instruction (`branch`/`jal`/`jalr`)
+have already been dropped by earlier pipeline registers (they're only
+needed as far as EX). The fix: a `valid` bit, computed once in ID
+(`reg_write | mem_write | branch | jal | jalr` -- every supported opcode
+sets at least one, so a bubble and only a bubble reads 0) and threaded
+unchanged through `id_ex_reg` -> `ex_mem_reg` -> `mem_wb_reg`, exactly
+the same pattern as the `instr_dbg` trace field those registers already
+carried. See `id_ex_reg.sv`'s header comment for the full reasoning.
+
+CPI is deliberately **not** computed in hardware -- it's `cycle_count /
+instr_retired_count`, a derived ratio with no reason to need a hardware
+divider, so it's computed in software (`scripts/run_benchmarks.py`,
+`sim/testbenches/tb_perf_counters.sv`).
+
+### A same-clock-edge race, again -- this time in testbench reset sequencing
+
+The first version of `tb_perf_counters.sv` disagreed between simulators
+by exactly one cycle on the two free-running counters (`cycle_count`,
+`instr_retired_count`) while every conditional counter (branches,
+stalls, flushes, forwards) matched exactly. Root cause: every
+testbench's reset sequence deasserted `rst_n` as the bare next statement
+after the last reset `@(posedge clk)` -- driving `rst_n=1` on the *same*
+active clock edge that `perf_counters`' own `always_ff(posedge clk or
+negedge rst_n)` block (and every other synchronous block) samples it on.
+This is the same class of same-edge race Phase 5 found in `regfile.sv`
+(nonblocking-assignment RHS evaluation for every block sensitive to an
+edge uses pre-edge values, regardless of which block is "the one
+driving" the signal) -- except this time in the testbench, not the RTL,
+and it had simply never been exercised by a signal that increments
+*every* cycle unconditionally before now (a conditional counter that
+only increments on a real branch/stall/etc, well after the first few
+cycles, isn't perturbed by a one-cycle uncertainty right at the start).
+
+Fixed with the standard, textbook fix: a `#1` delay between the last
+reset `@(posedge clk)` and driving `rst_n=1`, applied to **every**
+testbench in this project (not just this one), since the same
+class of race could in principle affect any of them even though only
+this new free-running counter happened to expose it. All prior phases'
+tests were re-run after the fix and continue to pass identically.
+
+### Benchmark programs
+
+`sim/programs/benchmarks/sum_loop.s` and `array_sum.s` -- real,
+branch-driven loops (not synthetic NOP-padded straight-line code like
+`pipeline_straightline.s`), chosen to contrast a pure-ALU workload
+against a load-heavy one with a genuine load-use hazard every iteration.
+Both programs' *correctness* (not just their performance counters) is
+verified against hand-computed results by
+`sim/testbenches/tb_perf_counters.sv` (`make test_perf`, both
+simulators); their counters were then captured from that same verified
+simulation, not derived by hand -- an initial hand-derivation of
+`sum_loop.s`'s forwarding-event count (20, reasoning from static
+instruction spacing alone) was wrong by a third (actual: 12), because
+static spacing doesn't account for the 2 bubble cycles a taken-branch
+flush inserts every iteration, which pushes some dependencies from the
+forwarding-unit range into the plain-register-file range. The measured
+value, not the flawed derivation, is what the testbench asserts.
+
+Run `make benchmarks` (`scripts/run_benchmarks.py`) to regenerate
+`results/performance_report.md` from a fresh simulation.
+

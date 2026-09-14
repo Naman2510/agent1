@@ -73,6 +73,15 @@ module tb_directed_test;
 
     rst_n = 0;
     repeat (2) @(posedge clk);
+    // A small delay (not the bare next statement) before deasserting
+    // reset: driving rst_n=1 exactly on the same active clock edge
+    // every always_ff(posedge clk or negedge rst_n) block also samples
+    // it on is a same-edge race whose outcome is simulator-defined --
+    // found when Icarus Verilog and Verilator disagreed by exactly one
+    // cycle on free-running counters in tb_perf_counters.sv (Phase 7;
+    // see CHANGELOG.md). This #1 delay is the standard fix and costs
+    // nothing (rst_n is not sampled at that instant by anything else).
+    #1;
     rst_n = 1;
 
     for (cyc = 0; cyc < MAX_CYCLES; cyc = cyc + 1) begin

@@ -233,4 +233,36 @@ places, both documented in full rather than smoothed over:**
 Both are in `docs/hazards.md` and `CHANGELOG.md` with full root-cause
 explanations, not just "fixed it."
 
+## Phase 7 — Performance Counters + CPI
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** `rtl/cpu/perf_counters.sv` (8 free-running counters),
+a `valid` bit threaded through every pipeline register so "instruction
+retired" can be counted without miscounting bubbles, two real
+branch-driven benchmark programs, and `scripts/run_benchmarks.py`
+generating `results/performance_report.md` from actual simulation
+output.
+
+**Verification for this phase found two more real bugs, both
+documented in full:**
+
+1. A genuine gap in Phase 6's `valid`-bit-free design: WB-stage signals
+   alone can't distinguish a bubble from a real instruction, because
+   `branch`/`jal`/`jalr` are dropped before WB. Fixed with an explicit
+   `valid` bit threaded through every register -- not a workaround, the
+   actual textbook-correct fix `docs/hazards.md` had already flagged as
+   missing.
+2. A same-clock-edge race in every testbench's reset sequencing (not
+   the RTL): deasserting `rst_n` on the same edge synchronous logic
+   samples it on is simulator-defined, and finally got exercised by a
+   free-running counter. Fixed project-wide (all six existing
+   testbenches, not just the new one) with the standard `#1`-delay fix,
+   with the full existing suite re-verified afterward.
+
+Both are in `docs/pipeline.md` and `CHANGELOG.md` with full
+explanations, continuing this project's practice of treating directed
+testing as a real verification tool -- catching two more bugs here,
+after two in Phase 5 and two in Phase 6 -- rather than a formality.
+
 Later phases append their own sections here as they land.

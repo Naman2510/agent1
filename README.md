@@ -71,6 +71,8 @@ make run_c_demo            # Phase 4: compile and run a real C program (GCC -> C
 make sim_pipeline          # Phase 5: assemble + run the pipelined CPU testbench
 make test_hazards          # Phase 6: run the pipeline hazard directed test suite
 make waves                 # Phase 6: generate GTKWave .vcd waveforms of the hazards
+make test_perf              # Phase 7: verify benchmark correctness + perf counters
+make benchmarks              # Phase 7: write results/performance_report.md
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -122,7 +124,7 @@ Tracked phase-by-phase; each phase below is only checked once it compiles, simul
 - [x] Phase 4 — Execute a real compiled C program
 - [x] Phase 5 — Five-stage pipeline
 - [x] Phase 6 — Pipeline hazards (forwarding/stalling/flushing)
-- [ ] Phase 7 — Performance counters / CPI
+- [x] Phase 7 — Performance counters / CPI
 - [ ] Phase 8 — SoC (memory map, peripherals)
 - [ ] Phase 9 — Hardware accelerator RTL
 - [ ] Phase 10 — Custom RISC-V extension for accelerator control

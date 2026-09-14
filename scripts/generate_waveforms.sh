@@ -31,6 +31,7 @@ RTL_FILES=(
   rtl/pipeline/mem_wb_reg.sv
   rtl/pipeline/forwarding_unit.sv
   rtl/pipeline/hazard_unit.sv
+  rtl/cpu/perf_counters.sv
   rtl/cpu/riscv_cpu_pipeline.sv
 )
 TB=sim/testbenches/tb_pipeline_directed_test.sv

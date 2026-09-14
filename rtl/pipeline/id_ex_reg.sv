@@ -36,6 +36,19 @@
 //                  same cycle, demonstrating real pipelined concurrency
 //                  -- see sim/testbenches/tb_pipeline.sv). Not read by
 //                  any functional logic.
+//   valid        - Phase 7: true iff this slot holds a real instruction,
+//                  not a bubble. Computed once in riscv_cpu_pipeline.sv's
+//                  ID stage as the OR of every control signal that some
+//                  real opcode sets (reg_write | mem_write | branch |
+//                  jal | jalr -- every supported opcode sets at least
+//                  one, see rtl/cpu/control_unit.sv), then threaded
+//                  through unchanged rather than re-derived at each
+//                  stage, since a bubble's control signals are all zero
+//                  by construction (reset/flush) and downstream stages
+//                  don't have enough of the original signals left (e.g.
+//                  branch/jal/jalr stop at EX) to recompute it. Used by
+//                  rtl/cpu/perf_counters.sv to count retired
+//                  instructions without miscounting bubbles.
 //
 // Reset clears every control signal to its inactive value (0), which is
 // what makes a bubble a bubble (see if_id_reg.sv's header comment) --
@@ -83,6 +96,7 @@ module id_ex_reg
   input  logic        jalr_in,
   input  logic        illegal_in,
   input  logic [31:0] instr_dbg_in,
+  input  logic        valid_in,
 
   output logic [31:0] pc_out,
   output logic [31:0] pc_plus4_out,
@@ -104,7 +118,8 @@ module id_ex_reg
   output logic        jal_out,
   output logic        jalr_out,
   output logic        illegal_out,
-  output logic [31:0] instr_dbg_out
+  output logic [31:0] instr_dbg_out,
+  output logic        valid_out
 );
 
   always_ff @(posedge clk or negedge rst_n) begin
@@ -130,6 +145,7 @@ module id_ex_reg
       jalr_out       <= 1'b0;
       illegal_out    <= 1'b0;
       instr_dbg_out  <= 32'b0;
+      valid_out      <= 1'b0;
     end else if (flush) begin
       pc_out         <= 32'b0;
       pc_plus4_out   <= 32'b0;
@@ -152,6 +168,7 @@ module id_ex_reg
       jalr_out       <= 1'b0;
       illegal_out    <= 1'b0;
       instr_dbg_out  <= 32'b0;
+      valid_out      <= 1'b0;
     end else begin
       pc_out         <= pc_in;
       pc_plus4_out   <= pc_plus4_in;
@@ -174,6 +191,7 @@ module id_ex_reg
       jalr_out       <= jalr_in;
       illegal_out    <= illegal_in;
       instr_dbg_out  <= instr_dbg_in;
+      valid_out      <= valid_in;
     end
   end
 

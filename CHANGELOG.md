@@ -333,3 +333,60 @@ This is not a commit log — it records *why*, not just *what*.
   hazard-free regression test still passes unchanged; Phases 2-4 are
   unaffected (`regfile.sv`'s new parameter defaults to its old,
   unparameterized behavior).
+
+## Phase 7 — Performance Counters + CPI (2026-09-14)
+
+- **Added `rtl/cpu/perf_counters.sv`** (cycle count, instructions
+  retired, stalls, branches, branches taken, load-use stalls,
+  forwarding events, flushes -- purely observational, no datapath
+  feedback), instantiated in `riscv_cpu_pipeline.sv`.
+
+- **Decision: thread an explicit `valid` bit through every pipeline
+  register rather than deriving "instruction retired" from WB-stage
+  signals alone.** By WB, `branch`/`jal`/`jalr` have already been
+  dropped (only needed through EX), so there wasn't enough left at WB
+  to distinguish a bubble from a real instruction using existing
+  signals. Computed once in ID as `reg_write | mem_write | branch |
+  jal | jalr` (every supported opcode sets at least one) and threaded
+  through `id_ex_reg` -> `ex_mem_reg` -> `mem_wb_reg`, the same pattern
+  already used for the `instr_dbg` trace field. This directly resolves
+  a limitation `docs/hazards.md` had flagged as a known gap in Phase 6.
+
+- **Bug found and fixed: a same-clock-edge race in testbench reset
+  sequencing, not RTL.** `tb_perf_counters.sv` initially disagreed
+  between Icarus Verilog and Verilator by exactly one cycle on the two
+  free-running counters, while every conditional counter matched
+  exactly. Root cause: every testbench in this project deasserted
+  `rst_n` as the bare next statement after the last reset
+  `@(posedge clk)` -- the same active edge every `always_ff(posedge clk
+  or negedge rst_n)` block also samples it on, the same class of
+  same-edge race Phase 5 found in `regfile.sv`, just never previously
+  exercised by a signal that increments unconditionally every cycle
+  from the start. Fixed with the standard fix (a `#1` delay before
+  deasserting reset), applied to **every** testbench in the project
+  (not just this one), since the same risk could in principle affect
+  any of them; the full existing test suite was re-run afterward and
+  continues to pass identically. Full account in `docs/pipeline.md`.
+
+- **Added benchmark programs** `sim/programs/benchmarks/sum_loop.s`
+  (pure-ALU loop, zero load-use stalls) and `array_sum.s` (load-heavy
+  loop, one load-use stall per iteration) -- real, branch-driven loops,
+  not synthetic NOP-padded code -- with correctness verified against
+  hand-computed results by `sim/testbenches/tb_perf_counters.sv` (both
+  simulators). An initial hand-derivation of `sum_loop.s`'s expected
+  forwarding-event count (20, from static instruction spacing alone)
+  was wrong by a third (measured: 12) -- static spacing doesn't account
+  for the 2 bubble cycles a taken-branch flush inserts each iteration,
+  which pushes some dependencies out of the forwarding-unit's range.
+  The testbench asserts the measured value, not the flawed derivation.
+
+- **Added `scripts/run_benchmarks.py`** (`make benchmarks`): runs both
+  benchmarks via a new generic harness (`sim/testbenches/tb_benchmark.sv`)
+  and writes `results/performance_report.md` from real simulation
+  output -- no number in that report is estimated or hand-computed.
+  CPI is computed in software from raw counters, not in hardware (no
+  divider needed for a ratio nothing else in the datapath consumes).
+
+- **Result:** `make test_perf` passes both benchmark correctness and
+  counter checks under both simulators; full Phase 2-6 regression
+  re-verified after the reset-sequencing fix.

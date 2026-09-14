@@ -26,6 +26,7 @@ RTL_FILES=(
   rtl/pipeline/mem_wb_reg.sv
   rtl/pipeline/forwarding_unit.sv
   rtl/pipeline/hazard_unit.sv
+  rtl/cpu/perf_counters.sv
   rtl/cpu/riscv_cpu_pipeline.sv
 )
 TB=sim/testbenches/tb_pipeline.sv
@@ -47,8 +48,15 @@ fi
 
 echo
 echo "== Verilator =="
+# -Wno-PINMISSING: tb_pipeline.sv predates riscv_cpu_pipeline.sv's Phase
+# 6/7 debug ports (dbg_stall/dbg_flush, perf_*) and has no reason to
+# connect them (this test has no hazards and doesn't check counters);
+# leaving debug-only outputs unconnected in an older testbench is a
+# deliberate choice, not a bug, so this warning class is suppressed
+# here rather than churning every prior testbench each time a new
+# phase adds observability.
 VOUT=$(mktemp -d)
-verilator --binary --timing -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM \
+verilator --binary --timing -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINMISSING \
   --top-module tb_pipeline "${RTL_FILES[@]}" "$TB" -o simv --Mdir "$VOUT" >/tmp/pipeline_verilator_build.log 2>&1
 "$VOUT/simv" | tee /tmp/pipeline_verilator.log
 rm -rf "$VOUT"
