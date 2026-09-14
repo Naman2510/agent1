@@ -34,6 +34,7 @@ lint:
 	@python3 -m py_compile frontend/server.py
 	@find phase1-host-provisioning/storage_sim -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 	@find phase1-host-provisioning/scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
+	@find phase2-networking/policy_sim -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 	@find phase3-telemetry/telemetryd/tests phase4-oob-lifecycle/tests frontend/tests -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 	@command -v node >/dev/null && node --check frontend/static/app.js || echo "node not installed, skipped JS syntax check"
 	@echo "== YAML/JSON config validation =="
@@ -75,13 +76,15 @@ unit-test:
 	cd phase1-host-provisioning && python3 -W error::ResourceWarning -m unittest discover -s storage_sim/tests
 	@echo "== plan_from_lsblk (17 tests) =="
 	cd phase1-host-provisioning && python3 -W error::ResourceWarning -m unittest discover -s scripts/tests
+	@echo "== policy_sim firewall logic (34 tests, SIMULATION TESTED — see README) =="
+	cd phase2-networking && python3 -W error::ResourceWarning -m unittest discover -s policy_sim/tests
 	@echo "== telemetryd (19 tests) =="
 	cd phase3-telemetry/telemetryd && python3 -W error::ResourceWarning -m unittest discover -s tests
 	@echo "== oob_control (14 tests) =="
 	cd phase4-oob-lifecycle && python3 -W error::ResourceWarning -m unittest discover -s tests
 	@echo "== dashboard (15 tests, real HTTP against a real server) =="
 	cd frontend && python3 -W error::ResourceWarning -m unittest discover -s tests
-	@echo "unit-test OK — 139 tests"
+	@echo "unit-test OK — 173 tests"
 
 telemetry-test:
 	python3 phase3-telemetry/telemetryd/telemetryd.py --mock --once -v \
