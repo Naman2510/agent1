@@ -74,6 +74,46 @@ class TestRAID1Corruption(StorageSimTestCase):
         # is a single unrecoverable block, not a whole-array wipeout.
         self.assertEqual(arr.read_block(0), pad_block("data-0"))
 
+    def test_same_block_corrupted_on_both_active_members_is_unrecoverable(self):
+        # Neither member has failed — both are ACTIVE — but the same
+        # block happens to be silently corrupt on both simultaneously.
+        # No copy anywhere is trustworthy, so this must surface as an
+        # explicit failure, not a coin-flip guess at which copy is right.
+        arr, d0, d1 = self._array_with_data()
+        d0.inject_silent_corruption(6)
+        d1.inject_silent_corruption(6)
+
+        with self.assertRaises(ArrayFailedError):
+            arr.read_block(6)
+
+        # Every other block is completely unaffected.
+        for i in range(NUM_BLOCKS):
+            if i != 6:
+                self.assertEqual(arr.read_block(i), pad_block(f"data-{i}"))
+
+    def test_scrub_reports_but_cannot_repair_double_corruption(self):
+        # Regression test for a real bug this suite caught: scrub used
+        # to silently DROP a block from its report entirely when every
+        # active member's copy was bad (no "good_data" to compare
+        # against) — an operator would see a clean scrub on a block that
+        # was actually unrecoverable. Fixed to always report a bad
+        # block, with an explicit `recoverable` flag.
+        arr, d0, d1 = self._array_with_data()
+        d0.inject_silent_corruption(1)
+        d1.inject_silent_corruption(1)
+
+        result = arr.scrub(repair=True)
+
+        entry = next((m for m in result["mismatches"] if m["block"] == 1), None)
+        self.assertIsNotNone(entry, "a block corrupt on every active member must still be reported")
+        self.assertFalse(entry["recoverable"])
+        self.assertEqual(set(entry["bad_members"]), {"disk0", "disk1"})
+
+        # Confirm it's genuinely still unrecoverable after the "repair"
+        # attempt — there was nothing to repair from.
+        with self.assertRaises(ArrayFailedError):
+            arr.read_block(1)
+
 
 if __name__ == "__main__":
     unittest.main()

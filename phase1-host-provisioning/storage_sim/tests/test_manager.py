@@ -167,6 +167,47 @@ class TestArrayManagerAssembly(unittest.TestCase):
         self.assertEqual(mgr.get("pair").status()["state"], "degraded")
         mgr.close_all()
 
+    def test_assembly_skips_a_disk_with_a_corrupted_superblock_without_crashing(self):
+        # A superblock is just bytes at the start of a file — corrupt it
+        # directly (bypassing the normal write path, modeling real disk
+        # corruption of the metadata region itself, not the data region)
+        # and confirm assemble_all() skips that file gracefully instead
+        # of crashing the whole scan, while a COMPLETELY SEPARATE valid
+        # array in the same directory is entirely unaffected.
+        mgr1 = ArrayManager(self.tmpdir)
+        mgr1.create_array("good", num_blocks=8, block_size=16)
+        mgr1.write_block("good", 0, pad_block("still-fine", size=16))
+        mgr1.close_all()
+
+        # A file that merely LOOKS like it might be one of ours, but
+        # whose superblock region is garbage from byte 0.
+        junk_path = self.tmpdir / "junk-0.img"
+        with open(junk_path, "wb") as fh:
+            fh.write(b"\xff" * 4096 + b"\x00" * (16 + 32) * 8)
+
+        mgr2 = ArrayManager(self.tmpdir)
+        reports = mgr2.assemble_all()  # must not raise
+
+        self.assertEqual(len(reports), 1)  # only "good" — junk-0.img contributed nothing
+        self.assertEqual(reports[0].name, "good")
+        self.assertEqual(mgr2.read_block("good", 0), pad_block("still-fine", size=16))
+        mgr2.close_all()
+
+    def test_assembly_skips_array_where_every_member_superblock_is_corrupt(self):
+        mgr1 = ArrayManager(self.tmpdir)
+        mgr1.create_array("doomed", num_blocks=8, block_size=16)
+        mgr1.close_all()
+
+        for name in ("doomed-0.img", "doomed-1.img"):
+            path = self.tmpdir / name
+            with open(path, "r+b") as fh:
+                fh.write(b"\xff" * 4096)  # stomp the superblock region on BOTH members
+
+        mgr2 = ArrayManager(self.tmpdir)
+        reports = mgr2.assemble_all()  # must not raise
+        self.assertEqual(reports, [])  # nothing readable -> nothing to report, not a crash
+        mgr2.close_all()
+
 
 class TestArrayManagerCrossProcessLifecycle(unittest.TestCase):
     """Regression coverage for a real bug caught while building this:
@@ -280,6 +321,48 @@ class TestArrayManagerCrossProcessLifecycle(unittest.TestCase):
             self.assertEqual(len(reports), 1)
             self.assertIn(mgr2.get("tank").status()["state"], ("degraded", "failed"))
             mgr2.close_all()
+
+    def test_five_generations_with_a_process_restart_between_every_step(self):
+        # The strongest durability test available: five full fail/
+        # remove/add/rebuild generations, with a brand-new ArrayManager
+        # (a simulated process restart) between EVERY single step, not
+        # just between generations. If event-count bookkeeping or
+        # member_roles persistence had any subtle bug that only shows up
+        # after repeated cycles, this is what would catch it.
+        mgr = ArrayManager(self.tmpdir)
+        mgr.create_array("tank", num_blocks=16, block_size=32)
+        for i in range(16):
+            mgr.write_block("tank", i, pad_block(f"v{i}"))
+        mgr.close_all()
+
+        for generation in range(5):
+            target = "tank-0" if generation % 2 == 0 else "tank-1"
+
+            mgr = ArrayManager(self.tmpdir)
+            mgr.assemble_all()
+            mgr.fail("tank", target)
+            mgr.close_all()
+
+            mgr = ArrayManager(self.tmpdir)
+            mgr.assemble_all()
+            mgr.remove("tank", target)
+            mgr.close_all()
+
+            mgr = ArrayManager(self.tmpdir)
+            mgr.assemble_all()
+            mgr.add("tank", target, delay_per_block=0.0)
+            mgr.get("tank").wait_for_rebuild(timeout=5)
+            mgr.close_all()
+
+            mgr = ArrayManager(self.tmpdir)
+            mgr.assemble_all()
+            self.assertEqual(
+                mgr.get("tank").status()["state"], "clean",
+                f"generation {generation} did not end clean",
+            )
+            for i in range(16):
+                self.assertEqual(mgr.read_block("tank", i), pad_block(f"v{i}"))
+            mgr.close_all()
 
 
 if __name__ == "__main__":

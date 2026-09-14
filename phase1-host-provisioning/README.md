@@ -25,6 +25,29 @@ python3 -m unittest discover -s storage_sim/tests -v
 python3 -m storage_sim.cli demo
 ```
 
+## Step zero, once real disks exist: `plan_from_lsblk.py`
+
+**Never guess device names.** Once the VM actually has its disks
+(1 OS + 2 blank), run `lsblk -J -O` on the VM and feed the output to
+`scripts/plan_from_lsblk.py` — it identifies which disk is safely a RAID
+candidate (unpartitioned, unmounted, no filesystem) versus which is
+clearly in use (mounted, has a filesystem, has partitions), and only
+prints a ready-to-review command block using the confirmed device paths
+when told to. It never executes anything itself:
+
+```
+lsblk -J -O > disks.json                 # run this ON the VM
+python3 scripts/plan_from_lsblk.py disks.json                              # analysis only
+python3 scripts/plan_from_lsblk.py disks.json --i-confirm-these-are-blank-disks  # + command plan
+```
+
+It refuses to produce a command plan at all unless exactly two disks
+look genuinely blank — ambiguous or fewer-than-2 results print a
+warning explaining why, not a guess. Tested against 17 synthetic
+`lsblk`-shaped fixtures (`scripts/tests/test_plan_from_lsblk.py`); not
+yet run against this project's actual VM output, since that doesn't
+exist yet.
+
 ## Run order (real scripts, real hardware/VM only)
 
 ```

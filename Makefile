@@ -33,6 +33,7 @@ lint:
 	@python3 -m py_compile phase4-oob-lifecycle/redfish-mockup/redfish_mock_server.py
 	@python3 -m py_compile frontend/server.py
 	@find phase1-host-provisioning/storage_sim -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
+	@find phase1-host-provisioning/scripts -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 	@find phase3-telemetry/telemetryd/tests phase4-oob-lifecycle/tests frontend/tests -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 	@command -v node >/dev/null && node --check frontend/static/app.js || echo "node not installed, skipped JS syntax check"
 	@echo "== YAML/JSON config validation =="
@@ -70,15 +71,17 @@ sim-test:
 	@rm -rf phase1-host-provisioning/storage_sim/data
 
 unit-test:
-	@echo "== storage_sim (50 tests) =="
+	@echo "== storage_sim (74 tests) =="
 	cd phase1-host-provisioning && python3 -W error::ResourceWarning -m unittest discover -s storage_sim/tests
+	@echo "== plan_from_lsblk (17 tests) =="
+	cd phase1-host-provisioning && python3 -W error::ResourceWarning -m unittest discover -s scripts/tests
 	@echo "== telemetryd (19 tests) =="
 	cd phase3-telemetry/telemetryd && python3 -W error::ResourceWarning -m unittest discover -s tests
 	@echo "== oob_control (14 tests) =="
 	cd phase4-oob-lifecycle && python3 -W error::ResourceWarning -m unittest discover -s tests
 	@echo "== dashboard (15 tests, real HTTP against a real server) =="
 	cd frontend && python3 -W error::ResourceWarning -m unittest discover -s tests
-	@echo "unit-test OK — 98 tests"
+	@echo "unit-test OK — 139 tests"
 
 telemetry-test:
 	python3 phase3-telemetry/telemetryd/telemetryd.py --mock --once -v \

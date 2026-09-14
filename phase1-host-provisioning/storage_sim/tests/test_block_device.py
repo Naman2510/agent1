@@ -8,6 +8,7 @@ from storage_sim.block_device import (
     create_single_raid_partition,
 )
 from storage_sim.exceptions import ChecksumMismatchError, DeviceFailedError
+from storage_sim.exceptions import SuperblockError
 from storage_sim.superblock import Superblock
 
 
@@ -115,6 +116,31 @@ class TestSimulatedBlockDevice(unittest.TestCase):
         with self.assertRaises(IndexError):
             part.read_block(10)
         dev.close()
+
+    def test_corrupt_superblock_does_not_leak_the_file_handle(self):
+        # Regression test for a real bug this suite caught: when the
+        # constructor's own read_superblock() call raised (invalid
+        # magic bytes), the file handle already opened a few lines
+        # earlier was never closed — the object never finished
+        # constructing, so nothing was ever assigned that could later
+        # be close()d. Confirmed by capturing ResourceWarning directly
+        # rather than just asserting the expected exception, since the
+        # exception alone doesn't prove the fd was cleaned up.
+        import gc
+        import warnings
+
+        path = self.tmpdir / "corrupt.img"
+        with open(path, "wb") as fh:
+            fh.write(b"\xff" * 4096 + b"\x00" * 4096)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with self.assertRaises(SuperblockError):
+                SimulatedBlockDevice(path)
+            gc.collect()  # force any leaked file object's __del__ to run now, not whenever
+
+        leaks = [w for w in caught if issubclass(w.category, ResourceWarning)]
+        self.assertEqual(leaks, [], f"file handle leaked on constructor failure: {leaks}")
 
 
 if __name__ == "__main__":

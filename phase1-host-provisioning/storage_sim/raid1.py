@@ -270,7 +270,16 @@ class RAID1Array:
         was_rebuilding = m.state == MemberState.REBUILDING
         m.state = MemberState.FAILED
         if was_rebuilding and self._rebuild_progress and self._rebuild_progress.target_label == m.label:
-            self._rebuild_progress.aborted_reason = reason
+            # First reason wins. A real bug this suite caught: when
+            # _run_rebuild fails the source AND THEN calls this again to
+            # also fail the target (see _run_rebuild's source-read
+            # except clause), the second call used to unconditionally
+            # overwrite the specific "failed at block N: <error>" message
+            # from the first call with a generic "no healthy source
+            # remained" — losing exactly the diagnostic detail (which
+            # block, what error) an operator would want most.
+            if not self._rebuild_progress.aborted_reason:
+                self._rebuild_progress.aborted_reason = reason
         self._notify()
 
     def remove_member(self, label: str) -> None:
@@ -438,9 +447,22 @@ class RAID1Array:
                             bad_members.append(m)
                     except ChecksumMismatchError:
                         bad_members.append(m)
-                if bad_members and good_data is not None:
-                    mismatches.append({"block": i, "bad_members": [m.label for m in bad_members]})
-                    if repair:
+                if bad_members:
+                    # Reported even when good_data is None (every active
+                    # member's read failed for this block) — this is a
+                    # real bug this suite caught: the original condition
+                    # required good_data to be truthy to report anything
+                    # at all, which meant total double-corruption (no
+                    # trustworthy copy exists anywhere) was silently
+                    # dropped instead of surfaced. An operator running
+                    # scrub on a doubly-corrupted block deserves to see
+                    # "unrecoverable," not a clean report that hid it.
+                    mismatches.append({
+                        "block": i,
+                        "bad_members": [m.label for m in bad_members],
+                        "recoverable": good_data is not None,
+                    })
+                    if repair and good_data is not None:
                         for m in bad_members:
                             try:
                                 m.device.write_block(i, good_data)

@@ -103,6 +103,105 @@ class TestRAID1Rebuild(StorageSimTestCase):
         with self.assertRaises(InvalidOperationError):
             arr.add_member("disk0", wrong_size)
 
+    def test_corrupted_source_block_aborts_rebuild_not_just_that_block(self):
+        # The rebuild source (disk1, the only remaining original member)
+        # has a silently corrupted block. When the rebuild cursor
+        # reaches it, this must be treated exactly like a hardware read
+        # failure on the source — the textbook "second failure during
+        # recovery" scenario — not skipped over or silently propagated
+        # as corrupt data onto the replacement.
+        arr, old_d0, d1 = self._degraded_array_with_data()
+        d1.inject_silent_corruption(10)
+        replacement = self.make_disk(
+            "disk0_replacement.img", num_blocks=NUM_BLOCKS, block_size=BLOCK_SIZE, role=0
+        )
+        arr.add_member("disk0", replacement, delay_per_block=0.0)
+        progress = arr.wait_for_rebuild(timeout=5)
+
+        self.assertFalse(progress.finished)
+        self.assertIsNotNone(progress.aborted_reason)
+        self.assertIn("10", progress.aborted_reason)
+        self.assertEqual(arr.state(), ArrayState.FAILED)
+
+    def test_repeated_fail_remove_add_cycles_preserve_data_integrity(self):
+        # Five full lifecycle generations in a row on the same array
+        # instance — a stress test for accumulated state corruption
+        # (stale in-memory references, event-count drift, etc.) that a
+        # single cycle wouldn't reveal.
+        d0, d1 = self.make_mirror_pair(num_blocks=NUM_BLOCKS, block_size=BLOCK_SIZE)
+        arr = RAID1Array([d0, d1], labels=["disk0", "disk1"])
+        for i in range(NUM_BLOCKS):
+            arr.write_block(i, pad_block(f"gen0-{i:03d}"))
+
+        current_devices = {"disk0": d0, "disk1": d1}
+        for generation in range(1, 6):
+            target_label = "disk0" if generation % 2 else "disk1"
+            arr.fail_member(target_label)
+            arr.remove_member(target_label)
+            replacement = self.make_disk(
+                f"{target_label}_gen{generation}.img", num_blocks=NUM_BLOCKS, block_size=BLOCK_SIZE, role=None
+            )
+            arr.add_member(target_label, replacement, delay_per_block=0.0)
+            progress = arr.wait_for_rebuild(timeout=5)
+            self.assertTrue(progress.finished, f"generation {generation} rebuild did not finish: {progress.aborted_reason}")
+            current_devices[target_label] = replacement
+
+            for i in range(NUM_BLOCKS):
+                arr.write_block(i, pad_block(f"gen{generation}-{i:03d}"))
+
+            self.assertEqual(arr.state(), ArrayState.CLEAN)
+            for i in range(NUM_BLOCKS):
+                expected = pad_block(f"gen{generation}-{i:03d}")
+                self.assertEqual(arr.read_block(i), expected)
+                # Verify both underlying devices directly too — not just
+                # through the array's own (potentially self-healing) read path.
+                self.assertEqual(current_devices["disk0"].read_block(i), expected)
+                self.assertEqual(current_devices["disk1"].read_block(i), expected)
+
+    def test_concurrent_writes_during_rebuild_stress(self):
+        # Multiple threads hammering different blocks with writes while
+        # a rebuild runs in the background — a genuine concurrency
+        # stress test beyond the single deterministic write already
+        # covered by test_writes_during_rebuild_land_on_both_source_and_target.
+        import threading
+
+        arr, old_d0, d1 = self._degraded_array_with_data()
+        replacement = self.make_disk(
+            "disk0_replacement.img", num_blocks=NUM_BLOCKS, block_size=BLOCK_SIZE, role=0
+        )
+        arr.add_member("disk0", replacement, delay_per_block=0.005)
+
+        errors = []
+        final_values = {}
+        final_values_lock = threading.Lock()
+
+        def writer(thread_id):
+            try:
+                for round_num in range(20):
+                    block = (thread_id * 7 + round_num) % NUM_BLOCKS
+                    value = pad_block(f"t{thread_id}-r{round_num}")
+                    arr.write_block(block, value)
+                    with final_values_lock:
+                        final_values[block] = value
+            except Exception as exc:  # noqa: BLE001 — captured for the assertion below, not swallowed
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer, args=(t,)) for t in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        self.assertEqual(errors, [], f"writer thread(s) raised during concurrent rebuild: {errors}")
+        arr.wait_for_rebuild(timeout=10)
+        self.assertEqual(arr.state(), ArrayState.CLEAN)
+
+        # Whatever each block's LAST recorded write was, both members —
+        # including the freshly rebuilt one — must agree on it.
+        for block, expected in final_values.items():
+            self.assertEqual(d1.read_block(block), expected)
+            self.assertEqual(replacement.read_block(block), expected)
+
     def test_request_rebuild_stop_and_join_stops_cleanly(self):
         # Regression test for a real race caught while building this:
         # closing a device's file handle while a rebuild thread is still

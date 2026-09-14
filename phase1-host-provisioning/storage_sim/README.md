@@ -21,17 +21,24 @@ testing ledger, before treating anything here as hardware-proven.
                     |
           BlockDevice interface (block_device.py)
            /                          \\
-  SimulatedBlockDevice          <future: RealBlockDevice
-   (a regular file)               wrapping /dev/sdX>
+  SimulatedBlockDevice           RealBlockDevice
+   (a regular file)          (real_block_device.py —
+                            dry-run by default, gated;
+                          never run against real hardware)
 ```
 
 `raid1.py` only ever calls `read_block()` / `write_block()` / `flush()`
 on whatever it's handed. It has zero knowledge of files, paths, or
-VirtualBox. That's the whole point: swapping in a `RealBlockDevice` that
-wraps an actual `/dev/sdX1` (opened with `O_DIRECT`, ioctl'd for its real
-size, etc.) should require **no changes to raid1.py at all** — only a new
-class satisfying the same interface, and a manager-level choice of which
-backend to instantiate.
+VirtualBox. That's the whole point, and it's no longer hypothetical:
+`real_block_device.py`'s `RealBlockDevice` wraps an actual path with
+plain `os.pread`/`os.pwrite` (not `O_DIRECT` — that's a real gap, see
+"Known, documented limitations" below), and
+`tests/test_real_block_device.py::TestRAID1ArrayOverRealBlockDevices`
+proves `RAID1Array` mirrors, degrades, and reads over it **completely
+unmodified** — the only difference from every other RAID1 test in this
+repo is which `BlockDevice` subclass got instantiated. See "RealBlockDevice:
+implemented, but never run against real hardware" below for exactly
+what that does and doesn't prove.
 
 ## Mapping onto real Linux / mdadm concepts
 
@@ -50,6 +57,37 @@ backend to instantiate.
 | `RAID1Array.scrub()` | `echo check\|repair > /sys/block/mdX/md/sync_action` |
 | `ArrayManager.assemble_all()` | `mdadm --assemble --scan` |
 | per-block checksum in `block_device.py` | **not** stock mdadm — see below |
+
+## RealBlockDevice: implemented, but never run against real hardware
+
+`real_block_device.py` exists, is fully implemented, and has 15 passing
+tests (`tests/test_real_block_device.py`) — but it has **never opened an
+actual `/dev/sdX`**, because none exists in this environment. Precisely:
+
+- **IMPLEMENTED + TESTED**: the safety-gating logic (dry-run by default;
+  `allow_real_io` alone is not enough; a denylist of boot-disk-like path
+  prefixes checked *before* any open attempt; `num_blocks` must be
+  explicit, never probed) — every one of these is exercised by a real
+  test that would fail if the guard were removed.
+- **IMPLEMENTED + TESTED (against a stand-in, not a device)**: the
+  `os.pread`/`os.pwrite`/`os.fsync` I/O path itself, and `RAID1Array`
+  running unmodified over two `RealBlockDevice` instances — both tested
+  against plain temp files. This proves the *code path* and the
+  *abstraction boundary* are correct; a real block device has different
+  characteristics a temp file doesn't (alignment requirements, real
+  failure modes, `O_DIRECT` semantics) that this cannot exercise.
+- **IMPLEMENTED + NOT YET VALIDATED**: everything about actually running
+  this against `/dev/sdX`. No `O_DIRECT` (real production use against a
+  raw device would want it, to bypass the page cache the way real mdadm
+  effectively does); no ioctl-based real size detection (deliberate —
+  see the class's own docstring on why `num_blocks` is never guessed);
+  no testing under real I/O errors, real latency, or real concurrent
+  access from another process.
+
+Bringing this to real hardware later is "confirm device identity via
+`plan_from_lsblk.py`, then construct `RealBlockDevice(path, ...,
+allow_real_io=True, i_have_confirmed_with_lsblk=True)` instead of
+`SimulatedBlockDevice`" — not a redesign.
 
 ## Design decisions worth defending in an interview
 
@@ -190,7 +228,7 @@ models exactly the one layout that matters, and no more.
 
 ```bash
 cd phase1-host-provisioning
-python3 -m unittest discover -s storage_sim/tests -v   # 50 tests as of this writing
+python3 -m unittest discover -s storage_sim/tests -v   # 65 tests as of this writing
 python3 -m storage_sim.cli demo                          # scripted, narrated, asserting walkthrough
 python3 -m storage_sim.cli create tank --num-blocks 4096 --block-size 4096
 python3 -m storage_sim.cli status tank
@@ -203,15 +241,19 @@ See `cli.py`'s module docstring for the full command reference.
 **Genuinely tested, right now, in this sandbox:** every code path above
 — normal read/write, degraded-mode read/write, member failure, removal,
 replacement, background rebuild (including one interrupted by a second
-failure), silent-corruption detection and self-heal, `scrub`, and
-cross-process persistence/reassembly (including the stale-event-count
-and untrusted-role-state cases) — via 50 real automated tests plus a
-scripted demo, all actually executed, not just asserted to work.
+failure, and one interrupted by a clean shutdown mid-rebuild), silent-
+corruption detection and self-heal, `scrub`, cross-process persistence/
+reassembly (including the stale-event-count and untrusted-role-state
+cases), and the `RealBlockDevice` safety-gating + I/O path against a
+stand-in file — via 65 real automated tests plus a scripted demo, all
+actually executed, not just asserted to work.
 
 **Not tested, and cannot be, without real hardware:** real `mdadm`,
-real `/dev/sdX` block devices, real disk failure timing/latency
-characteristics, real GRUB/EFI interaction, real filesystem behavior on
-top of the array. This simulation is a model of the *logic*, built to
-make the eventual real-hardware integration (see
-`phase1-host-provisioning/scripts/`) a smaller, better-understood step —
-it is not a substitute for actually running that integration on the VM.
+real `/dev/sdX` block devices (including `RealBlockDevice` itself — see
+its own section above), real disk failure timing/latency characteristics,
+real GRUB/EFI interaction, real filesystem behavior on top of the array.
+This simulation is a model of the *logic*, built to make the eventual
+real-hardware integration (see `phase1-host-provisioning/scripts/`, and
+`scripts/plan_from_lsblk.py` for the safe first step once real disks
+exist) a smaller, better-understood step — it is not a substitute for
+actually running that integration on the VM.

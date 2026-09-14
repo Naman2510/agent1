@@ -101,7 +101,20 @@ class SimulatedBlockDevice(BlockDevice):
         self._lock = threading.Lock()
         self._fh = open(self.path, "r+b")
         self._hardware_failed = False
-        sb = self.read_superblock()
+        try:
+            sb = self.read_superblock()
+        except Exception:
+            # A real resource leak this suite caught: if the superblock
+            # is corrupt/invalid, this constructor never finishes, so
+            # `self` is never assigned by the caller and never gets a
+            # chance to be close()d — but the file handle above was
+            # already opened. Close it here before re-raising, or every
+            # ArrayManager.assemble_all() scan over a directory
+            # containing even one corrupt image leaks an fd per corrupt
+            # file (see tests/test_manager.py's superblock-corruption
+            # tests, which exercise exactly this path).
+            self._fh.close()
+            raise
         self.block_size = sb.block_size
         self._num_blocks = sb.num_blocks
 
