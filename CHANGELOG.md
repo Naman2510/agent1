@@ -452,3 +452,76 @@ This is not a commit log — it records *why*, not just *what*.
 
 - **Result:** `make sim_soc` passes under both simulators; full Phase
   2-7 regression re-verified clean after the bus-master refactor.
+
+## Phase 9 — Hardware Accelerator (2026-09-14)
+
+- **Added `rtl/accelerator/accelerator.sv`**, one FSM-driven
+  memory-mapped peripheral covering the task's vector-add ->
+  dot-product -> matrix-multiply progression as three opcodes
+  (`OP_VECADD`/`OP_DOT`/`OP_MATMUL`) on one shared register interface
+  (`CTRL`/`STATUS`/`LEN`/`RESULT` + `VECA`/`VECB`/`VECOUT`
+  scratchpads), rather than three separate peripherals -- see
+  `docs/accelerator.md` for why. MATMUL runs a real sequential `N^3`
+  triple-nested-loop FSM (`i`/`j`/`k` counters, one
+  multiply-accumulate per cycle), not a combinational unrolled
+  multiplier tree. Wired into `rtl/bus/soc_bus.sv` (new `accel_*` port)
+  and `rtl/cpu/riscv_soc.sv` at `0x30000000`, the region that region's
+  own Phase 8 decoder had already reserved.
+
+- **Bug found and fixed during review, before this file was ever
+  simulated: `LEN` register sized for the wrong bound.** An early
+  draft sized `LEN` (and every FSM index counter) using
+  `$clog2(MAX_DIM + 1)` -- correct for MATMUL's dimension bound
+  (`N <= 8` needs 4 bits) but far too narrow for VECADD/DOT's element-
+  count bound (`N` up to `MAX_LEN = 64`, needing 7 bits); a length of,
+  say, 40 would have silently truncated to 8. Caught by re-reading the
+  register map's own two different meanings for `LEN` side by side,
+  not by a failing test. Fixed by sizing every FSM counter (`len_r`,
+  `idx`, `mi`, `mj`, `mk`) to the larger bound
+  (`LEN_BITS = $clog2(MAX_LEN + 1)`).
+
+- **Bug found and fixed: a testbench-driver same-edge race that
+  disagreed between simulators about its own fix.** The first version
+  of `tb_accelerator.sv` drove `addr`/`wdata`/`mem_write` with plain
+  blocking assignment immediately after `@(posedge clk)`. This raced
+  the DUT's own `always_ff` block, which is triggered by that exact
+  same edge -- their relative execution order within one simulation
+  time step is simulator-defined. Measured effect: a `VECADD` of
+  `a=[1..6]`, `b=[10,20,...,60]` computed `[12,23,34,0,0,0]` instead of
+  `[11,22,...,66]` -- reading the scratchpad arrays directly (via
+  hierarchical reference, before the FSM even started) showed `veca[]`
+  holding `vecb[]`'s intended values and vice versa, shifted by one
+  element. Nonblocking assignment is the standard textbook fix for
+  exactly this class of race and resolved it under Icarus Verilog --
+  but Verilator flagged it with `%Warning-INITIALDLY`, stating plainly
+  that a nonblocking assignment inside an `initial`-block task executes
+  as blocking under Verilator. Two simulators disagreeing about what
+  the same source code even means is disqualifying for a project whose
+  entire verification methodology is "both simulators must agree," so
+  nonblocking assignment was rejected even though it "worked." Fixed
+  instead with genuine simulation-time separation: a `#1` delay
+  inserted *before* touching any DUT input (not just before releasing
+  it), guaranteeing no process anywhere can observe the change until
+  strictly after every same-edge evaluation has completed -- the same
+  technique this project has used for reset sequencing since Phase 7,
+  applied here to ordinary register-write stimulus for the first time.
+  Full derivation (including the intermediate hierarchical-reference
+  debug traces that isolated it) in `docs/accelerator.md` and
+  `sim/testbenches/tb_accelerator.sv`'s task comments.
+
+- **Added two testbenches verifying different layers, deliberately
+  kept separate:** `sim/testbenches/tb_accelerator.sv` drives the
+  accelerator's MMIO registers directly (VECADD N=6, DOT N=4, MATMUL
+  N=3 with non-symmetric hand-computed operands so a row/column
+  transposition bug would be caught, plus LEN=0 and LEN>MAX_DIM error
+  handling); `sim/testbenches/tb_soc_accel.sv` runs
+  `sim/programs/soc/accel_demo.s` -- real RISC-V assembly executed on
+  the actual pipelined CPU -- through the full SoC, driving all three
+  operations purely via `LW`/`SW` across the real bus. A failure in
+  either always isolates which layer (accelerator RTL vs. CPU/bus
+  path) actually broke.
+
+- **Result:** `make test_accel` passes both testbenches under both
+  simulators; full Phase 2-8 regression (`tb_soc.sv`'s RAM/UART/GPIO
+  checks included) re-verified clean after wiring the accelerator onto
+  the shared bus.

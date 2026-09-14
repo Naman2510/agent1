@@ -11,8 +11,7 @@
 //   addr[31:28] == 4'h1  ->  UART  (0x10000000 - 0x1FFFFFFF)
 //   addr[31:28] == 4'h2  ->  GPIO  (0x20000000 - 0x2FFFFFFF)
 //   addr[31:28] == 4'h3  ->  Accelerator (0x30000000 - 0x3FFFFFFF,
-//                             reserved -- unpopulated until Phase 9;
-//                             reads as 0, writes are dropped)
+//                             rtl/accelerator/accelerator.sv, Phase 9)
 //   anything else         ->  unmapped: reads as 0, writes dropped
 //
 // RAM is deliberately kept at address 0x00000000 (not, say, moved to
@@ -61,7 +60,14 @@ module soc_bus (
   output logic [31:0] gpio_wdata,
   output logic         gpio_mem_read,
   output logic         gpio_mem_write,
-  input  logic [31:0] gpio_rdata
+  input  logic [31:0] gpio_rdata,
+
+  // Accelerator port (Phase 9)
+  output logic [31:0] accel_addr,
+  output logic [31:0] accel_wdata,
+  output logic         accel_mem_read,
+  output logic         accel_mem_write,
+  input  logic [31:0] accel_rdata
 );
 
   localparam logic [3:0] SEL_RAM   = 4'h0;
@@ -74,8 +80,7 @@ module soc_bus (
   wire is_ram   = (sel == SEL_RAM);
   wire is_uart  = (sel == SEL_UART);
   wire is_gpio  = (sel == SEL_GPIO);
-  // is_accel intentionally has no destination yet (Phase 9); accesses to
-  // 0x30000000-0x3FFFFFFF fall through to the unmapped default below.
+  wire is_accel = (sel == SEL_ACCEL);
 
   // Broadcast addr/wdata; each peripheral only sees the low bits it
   // actually decodes internally (its own register-offset window), same
@@ -95,9 +100,15 @@ module soc_bus (
   assign gpio_mem_read  = cpu_mem_read  && is_gpio;
   assign gpio_mem_write = cpu_mem_write && is_gpio;
 
-  assign cpu_rdata = is_ram  ? ram_rdata  :
-                      is_uart ? uart_rdata :
-                      is_gpio ? gpio_rdata :
-                      32'b0; // accelerator (reserved) and unmapped both read as 0
+  assign accel_addr  = cpu_addr;
+  assign accel_wdata = cpu_wdata;
+  assign accel_mem_read  = cpu_mem_read  && is_accel;
+  assign accel_mem_write = cpu_mem_write && is_accel;
+
+  assign cpu_rdata = is_ram   ? ram_rdata   :
+                      is_uart  ? uart_rdata  :
+                      is_gpio  ? gpio_rdata  :
+                      is_accel ? accel_rdata :
+                      32'b0; // unmapped reads as 0
 
 endmodule

@@ -1,15 +1,17 @@
 `timescale 1ns/1ps
 // riscv_soc.sv
 //
-// Phase 8: top-level System-on-Chip. Instantiates the pipelined CPU
+// Phase 8/9: top-level System-on-Chip. Instantiates the pipelined CPU
 // (rtl/cpu/riscv_cpu_pipeline.sv, unmodified from Phase 7's
 // architecture except for Phase 8's data-bus externalization -- see its
 // own header comment) and connects its data-bus-master port through the
-// new address decoder (rtl/bus/soc_bus.sv) to three memory-mapped
+// address decoder (rtl/bus/soc_bus.sv) to four memory-mapped
 // peripherals: RAM (rtl/memory/dmem.sv, reused as-is -- a behavioral
 // memory model, not synthesizable SRAM, same caveat as every prior
-// phase), UART (rtl/bus/uart.sv), and GPIO (rtl/bus/gpio.sv). See
-// docs/soc.md for the full memory map and how this module is verified.
+// phase), UART (rtl/bus/uart.sv), GPIO (rtl/bus/gpio.sv), and, since
+// Phase 9, the hardware accelerator (rtl/accelerator/accelerator.sv).
+// See docs/soc.md for the full memory map and how this module is
+// verified.
 //
 // Instruction memory (ROM) is NOT part of this new data bus: it stays on
 // riscv_cpu_pipeline's own dedicated fetch-only port, internal to that
@@ -18,18 +20,13 @@
 // CPU to write program memory over the data bus, so it is not modeled
 // here. IMEM_INIT_FILE is forwarded through so this SoC can run any
 // existing test/benchmark program unchanged.
-//
-// The accelerator region (0x30000000-0x3FFFFFFF) is reserved by
-// soc_bus.sv's address decode but has no peripheral behind it yet --
-// that arrives in Phase 9. Reading it here returns 0; writing it is a
-// silent no-op, both by construction in soc_bus.sv, not because
-// anything is being hidden.
 
 module riscv_soc #(
   parameter int IMEM_DEPTH_WORDS = 1024,
   parameter      IMEM_INIT_FILE  = "",
   parameter int RAM_DEPTH_WORDS  = 1024,
-  parameter int UART_BUSY_CYCLES = 4
+  parameter int UART_BUSY_CYCLES = 4,
+  parameter int ACCEL_MAX_DIM    = 8
 ) (
   input  logic clk,
   input  logic rst_n,
@@ -112,6 +109,9 @@ module riscv_soc #(
   logic [31:0] gpio_addr, gpio_wdata, gpio_rdata;
   logic         gpio_mem_read, gpio_mem_write;
 
+  logic [31:0] accel_addr, accel_wdata, accel_rdata;
+  logic         accel_mem_read, accel_mem_write;
+
   soc_bus bus_inst (
     .cpu_addr(dbus_addr), .cpu_wdata(dbus_wdata),
     .cpu_mem_read(dbus_mem_read), .cpu_mem_write(dbus_mem_write),
@@ -127,7 +127,11 @@ module riscv_soc #(
 
     .gpio_addr(gpio_addr), .gpio_wdata(gpio_wdata),
     .gpio_mem_read(gpio_mem_read), .gpio_mem_write(gpio_mem_write),
-    .gpio_rdata(gpio_rdata)
+    .gpio_rdata(gpio_rdata),
+
+    .accel_addr(accel_addr), .accel_wdata(accel_wdata),
+    .accel_mem_read(accel_mem_read), .accel_mem_write(accel_mem_write),
+    .accel_rdata(accel_rdata)
   );
 
   // -------------------------------------------------------------------
@@ -154,6 +158,14 @@ module riscv_soc #(
     .addr(gpio_addr), .wdata(gpio_wdata),
     .mem_read(gpio_mem_read), .mem_write(gpio_mem_write), .rdata(gpio_rdata),
     .gpio_out(gpio_out), .gpio_in(gpio_in)
+  );
+
+  accelerator #(
+    .MAX_DIM(ACCEL_MAX_DIM), .MAX_LEN(ACCEL_MAX_DIM * ACCEL_MAX_DIM)
+  ) accel_inst (
+    .clk(clk), .rst_n(rst_n),
+    .addr(accel_addr), .wdata(accel_wdata),
+    .mem_read(accel_mem_read), .mem_write(accel_mem_write), .rdata(accel_rdata)
   );
 
 endmodule

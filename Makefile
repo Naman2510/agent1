@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel
 
 help:
 	@echo "Available targets:"
@@ -30,6 +30,9 @@ help:
 	@echo "  sim_soc      - Phase 8: assemble and run the top-level SoC testbench"
 	@echo "                 (RAM/UART/GPIO through the real address-decoded bus)"
 	@echo "                 under both Icarus Verilog and Verilator"
+	@echo "  test_accel   - Phase 9: run the accelerator unit test (direct MMIO)"
+	@echo "                 and the CPU-driven end-to-end demo (vector add,"
+	@echo "                 dot product, matrix multiply) under both simulators"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -63,3 +66,6 @@ benchmarks:
 
 sim_soc:
 	@./scripts/run_sim_soc.sh
+
+test_accel:
+	@./scripts/run_sim_accel.sh

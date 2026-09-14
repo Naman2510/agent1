@@ -300,4 +300,48 @@ assume RAM starts at 0) keeps working unmodified through the real SoC
 address decoder -- verified, not just assumed (see `docs/soc.md`'s
 Verification section).
 
+## Phase 9 — Hardware Accelerator
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** `rtl/accelerator/accelerator.sv`, one FSM-driven
+memory-mapped peripheral implementing the task's own vector-add ->
+dot-product -> matrix-multiply progression as three opcodes on a shared
+register interface (rather than three separate peripherals -- see
+`docs/accelerator.md`'s rationale), wired into `rtl/bus/soc_bus.sv` at
+`0x30000000`, plus two testbenches verifying it at different layers:
+`tb_accelerator.sv` (direct MMIO, isolates the accelerator's own RTL)
+and `tb_soc_accel.sv` (real RISC-V assembly run on the CPU, isolates
+the CPU/bus path to it).
+
+**Verification for this phase found two more real bugs, both
+documented in full:**
+
+1. A width-sizing bug caught in review, before any simulation ran: an
+   early draft sized the `LEN` register for MATMUL's smaller bound
+   (`MAX_DIM`) rather than VECADD/DOT's larger one (`MAX_LEN`), which
+   would have silently truncated any vector length above 15. Fixed by
+   sizing every FSM counter to the larger bound.
+2. A testbench-driver same-edge race, the same general class as every
+   prior same-edge race in this project but a new variant of it: the
+   testbench's own blocking-assignment stimulus raced the DUT's
+   `always_ff` block at the very edge meant to sample it, corrupting
+   which scratchpad address received which write's data. Nonblocking
+   assignment is the textbook fix and worked under Icarus Verilog, but
+   Verilator explicitly warns that nonblocking assignment inside an
+   `initial`-block task is executed as blocking there -- the two
+   simulators disagreeing about what the code even means is
+   disqualifying for this project's "both simulators must agree"
+   methodology. Fixed instead with genuine simulation-time separation
+   (a `#1` delay before touching any DUT input, not just before
+   releasing it), which is unambiguous under any simulator and is the
+   same technique already used for reset sequencing since Phase 7.
+
+Both are in `docs/accelerator.md` and `CHANGELOG.md` with full
+explanations, continuing this project's practice of treating directed
+testing (and, in the first case, plain re-reading of the register map)
+as real verification tools rather than formalities -- 11 substantive
+bugs found and fixed across Phases 2-9 now, every one documented rather
+than glossed over.
+
 Later phases append their own sections here as they land.

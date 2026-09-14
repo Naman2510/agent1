@@ -3,7 +3,11 @@
 # top-level SoC testbench (RAM + UART + GPIO through the real
 # address-decoded bus) under both Icarus Verilog and Verilator, so a
 # fresh checkout can reproduce Phase 8's verification with one command
-# (same pattern as scripts/run_sim_pipeline.sh for Phase 5).
+# (same pattern as scripts/run_sim_pipeline.sh for Phase 5). Includes
+# rtl/accelerator/accelerator.sv since riscv_soc.sv instantiates it
+# (Phase 9) even though this particular testbench never exercises it
+# (that's scripts/run_sim_accel.sh's job) -- riscv_soc.sv simply won't
+# elaborate without it.
 #
 # Usage: scripts/run_sim_soc.sh
 
@@ -31,6 +35,7 @@ RTL_FILES=(
   rtl/bus/soc_bus.sv
   rtl/bus/uart.sv
   rtl/bus/gpio.sv
+  rtl/accelerator/accelerator.sv
   rtl/cpu/riscv_soc.sv
 )
 TB=sim/testbenches/tb_soc.sv
