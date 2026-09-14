@@ -835,3 +835,60 @@ This is not a commit log — it records *why*, not just *what*.
   -> `.venv/`, gitignored) rather than fighting the system install --
   a convenience for this environment, not a requirement of the code
   itself.
+
+## Phase 14 — Scheduler Decision Pipeline + Accuracy Tracking (2026-09-14)
+
+- **Built the actual decision function**: `scheduler/inference/decide.py`
+  loads Phase 13's `scheduler/models/scheduler_tree.pkl` once and
+  exposes `decide(operation, size_n) -> "cpu"|"accelerator"`, calling
+  the exact same `scheduler/models/features.py:extract_features()`
+  `train_scheduler.py` used to build training features -- by
+  construction, a decision made here can't silently compute a feature
+  differently than what the model was fit on.
+
+- **Built a genuinely held-out evaluation, not another LOO-CV slice.**
+  Leave-one-out cross-validation (Phase 13) only ever refits the model
+  on 10 of the same 11 training points -- Phase 14 needed workloads
+  the model had never seen in any form. Extended
+  `scheduler/benchmarks/gen_scheduler_programs.py` with
+  `HELDOUT_VECADD_DOT_SIZES = [2, 3, 8, 32]` and
+  `HELDOUT_MATMUL_SIZES = [1]` (purely additive -- confirmed
+  `scheduler/training/dataset.csv` is bit-for-bit unchanged by this
+  extension) chosen specifically so N=2/N=3 sit exactly inside the
+  "real vecadd crossover point is unknown" gap Phase 13 documented.
+
+- **Correctness verified before trust, same discipline as every prior
+  phase**: `sim/testbenches/tb_scheduler_heldout_correctness.sv` checks
+  all 9 held-out workloads' actual computed results (18 `riscv_soc`
+  instances) against Python-computed expected values, passing under
+  both Icarus Verilog and Verilator on first run
+  (`make test_scheduler_heldout_correctness`). No RTL or shared
+  testbench file needed changes -- every held-out program is cheaper
+  than Phase 13's `cpu_matmul_n8`, so `tb_benchmark_soc.sv`'s existing
+  150000-cycle `MAX_CYCLES` already covers them.
+
+- **Real finding: 8/9 held-out accuracy, with one genuine, instructive
+  miss.** `scheduler/benchmarks/collect_heldout_dataset.py` measured
+  real ground truth for all 9 held-out workloads
+  (`scheduler/training/heldout_dataset.csv`); every one favors the
+  accelerator except that `vecadd N=2` (61 CPU cycles vs. 50
+  accelerator cycles) is an accelerator win the model incorrectly
+  predicted as a CPU win (regret: 11 cycles). This is not noise --
+  the fitted tree's only small-`vecadd` split was learned from a
+  SINGLE training point (`vecadd N=1`, a real CPU win) and
+  extrapolated straight through N=2, which this new data shows is
+  already on the other side of the real crossover. `scheduler/inference/evaluate_accuracy.py`
+  reports this plainly (`results/scheduler_accuracy_report.md`)
+  rather than only showing the workloads it got right.
+
+- **Scope decision**: the model was scored exactly as Phase 13 shipped
+  it -- not retrained on the newly discovered `vecadd N=2` point --
+  so this phase's held-out result stays an uncontaminated test of that
+  one model. Incorporating the new point is left as a flagged future
+  step, not done reflexively.
+
+- Docs: `docs/scheduler_pipeline.md` (full methodology + the held-out
+  result), README.md/CHANGELOG.md/docs/architecture.md updated for
+  Phase 14, Makefile gained
+  `test_scheduler_heldout_correctness`/`collect_scheduler_heldout_dataset`/
+  `evaluate_scheduler_accuracy` targets.

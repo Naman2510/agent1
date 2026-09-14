@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy
 
 help:
 	@echo "Available targets:"
@@ -48,6 +48,12 @@ help:
 	@echo "  train_scheduler - Phase 13: fit the AI scheduler decision-tree model on"
 	@echo "                 dataset.csv and write results/scheduler_report.md"
 	@echo "                 (needs numpy/pandas/scikit-learn: see .venv/ in docs/scheduler.md)"
+	@echo "  test_scheduler_heldout_correctness - Phase 14: verify the 9 held-out"
+	@echo "                 scheduler workloads against Python-computed expected results"
+	@echo "  collect_scheduler_heldout_dataset - Phase 14: write"
+	@echo "                 scheduler/training/heldout_dataset.csv from real measured cycles"
+	@echo "  evaluate_scheduler_accuracy - Phase 14: score the trained model's decisions"
+	@echo "                 against held-out ground truth + write results/scheduler_accuracy_report.md"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -105,3 +111,12 @@ collect_scheduler_dataset:
 
 train_scheduler:
 	@.venv/bin/python3 scheduler/training/train_scheduler.py
+
+test_scheduler_heldout_correctness:
+	@./scripts/run_scheduler_heldout_correctness.sh
+
+collect_scheduler_heldout_dataset:
+	@python3 scheduler/benchmarks/collect_heldout_dataset.py
+
+evaluate_scheduler_accuracy:
+	@.venv/bin/python3 scheduler/inference/evaluate_accuracy.py

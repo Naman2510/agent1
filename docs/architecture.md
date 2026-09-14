@@ -495,4 +495,35 @@ point was narrowed to "somewhere in N=1..4" but not pinned down further
 (N=2/N=3 were never simulated); the model is not yet wired into any
 live scheduling decision -- that is Phase 14's job.
 
+## Phase 14 — Scheduler Decision Pipeline + Accuracy Tracking
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** `scheduler/inference/decide.py`, a callable decision
+function (`decide(operation, size_n) -> "cpu"|"accelerator"`) wrapping
+Phase 13's trained model, using the same shared
+`scheduler/models/features.py:extract_features()` the model was
+trained with so training and inference can never compute a feature
+differently. `scheduler/inference/evaluate_accuracy.py` scores that
+function against 9 workloads the model has never been fit on in any
+form -- a genuinely held-out test, not another leave-one-out slice of
+the same 11 training points. Full writeup: `docs/scheduler_pipeline.md`.
+
+**Real result:** 8/9 held-out accuracy. The one miss (`vecadd N=2`,
+predicted CPU, actually an accelerator win by 61 vs 50 cycles) is a
+concrete, honestly reported instance of exactly the limitation Phase
+13 documented -- the model's only small-`vecadd` split was learned
+from a single training point (`N=1`) and extrapolated past the real
+crossover, which this new data shows sits strictly between N=1 and
+N=2. This was measured, not asserted: `sim/testbenches/tb_scheduler_heldout_correctness.sv`
+verifies all 9 held-out workloads' actual computed results (18
+`riscv_soc` instances) before their timing was trusted, under both
+Icarus Verilog and Verilator.
+
+**Scope decision:** the model is scored as Phase 13 shipped it, not
+retrained on the newly discovered `vecadd N=2` point -- keeping this
+phase's held-out evaluation an uncontaminated test of that exact
+model, with incorporating the new point left as a clearly-flagged
+future step rather than done reflexively.
+
 Later phases append their own sections here as they land.

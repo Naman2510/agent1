@@ -54,6 +54,22 @@ OUT_DIR = os.path.join(ROOT, "sim", "programs", "scheduler")
 VECADD_DOT_EXTRA_SIZES = [1, 4, 64]  # smallest possible, smallest useful, MAX_LEN
 MATMUL_EXTRA_SIZES = [2, 8]           # smallest useful, and MAX_DIM (largest)
 
+# Phase 14 HELD-OUT sizes: generated the same way, but deliberately never
+# fed to scheduler/training/train_scheduler.py -- scheduler/benchmarks/
+# collect_dataset.py's own PROGRAMS list is the one place that decides
+# which sizes are "training data"; these exist only so
+# scheduler/inference/evaluate_accuracy.py can measure the model's
+# predictions against REAL simulated ground truth it never saw fit.
+# vecadd/dot get sizes both inside the unexplored N=1..4 gap (N=2, N=3
+# -- see docs/scheduler.md's "real vecadd crossover point is unknown"
+# limitation) and outside the trained range entirely (N=8, N=32).
+# matmul has no unexplored gap to test (valid sizes are already fully
+# enumerated by the power-of-two/MAX_DIM=8 constraint: 1, 2, 4, 8, and
+# 2/4/8 are already training data) -- N=1 (a degenerate 1x1 "matrix
+# multiply") is the only genuinely held-out matmul size available.
+HELDOUT_VECADD_DOT_SIZES = [2, 3, 8, 32]
+HELDOUT_MATMUL_SIZES = [1]
+
 
 def gen_cpu_vecadd(n):
     return f"""\
@@ -429,6 +445,21 @@ def main():
             written.append(path)
 
     for n in MATMUL_EXTRA_SIZES:
+        for name, gen in [("cpu_matmul", gen_cpu_matmul), ("accel_matmul", gen_accel_matmul)]:
+            path = os.path.join(OUT_DIR, f"{name}_n{n}.s")
+            with open(path, "w") as f:
+                f.write(gen(n))
+            written.append(path)
+
+    for n in HELDOUT_VECADD_DOT_SIZES:
+        for name, gen in [("cpu_vecadd", gen_cpu_vecadd), ("cpu_dot", gen_cpu_dot),
+                           ("accel_vecadd", gen_accel_vecadd), ("accel_dot", gen_accel_dot)]:
+            path = os.path.join(OUT_DIR, f"{name}_n{n}.s")
+            with open(path, "w") as f:
+                f.write(gen(n))
+            written.append(path)
+
+    for n in HELDOUT_MATMUL_SIZES:
         for name, gen in [("cpu_matmul", gen_cpu_matmul), ("accel_matmul", gen_accel_matmul)]:
             path = os.path.join(OUT_DIR, f"{name}_n{n}.s")
             with open(path, "w") as f:
