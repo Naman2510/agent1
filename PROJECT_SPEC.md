@@ -89,7 +89,11 @@ where no single drive failure crashes the host or leaves it unbootable.
   (`ProtectSystem=strict`, `PrivateTmp=yes`, `NoNewPrivileges=true`,
   `MemoryDenyWriteExecute=true`).
 
-Implementation: `phase1-host-provisioning/`.
+Implementation: `phase1-host-provisioning/scripts/` (the real, destructive
+shell scripts above — hardware/VM-only, `SIMULATE=1`-dry-run-tested so
+far) and `phase1-host-provisioning/storage_sim/` (a from-scratch, 48-test
+software model of the RAID1 mirror itself — see its own README for the
+architecture and the full mapping onto the real `mdadm` concepts above).
 
 ## Phase 2 — Deterministic Networking & Traffic Control
 
@@ -157,8 +161,11 @@ Implementation: `phase5-physical-dr/`, `docs/`.
 
 A single-page operations dashboard aggregating the above: power/RAID/
 thermal overview, S.M.A.R.T./thermal detail, network state, a live alert
-feed (fed by telemetryd's webhook), and Redfish OOB control buttons.
-Implementation: `frontend/`.
+feed (fed by telemetryd's webhook), Redfish OOB control buttons, and a
+Storage Simulation panel driving the Phase 1 RAID1 model live — including
+watching a background rebuild's progress bar advance in real time via
+polling, a capability the CLI architecturally cannot offer (see
+`storage_sim/README.md`'s "known limitations"). Implementation: `frontend/`.
 
 ---
 
