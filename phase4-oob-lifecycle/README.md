@@ -9,6 +9,7 @@ production network is down.
 | Path | Purpose |
 | --- | --- |
 | `oob_control.py` | Redfish CLI: `power-status`, `power-cycle`, `boot-override`, `set-led` |
+| `tests/` | Automated test suite (14 tests) — see "Testing" below |
 | `fault_drill.sh` | End-to-end fault injection & rebuild drill (mdadm + Redfish LED) |
 | `redfish-mockup/` | Three ways to stand up a BMC to test against — see its README |
 
@@ -31,6 +32,22 @@ boot-override → set-led) has been run in this repo's own build/test pass
 against `redfish_mock_server.py` and confirmed working: `PowerState`
 actually transitions, the boot override persists, and the drive LED state
 persists.
+
+### Testing
+
+Beyond the manual sequence above, there's a real automated test suite:
+
+```
+python3 -m unittest discover -s tests -v   # 14 tests
+```
+
+Runs the mock server in-process (not a subprocess) and exercises every
+CLI command path, every reset type and boot target, argparse's own
+validation of bad input, and a genuine unreachable-endpoint failure path.
+It also checks that `RESET_TYPE_MAP` here and `RESET_TO_POWER_STATE` in
+`redfish-mockup/redfish_mock_server.py` can't silently drift apart —
+without that check, adding a reset type to one file but not the other
+would go unnoticed until a real run failed.
 
 ## Fault drill
 

@@ -165,17 +165,24 @@ class SmartCollector:
 
 
 class ThermalCollector:
-    """Polls sysfs thermal zones (millidegrees C -> degrees C)."""
+    """Polls sysfs thermal zones (millidegrees C -> degrees C).
 
-    def __init__(self, zones_glob: str, mock: bool = False):
+    `base` is the filesystem root the glob is resolved against — always
+    "/" in production, overridable in tests so the real (non-mock) glob
+    path can be exercised against a fake sysfs tree under a temp
+    directory instead of the real (read-only, and on this sandbox,
+    nonexistent) /sys."""
+
+    def __init__(self, zones_glob: str, mock: bool = False, base: Path = Path("/")):
         self.zones_glob = zones_glob
         self.mock = mock
+        self.base = base
 
     async def poll(self) -> Dict[str, float]:
         if self.mock:
             return self._mock_reading()
         readings: Dict[str, float] = {}
-        for zone_path in sorted(Path("/").glob(self.zones_glob.lstrip("/"))):
+        for zone_path in sorted(self.base.glob(self.zones_glob.lstrip("/"))):
             try:
                 raw = zone_path.read_text().strip()
                 readings[zone_path.parent.name] = int(raw) / 1000.0

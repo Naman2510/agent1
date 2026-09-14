@@ -73,23 +73,25 @@ Phase 1's RAID array exists).
 
 ```
 make simulate         # dry-runs every destructive script across all 5 phases
-make sim-test          # runs storage_sim's 48-test suite + the scripted RAID1 demo
+make unit-test         # runs every automated test suite in the repo: 81 tests
+                        # (storage_sim 48, telemetryd 19, oob_control 14)
+make sim-test          # storage_sim's suite alone, plus the scripted RAID1 demo
 make telemetry-test    # runs telemetryd.py in --mock mode, one poll cycle
 make oob-test          # spins up the local Redfish mock, exercises oob_control.py
 make dashboard         # full local stack: Redfish mock + telemetryd --mock +
                         # the web dashboard, browsable at http://localhost:8080/
 ```
 
-All five have been run against this exact repo as part of building it —
-`make simulate` dry-runs cleanly end to end, `sim-test` runs a real,
-executed RAID1 mirror through normal operation/failure/rebuild/corruption/
-cross-process persistence, `telemetry-test` produces valid Prometheus
-textfile output and fires a webhook on a sliding-window thermal breach,
-`oob-test` proves `power-cycle` actually flips `PowerState` on the mock
-BMC, and `make dashboard` serves a real dashboard with live (mock)
-power/telemetry data plus a live-pollable simulated-RAID rebuild — every
-OOB button and the live alert feed were exercised end to end while
-building it.
+All of the above have been run against this exact repo as part of
+building it — `make simulate` dry-runs cleanly end to end, `make
+unit-test` passes all 81 tests, `sim-test` runs a real, executed RAID1
+mirror through normal operation/failure/rebuild/corruption/cross-process
+persistence, `telemetry-test` produces valid Prometheus textfile output
+and fires a webhook on a sliding-window thermal breach, `oob-test` proves
+`power-cycle` actually flips `PowerState` on the mock BMC, and `make
+dashboard` serves a real dashboard with live (mock) power/telemetry data
+plus a live-pollable simulated-RAID rebuild — every OOB button and the
+live alert feed were exercised end to end while building it.
 
 ## Storage simulation
 
