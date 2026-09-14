@@ -892,3 +892,67 @@ This is not a commit log — it records *why*, not just *what*.
   Phase 14, Makefile gained
   `test_scheduler_heldout_correctness`/`collect_scheduler_heldout_dataset`/
   `evaluate_scheduler_accuracy` targets.
+
+## Phase 15 — Dynamic Runtime Scheduling (2026-09-14)
+
+- **Built a genuinely runtime scheduling decision, in hardware/software
+  this time, not Python.** Phase 13/14's `decide()` is an OFFLINE
+  script picking which already-assembled, single-workload program to
+  run. `scheduler/runtime/gen_dynamic_scheduler_demo.py` instead
+  generates ONE RISC-V program (`dynamic_scheduler_demo.s`) that, in a
+  single simulated execution, processes a fixed 6-workload stream
+  (vecadd N=1,2,4; dot N=1,4; matmul N=2) and computes the
+  CPU-vs-accelerator decision for each workload with real RV32I
+  instructions (including, for matmul, two genuine runtime
+  multiplications through the shared `mul32` subroutine) and a real
+  conditional branch on the fitted tree's exact boundary
+  (`element_count <= 2 and multiply_count == 0 -> cpu, else
+  accelerator`) -- keeping this project's own "important CPU/accelerator
+  behavior belongs in RTL/software, never a Python shortcut" rule for
+  the scheduling decision itself.
+
+- **Built three real (not hand-summed) baselines on the identical
+  stream**: `always_cpu_demo.s`, `always_accel_demo.s` (every block
+  forced to one engine, no decision logic), and `oracle_demo.s` (every
+  block forced to whichever engine Phase 13/14's real measured
+  `dataset.csv`/`heldout_dataset.csv` says is actually faster,
+  generated from that data, not hand-transcribed) -- so the dynamic
+  scheduler's real overhead could be measured against genuine
+  simulation totals, not a Python-summed estimate.
+
+- **Bug found and fixed: colliding labels between a block's co-resident
+  CPU and accelerator bodies.** A dynamically-decided block compiles
+  BOTH possible bodies into the binary (only one runs, per the branch,
+  but the assembler must resolve both) -- an early version gave them
+  the same label tag, so their internal loop labels (e.g.
+  `blk1_setup_loop`) collided and silently corrupted the unrun path's
+  jump targets. Caught immediately by this phase's own correctness
+  testbench (the affected block, `vecadd N=2`, failed with output 0
+  only in `dynamic_scheduler_demo` -- the identical body in
+  `always_cpu_demo`, with no collision possible, passed cleanly).
+  Fixed with per-path suffixed tags (`{tag}c`/`{tag}a`); all 4 programs
+  x 9 checks pass under both Icarus Verilog and Verilator after the fix
+  (`sim/testbenches/tb_dynamic_scheduler_correctness.sv`,
+  `make test_dynamic_scheduler_correctness`).
+
+- **Real result, reported exactly as measured, not reframed to look
+  better: the dynamic scheduler LOSES to a naive baseline.**
+  `scheduler/runtime/run_dynamic_scheduler_demo.py` measured
+  dynamic=492 cycles vs. always-accelerator=389 cycles for this
+  6-workload stream -- the dynamic scheduler is SLOWER. Two real,
+  separately measured causes: Phase 14's one known misprediction
+  (`vecadd N=2`) costs real cycles here too, and the runtime decision
+  computation itself is not free (dynamic retires 396 instructions /
+  37 flushes vs. oracle's 321 instructions / 17 flushes for the
+  identical workloads). The oracle baseline (379 cycles, every
+  decision correct but still generation-time-fixed with no runtime
+  decision cost) still beats always-accelerator by 10 cycles -- so the
+  idea has real value here; it's the combination of decision overhead
+  and one wrong call that erases it for a stream this small. Full
+  detail: `results/dynamic_scheduling_report.md`.
+
+- Docs: `docs/dynamic_scheduling.md` (full methodology, the bug, and
+  the honest result), README.md/CHANGELOG.md/docs/architecture.md
+  updated for Phase 15, Makefile gained
+  `test_dynamic_scheduler_correctness`/`run_dynamic_scheduler_demo`
+  targets.

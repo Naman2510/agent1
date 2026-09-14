@@ -526,4 +526,45 @@ phase's held-out evaluation an uncontaminated test of that exact
 model, with incorporating the new point left as a clearly-flagged
 future step rather than done reflexively.
 
+## Phase 15 — Dynamic Runtime Scheduling
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** `scheduler/runtime/gen_dynamic_scheduler_demo.py`
+generates a single RISC-V program (`dynamic_scheduler_demo.s`) that
+processes a fixed 6-workload stream in ONE simulated execution,
+computing the CPU-vs-accelerator decision for each workload AT
+RUNTIME with real RV32I instructions and a real conditional branch --
+not an offline Python lookup like Phase 13/14. Three baseline programs
+sharing the identical stream and per-block bodies (`always_cpu_demo`,
+`always_accel_demo`, `oracle_demo`, the last generated from Phase
+13/14's real measured data) let the dynamic scheduler's actual
+overhead be measured, not estimated. Full writeup:
+`docs/dynamic_scheduling.md`.
+
+**Bug found and fixed:** a dynamically-decided block compiles BOTH its
+CPU-path and accelerator-path bodies into the binary (only one runs,
+per the branch, but the assembler must resolve both) -- giving them
+the same label tag let their internal loop labels collide, corrupting
+the unrun path's targets. Caught immediately by
+`sim/testbenches/tb_dynamic_scheduler_correctness.sv` (the affected
+block failed only in the dynamic program, not in the single-body
+baseline programs using the identical body), fixed with per-path
+suffixed tags, reconfirmed passing under both simulators.
+
+**Real, honestly reported result:** the dynamic scheduler (492 cycles)
+is SLOWER than the naive always-accelerator baseline (389 cycles) for
+this workload stream -- not hidden or reframed. Two measured causes:
+Phase 14's one known misprediction (`vecadd N=2`) costs real cycles
+here too, and the runtime decision computation itself has a real,
+non-zero cost (396 vs. 321 instructions retired, 37 vs. 17 flushes,
+dynamic vs. oracle). The oracle baseline still beats always-accelerator
+by 10 cycles, showing the idea has real value here -- it's the
+combination of decision overhead and one wrong call that erases it for
+a stream this small.
+
+**Scope decision:** the workload stream and decision boundary are
+fixed and small by design, to keep this phase's result cleanly
+attributable; testing at larger/more varied scale is Phase 16's job.
+
 Later phases append their own sections here as they land.

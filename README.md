@@ -89,6 +89,8 @@ make train_scheduler             # Phase 13: fit the model + write results/sched
 make test_scheduler_heldout_correctness  # Phase 14: verify the 9 held-out workloads
 make collect_scheduler_heldout_dataset   # Phase 14: write scheduler/training/heldout_dataset.csv
 make evaluate_scheduler_accuracy         # Phase 14: score the model vs. held-out ground truth
+make test_dynamic_scheduler_correctness  # Phase 15: verify the dynamic-scheduling demo
+make run_dynamic_scheduler_demo          # Phase 15: measure real runtime decision overhead
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -119,6 +121,7 @@ container with no FPGA or other physical hardware attached.
 - [`docs/custom_extension.md`](docs/custom_extension.md) — the ACCEL.* custom RISC-V instructions: encoding, what they replace, and why some accelerator registers deliberately aren't covered (Phase 10).
 - [`docs/scheduler.md`](docs/scheduler.md) — AI scheduler dataset generation, the matmul shift-amount fix, a real measured CPU-wins crossover, and the model's honest limitations at n=11 (Phase 13).
 - [`docs/scheduler_pipeline.md`](docs/scheduler_pipeline.md) — the scheduler's runtime decision function, a genuinely held-out (never-trained-on) accuracy evaluation, and a real 8/9 result with one instructive miss (Phase 14).
+- [`docs/dynamic_scheduling.md`](docs/dynamic_scheduling.md) — a single RISC-V program that computes the scheduling decision itself, on the CPU, at runtime, and the honest real result that its own decision overhead can outweigh the benefit for small workload streams (Phase 15).
 - [`docs/benchmarking.md`](docs/benchmarking.md) — CPU-vs-accelerator benchmark methodology, real measured results, and a real bug it caught (Phase 11).
 - [`docs/synthesis.md`](docs/synthesis.md) — Yosys/iCE40 synthesis methodology, two real tooling problems it solved, and why place-and-route was tried but not adopted (Phase 12).
 - `CHANGELOG.md` — chronological log of architectural decisions.
@@ -149,7 +152,7 @@ Tracked phase-by-phase; each phase below is only checked once it compiles, simul
 - [x] Phase 12 — FPGA synthesis resource estimates
 - [x] Phase 13 — AI workload scheduler (trained model)
 - [x] Phase 14 — Scheduler decision pipeline + accuracy tracking
-- [ ] Phase 15 — Dynamic runtime scheduling
+- [x] Phase 15 — Dynamic runtime scheduling
 - [ ] Phase 16 — Mixed/heterogeneous workloads
 - [ ] Phase 17 — End-to-end demo + full documentation
 

@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo
 
 help:
 	@echo "Available targets:"
@@ -54,6 +54,10 @@ help:
 	@echo "                 scheduler/training/heldout_dataset.csv from real measured cycles"
 	@echo "  evaluate_scheduler_accuracy - Phase 14: score the trained model's decisions"
 	@echo "                 against held-out ground truth + write results/scheduler_accuracy_report.md"
+	@echo "  test_dynamic_scheduler_correctness - Phase 15: verify the dynamic-scheduling"
+	@echo "                 demo (+ 3 static baselines) against Python-computed expected results"
+	@echo "  run_dynamic_scheduler_demo - Phase 15: measure the dynamic scheduler's real"
+	@echo "                 runtime overhead + write results/dynamic_scheduling_report.md"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -120,3 +124,9 @@ collect_scheduler_heldout_dataset:
 
 evaluate_scheduler_accuracy:
 	@.venv/bin/python3 scheduler/inference/evaluate_accuracy.py
+
+test_dynamic_scheduler_correctness:
+	@./scripts/run_dynamic_scheduler_correctness.sh
+
+run_dynamic_scheduler_demo:
+	@python3 scheduler/runtime/run_dynamic_scheduler_demo.py
