@@ -9,7 +9,7 @@ production network is down.
 | Path | Purpose |
 | --- | --- |
 | `oob_control.py` | Redfish CLI: `power-status`, `power-cycle`, `boot-override`, `set-led` |
-| `tests/` | Automated test suite (14 tests) — see "Testing" below |
+| `tests/` | Automated test suite (29 tests) — see "Testing" below |
 | `fault_drill.sh` | End-to-end fault injection & rebuild drill (mdadm + Redfish LED) |
 | `redfish-mockup/` | Three ways to stand up a BMC to test against — see its README |
 
@@ -38,16 +38,35 @@ persists.
 Beyond the manual sequence above, there's a real automated test suite:
 
 ```
-python3 -m unittest discover -s tests -v   # 14 tests
+python3 -m unittest discover -s tests -v   # 29 tests
 ```
 
-Runs the mock server in-process (not a subprocess) and exercises every
-CLI command path, every reset type and boot target, argparse's own
-validation of bad input, and a genuine unreachable-endpoint failure path.
-It also checks that `RESET_TYPE_MAP` here and `RESET_TO_POWER_STATE` in
-`redfish-mockup/redfish_mock_server.py` can't silently drift apart —
-without that check, adding a reset type to one file but not the other
-would go unnoticed until a real run failed.
+`test_oob_control.py` (22 tests) runs the mock server in-process (not a
+subprocess) and exercises every CLI command path, every reset type and
+boot target, argparse's own validation of bad input (including missing
+`--base-url`/subcommand), the `--user`/`--password`/`--timeout` argparse
+defaults and their `REDFISH_USER`/`REDFISH_PASSWORD` env-var fallbacks,
+a genuine unreachable-endpoint failure path, and — by monkeypatching the
+mock server's request handler to capture the real `Authorization`
+header — that HTTP Basic Auth credentials are actually sent on the wire,
+not just accepted by argparse. It also checks that `RESET_TYPE_MAP` here
+and `RESET_TO_POWER_STATE` in `redfish-mockup/redfish_mock_server.py`
+can't silently drift apart — without that check, adding a reset type to
+one file but not the other would go unnoticed until a real run failed.
+
+`test_fault_drill.py` (7 tests) runs the real `fault_drill.sh` script as
+a subprocess with `SIMULATE=1` and asserts the exact expected command
+sequence appears, in the right order: all 5 numbered steps, the precise
+`mdadm --fail/--remove/--add` command lines built from `MD_DEVICE`/
+`FAILED_PART`, the drive LED going Blinking before Off, the completion
+message, and — critically — that every real-looking `mdadm` invocation
+is actually prefixed `(simulated)` (never a real, unmarked command) and
+that a second run with different device names produces exactly those
+new device names with no leftover trace of the defaults. This exercises
+the shell logic genuinely, not just "the script didn't crash" — but it
+is still exclusively `SIMULATE=1` shell-logic coverage: the real-mode
+branch (actual `mdadm --fail` etc. against a real array) is NOT
+exercised here or anywhere else in this repo without real hardware.
 
 ## Fault drill
 

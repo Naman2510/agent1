@@ -14,6 +14,7 @@ drift apart without either side's own tests noticing.
 import contextlib
 import http.server
 import io
+import os
 import sys
 import threading
 import unittest
@@ -161,6 +162,100 @@ class TestCliErrorHandling(unittest.TestCase):
     def test_missing_required_target_rejected_by_argparse(self):
         with self.assertRaises(SystemExit):
             oob_control.build_parser().parse_args(["--base-url", "http://x", "boot-override"])
+
+    def test_missing_base_url_rejected_by_argparse(self):
+        with self.assertRaises(SystemExit):
+            oob_control.build_parser().parse_args(["power-status"])
+
+    def test_missing_subcommand_rejected_by_argparse(self):
+        with self.assertRaises(SystemExit):
+            oob_control.build_parser().parse_args(["--base-url", "http://x"])
+
+
+class TestArgParsingDefaults(unittest.TestCase):
+    """--user/--password/--timeout had no direct test coverage before
+    this, including the REDFISH_USER/REDFISH_PASSWORD env var defaults
+    (os.environ.get calls evaluated once at argparse construction time)."""
+
+    def test_user_and_password_default_to_none_without_env_vars(self):
+        for var in ("REDFISH_USER", "REDFISH_PASSWORD"):
+            os.environ.pop(var, None)
+        parser = oob_control.build_parser()  # env vars read at parser-build time
+        args = parser.parse_args(["--base-url", "http://x", "power-status"])
+        self.assertIsNone(args.user)
+        self.assertIsNone(args.password)
+
+    def test_user_and_password_env_vars_become_defaults(self):
+        old_user = os.environ.get("REDFISH_USER")
+        old_password = os.environ.get("REDFISH_PASSWORD")
+        os.environ["REDFISH_USER"] = "admin"
+        os.environ["REDFISH_PASSWORD"] = "hunter2"
+        try:
+            parser = oob_control.build_parser()
+            args = parser.parse_args(["--base-url", "http://x", "power-status"])
+            self.assertEqual(args.user, "admin")
+            self.assertEqual(args.password, "hunter2")
+        finally:
+            for var, old in (("REDFISH_USER", old_user), ("REDFISH_PASSWORD", old_password)):
+                if old is None:
+                    os.environ.pop(var, None)
+                else:
+                    os.environ[var] = old
+
+    def test_explicit_flags_override_env_vars(self):
+        os.environ["REDFISH_USER"] = "from-env"
+        try:
+            parser = oob_control.build_parser()
+            args = parser.parse_args(["--base-url", "http://x", "--user", "from-flag", "power-status"])
+            self.assertEqual(args.user, "from-flag")
+        finally:
+            os.environ.pop("REDFISH_USER", None)
+
+    def test_default_timeout_is_ten_seconds(self):
+        args = oob_control.build_parser().parse_args(["--base-url", "http://x", "power-status"])
+        self.assertEqual(args.timeout, 10.0)
+
+    def test_custom_timeout_parsed(self):
+        args = oob_control.build_parser().parse_args(
+            ["--base-url", "http://x", "--timeout", "3.5", "power-status"]
+        )
+        self.assertEqual(args.timeout, 3.5)
+
+
+class TestBasicAuthActuallyUsed(MockRedfishServerTestCase):
+    """--user/--password must actually reach the HTTP request, not just
+    parse — verified by checking the real Authorization header the mock
+    server received, not just that no exception was raised."""
+
+    def test_credentials_sent_as_http_basic_auth(self):
+        received_headers = {}
+        original_do_get = redfish_mock_server.Handler.do_GET
+
+        def capturing_do_get(self):
+            received_headers["Authorization"] = self.headers.get("Authorization")
+            original_do_get(self)
+
+        redfish_mock_server.Handler.do_GET = capturing_do_get
+        try:
+            returncode, _out = self.run_cli(["power-status"])
+        finally:
+            redfish_mock_server.Handler.do_GET = original_do_get
+
+        # This particular CLI invocation didn't pass --user/--password —
+        # confirms the ABSENCE of an Authorization header when none is given.
+        self.assertEqual(returncode, 0)
+        self.assertIsNone(received_headers["Authorization"])
+
+        client = oob_control.RedfishClient(self.base_url, "admin", "hunter2", verify=False)
+        received_headers.clear()
+        redfish_mock_server.Handler.do_GET = capturing_do_get
+        try:
+            client.get("/redfish/v1/Systems/System.Embedded.1")
+        finally:
+            redfish_mock_server.Handler.do_GET = original_do_get
+
+        self.assertIsNotNone(received_headers["Authorization"])
+        self.assertTrue(received_headers["Authorization"].startswith("Basic "))
 
 
 if __name__ == "__main__":
