@@ -64,6 +64,52 @@
         <div id="network-body" class="mono">loading…</div>
       </div>
 
+      <div class="panel panel-wide" id="panel-simstorage">
+        <h2>Storage Simulation <span class="badge-sim">SIMULATED — not real disks</span></h2>
+        <p class="muted">
+          A real, tested software RAID1 model — see
+          <code>phase1-host-provisioning/storage_sim/README.md</code>. Nothing
+          on this panel touches a real block device or real <code>mdadm</code>.
+        </p>
+
+        <div class="oob-row">
+          <label>Array
+            <select id="sim-array-select"><option value="">(none)</option></select>
+          </label>
+          <button id="btn-sim-refresh">Refresh</button>
+          <button id="btn-sim-new">+ New Array</button>
+        </div>
+
+        <div id="sim-status-body" class="mono">select or create an array</div>
+        <div id="sim-rebuild-bar-wrap" hidden>
+          <div class="progress-track"><div id="sim-rebuild-bar" class="progress-fill"></div></div>
+          <div class="muted" id="sim-rebuild-label"></div>
+        </div>
+
+        <div class="oob-row">
+          <label>Block # <input id="sim-block-index" value="0" size="4"></label>
+          <label>Data <input id="sim-block-data" placeholder="text to write" size="20"></label>
+          <button id="btn-sim-write">Write</button>
+          <button id="btn-sim-read">Read</button>
+        </div>
+
+        <div class="oob-row">
+          <label>Member <input id="sim-member-label" placeholder="e.g. tank-0" size="10"></label>
+          <button id="btn-sim-fail">Fail</button>
+          <button id="btn-sim-remove">Remove</button>
+          <button id="btn-sim-add">Add (rebuild)</button>
+        </div>
+
+        <div class="oob-row">
+          <label>Corrupt block # <input id="sim-corrupt-block" value="0" size="4"></label>
+          <button id="btn-sim-corrupt">Inject Corruption</button>
+          <button id="btn-sim-hwfail">Simulate Hardware Failure</button>
+          <button id="btn-sim-scrub">Scrub + Repair</button>
+        </div>
+
+        <pre id="sim-output" class="mono output-box">no action taken yet</pre>
+      </div>
+
       <div class="panel" id="panel-oob">
         <h2>Out-of-Band Control</h2>
         <p class="muted">Talks to the Redfish endpoint configured in <code>frontend/config.yaml</code>.</p>

@@ -55,7 +55,7 @@ be validated before it ever touches a disk, a NIC, or a chassis.
 
 | Path | Phase | Contents |
 | --- | --- | --- |
-| `phase1-host-provisioning/` | 1 | RAID 1 storage, dual-disk boot mirroring, SSH/sudo hardening, systemd sandboxing profile |
+| `phase1-host-provisioning/` | 1 | Real RAID 1/boot/SSH/sudo scripts (`scripts/`) **plus** `storage_sim/` — a from-scratch, 48-test-covered software RAID1 model built and verified with zero real disks |
 | `phase2-networking/` | 2 | Netplan static/VLAN config, nftables default-deny firewall, diagnostic network namespace |
 | `phase3-telemetry/` | 3 | `telemetryd.py` async daemon, Prometheus/Alertmanager/Grafana wiring |
 | `phase4-oob-lifecycle/` | 4 | `oob_control.py` Redfish CLI, `fault_drill.sh` fault-injection drill, mock/real BMC options |
@@ -73,30 +73,54 @@ Phase 1's RAID array exists).
 
 ```
 make simulate         # dry-runs every destructive script across all 5 phases
+make sim-test          # runs storage_sim's 48-test suite + the scripted RAID1 demo
 make telemetry-test    # runs telemetryd.py in --mock mode, one poll cycle
 make oob-test          # spins up the local Redfish mock, exercises oob_control.py
 make dashboard         # full local stack: Redfish mock + telemetryd --mock +
                         # the web dashboard, browsable at http://localhost:8080/
 ```
 
-All four have been run against this exact repo as part of building it —
-`make simulate` dry-runs cleanly end to end, `telemetry-test` produces valid
-Prometheus textfile output and fires a webhook on a sliding-window thermal
-breach, `oob-test` proves `power-cycle` actually flips `PowerState` on the
-mock BMC, and `make dashboard` serves a real dashboard with live (mock)
-power/telemetry data — every OOB button and the live alert feed were
-exercised end to end while building it.
+All five have been run against this exact repo as part of building it —
+`make simulate` dry-runs cleanly end to end, `sim-test` runs a real,
+executed RAID1 mirror through normal operation/failure/rebuild/corruption/
+cross-process persistence, `telemetry-test` produces valid Prometheus
+textfile output and fires a webhook on a sliding-window thermal breach,
+`oob-test` proves `power-cycle` actually flips `PowerState` on the mock
+BMC, and `make dashboard` serves a real dashboard with live (mock)
+power/telemetry data plus a live-pollable simulated-RAID rebuild — every
+OOB button and the live alert feed were exercised end to end while
+building it.
+
+## Storage simulation
+
+`phase1-host-provisioning/storage_sim/` is a from-scratch, from-first-
+principles software model of a RAID1 mirror — simulated block devices,
+partitioning, a superblock/metadata layer, mirrored writes, degraded-mode
+reads, member fail/remove/add, background rebuild with live progress,
+silent-corruption detection with self-heal, and `scrub`. It is not a fake
+demo: 48 automated tests plus a scripted, asserting `raidsim demo` walk
+through every one of those behaviors for real, including a genuine bug
+this build caught and fixed (a failed disk being silently reactivated
+across a process restart — see the README's "Why `member_roles` exists").
+It's wired into the dashboard's new **Storage Simulation** panel, and its
+`README.md` maps every concept onto the real `mdadm`/Linux equivalent,
+including an explicit list of what it deliberately does *not* claim to
+replicate.
 
 ## Web dashboard
 
 `frontend/` is a single-page operations dashboard: power/RAID/thermal
 overview cards, S.M.A.R.T. and thermal detail tables, a live alert feed
-(fed by telemetryd's webhook), and buttons for Redfish power-cycle /
-boot-override / drive-LED control. It's a stdlib Python backend
-(`server.py`, no Flask/npm build step) plus plain HTML/CSS/JS, and it
-doesn't reimplement anything — it parses telemetryd's own Prometheus
-textfile output and imports `oob_control.py`'s `RedfishClient` directly.
-See `frontend/README.md` for the API and wiring details.
+(fed by telemetryd's webhook), buttons for Redfish power-cycle /
+boot-override / drive-LED control, and a **Storage Simulation** panel
+that drives the RAID1 model above live — including watching a rebuild's
+progress bar move in real time, something the CLI genuinely cannot do
+(see `storage_sim/README.md`'s "known limitations" for why). It's a
+stdlib Python backend (`server.py`, no Flask/npm build step) plus plain
+HTML/CSS/JS, and it doesn't reimplement anything it can instead read
+directly — it parses telemetryd's own Prometheus textfile output, imports
+`oob_control.py`'s `RedfishClient`, and imports `storage_sim`'s
+`ArrayManager`. See `frontend/README.md` for the API and wiring details.
 
 ## Hardware requirements
 

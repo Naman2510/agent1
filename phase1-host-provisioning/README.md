@@ -3,7 +3,29 @@
 Turns raw hardware into an isolated, resilient foundation where no single
 drive failure crashes the host or leaves it unbootable.
 
-## Run order
+## Two ways to work with this phase
+
+1. **`scripts/`** — the real shell scripts meant to run against actual
+   block devices (a VM's virtual disks, or bare metal). `SIMULATE=1`
+   dry-runs the *shell logic*, but nothing here has ever executed a real
+   `mdadm`/`sgdisk`/`grub-install` — see "Run order" below.
+2. **`storage_sim/`** — a from-scratch, fully tested software model of
+   the RAID1 mirror itself (mirroring, degraded mode, member
+   replacement, background rebuild, corruption detection, cross-process
+   persistence). This is where the *logic* has actually been built and
+   verified — 48 real automated tests plus a scripted demo, all
+   executed, in `storage_sim/README.md`. It requires no disks at all,
+   real or virtual, and is meant to make the eventual real-hardware run
+   of the scripts below a smaller, better-understood step, not to
+   replace it.
+
+```
+# from this directory (phase1-host-provisioning/):
+python3 -m unittest discover -s storage_sim/tests -v
+python3 -m storage_sim.cli demo
+```
+
+## Run order (real scripts, real hardware/VM only)
 
 ```
 sudo DISK1=/dev/sda DISK2=/dev/sdb ./scripts/00-wipe-disks.sh

@@ -15,6 +15,12 @@ already produced elsewhere in this repo:
   - Alerts:    an in-memory feed fed by telemetryd's webhook — point
                telemetryd's `webhook_url` at this server's
                /api/alerts/ingest and alerts appear on the dashboard live
+  - Storage simulation: a live, software RAID1 model (SIMULATED — not a
+               real block device or real mdadm; see
+               phase1-host-provisioning/storage_sim/README.md). This is
+               the one section of the dashboard the process's own
+               ArrayManager owns directly rather than reading files
+               produced elsewhere — see "Storage simulation" below.
 
 Every data source degrades gracefully: on hardware without mdadm, live
 `ip`/`ss`/`nft`, or a populated textfile (i.e. this sandbox, or any host
@@ -41,7 +47,7 @@ import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 try:
     import yaml
@@ -64,6 +70,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "redfish_chassis": "System.Embedded.1",
     "fault_drill_script": str(REPO_ROOT / "phase4-oob-lifecycle" / "fault_drill.sh"),
     "max_alerts": 200,
+    "storage_sim_data_dir": str(REPO_ROOT / "phase1-host-provisioning" / "storage_sim" / "data"),
 }
 
 
@@ -95,6 +102,19 @@ def _load_oob_control():
 
 
 oob_control = _load_oob_control()
+
+
+# --------------------------------------------------------------------------
+# storage_sim is a real Python package (relative imports inside it), so it
+# needs its parent directory on sys.path rather than the single-file
+# spec_from_file_location trick used for oob_control.py above.
+# --------------------------------------------------------------------------
+
+_STORAGE_SIM_PARENT = str(REPO_ROOT / "phase1-host-provisioning")
+if _STORAGE_SIM_PARENT not in sys.path:
+    sys.path.insert(0, _STORAGE_SIM_PARENT)
+from storage_sim.exceptions import StorageSimError  # noqa: E402
+from storage_sim.manager import ArrayManager  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -207,6 +227,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "EdgeDashboard/1.0"
     cfg: Dict[str, Any] = {}
     alerts: AlertStore = AlertStore(200)
+    storage_sim_mgr: "ArrayManager" = None  # type: ignore[assignment] — set in main()
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[dashboard] " + (fmt % args) + "\n")
@@ -263,7 +284,9 @@ class Handler(BaseHTTPRequestHandler):
     # -- routing --------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
         try:
             if path == "/api/overview":
                 self._json(200, self._overview())
@@ -277,10 +300,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"alerts": self.alerts.list()})
             elif path == "/api/oob/power-status":
                 self._oob_power_status()
+            elif path == "/api/simstorage/list":
+                self._json(200, {"arrays": self.storage_sim_mgr.list_arrays()})
+            elif path == "/api/simstorage/status":
+                name = query.get("name", [None])[0]
+                self._json(200, self.storage_sim_mgr.get(name).status())
+            elif path == "/api/simstorage/read":
+                name = query.get("name", [None])[0]
+                index = int(query.get("block_index", [0])[0])
+                data = self.storage_sim_mgr.read_block(name, index)
+                self._json(200, {"block_index": index, "data": data.rstrip(b"\0").decode(errors="replace")})
             elif path.startswith("/api/"):
                 self._json(404, {"error": "unknown endpoint", "path": path})
             else:
                 self._serve_static(path)
+        except StorageSimError as exc:
+            self._json(400, {"error": str(exc)})
         except Exception as exc:  # noqa: BLE001 - never let a bad request kill the server
             self._json(500, {"error": str(exc)})
 
@@ -299,10 +334,52 @@ class Handler(BaseHTTPRequestHandler):
                 self._oob_set_led(body)
             elif path == "/api/drill/run":
                 self._run_drill(body)
+            elif path == "/api/simstorage/create":
+                arr = self.storage_sim_mgr.create_array(
+                    body["name"],
+                    num_blocks=int(body.get("num_blocks", 4096)),
+                    block_size=int(body.get("block_size", 4096)),
+                )
+                self._json(200, arr.status())
+            elif path == "/api/simstorage/write":
+                arr = self.storage_sim_mgr.get(body["name"])
+                data = body["data"].encode().ljust(arr.block_size, b"\0")[: arr.block_size]
+                self.storage_sim_mgr.write_block(body["name"], int(body["block_index"]), data)
+                self._json(200, {"status": "written"})
+            elif path == "/api/simstorage/fail":
+                self.storage_sim_mgr.fail(body["name"], body["label"])
+                self._json(200, self.storage_sim_mgr.get(body["name"]).status())
+            elif path == "/api/simstorage/remove":
+                self.storage_sim_mgr.remove(body["name"], body["label"])
+                self._json(200, self.storage_sim_mgr.get(body["name"]).status())
+            elif path == "/api/simstorage/add":
+                # Async: returns immediately, rebuild runs on a background
+                # thread inside this long-lived process — poll
+                # /api/simstorage/status while it's in progress. This is
+                # exactly the case the CLI *can't* do (see cli.py's
+                # cmd_add docstring) because the CLI has no persistent
+                # process for a later invocation to poll.
+                self.storage_sim_mgr.add(
+                    body["name"], body["label"], delay_per_block=float(body.get("delay_per_block", 0.05))
+                )
+                self._json(200, {"status": "rebuild started"})
+            elif path == "/api/simstorage/scrub":
+                result = self.storage_sim_mgr.scrub(body["name"], repair=bool(body.get("repair", True)))
+                self._json(200, result)
+            elif path == "/api/simstorage/corrupt":
+                self.storage_sim_mgr.inject_corruption(body["name"], body["label"], int(body["block_index"]))
+                self._json(200, {"status": "corrupted"})
+            elif path == "/api/simstorage/hardware-fail":
+                self.storage_sim_mgr.simulate_hardware_failure(body["name"], body["label"])
+                self._json(200, {"status": "hardware-failed"})
             else:
                 self._json(404, {"error": "unknown endpoint", "path": path})
         except json.JSONDecodeError:
             self._json(400, {"error": "invalid JSON body"})
+        except KeyError as exc:
+            self._json(400, {"error": f"missing required field: {exc}"})
+        except StorageSimError as exc:
+            self._json(400, {"error": str(exc)})
         except Exception as exc:  # noqa: BLE001
             self._json(500, {"error": str(exc)})
 
@@ -448,14 +525,22 @@ def main() -> int:
     Handler.cfg = cfg
     Handler.alerts = AlertStore(cfg.get("max_alerts", 200))
 
+    Handler.storage_sim_mgr = ArrayManager(cfg["storage_sim_data_dir"])
+    reassembled = Handler.storage_sim_mgr.assemble_all()
+
     server = ThreadingHTTPServer((args.host, cfg["port"]), Handler)
     print(f"Edge server dashboard listening on http://{args.host}:{cfg['port']}")
-    print(f"  Redfish target:    {cfg['redfish_base_url']}")
-    print(f"  Telemetry textfile: {cfg['textfile_collector_path']}")
+    print(f"  Redfish target:      {cfg['redfish_base_url']}")
+    print(f"  Telemetry textfile:  {cfg['textfile_collector_path']}")
+    print(f"  Storage sim data dir: {cfg['storage_sim_data_dir']}")
+    for r in reassembled:
+        print(f"    [storage_sim] reassembled {r.name!r}: included {r.included_labels}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        Handler.storage_sim_mgr.close_all()
     return 0
 
 

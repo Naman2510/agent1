@@ -148,9 +148,135 @@ async function refreshAlerts() {
   }
 }
 
+let currentSimArray = null;
+
+async function refreshSimStorage() {
+  const select = document.getElementById("sim-array-select");
+  const { arrays } = await getJSON("/api/simstorage/list");
+
+  const previousSelection = select.value;
+  select.innerHTML = "";
+  if (!arrays.length) {
+    select.innerHTML = '<option value="">(none — create one)</option>';
+    currentSimArray = null;
+  } else {
+    for (const a of arrays) {
+      const opt = document.createElement("option");
+      opt.value = a.name;
+      opt.textContent = `${a.name} (${a.state})`;
+      select.appendChild(opt);
+    }
+    currentSimArray = arrays.find(a => a.name === previousSelection) ? previousSelection : arrays[0].name;
+    select.value = currentSimArray;
+  }
+
+  const statusBody = document.getElementById("sim-status-body");
+  const barWrap = document.getElementById("sim-rebuild-bar-wrap");
+  if (!currentSimArray) {
+    statusBody.textContent = "no simulated arrays yet — click + New Array";
+    barWrap.hidden = true;
+    return;
+  }
+
+  const status = await getJSON(`/api/simstorage/status?name=${encodeURIComponent(currentSimArray)}`);
+  statusBody.textContent = `state: ${status.state}\n` +
+    status.members.map(m => `  ${m.label}: ${m.state}`).join("\n");
+
+  if (status.rebuild && !status.rebuild.finished && !status.rebuild.aborted_reason) {
+    barWrap.hidden = false;
+    document.getElementById("sim-rebuild-bar").style.width = `${status.rebuild.percent}%`;
+    document.getElementById("sim-rebuild-label").textContent =
+      `rebuilding ${status.rebuild.target}: ${status.rebuild.percent}% (${status.rebuild.blocks_done}/${status.rebuild.blocks_total})`;
+  } else {
+    barWrap.hidden = true;
+  }
+}
+
+function wireSimStorageControls() {
+  const select = document.getElementById("sim-array-select");
+  const output = document.getElementById("sim-output");
+  select.addEventListener("change", () => { currentSimArray = select.value || null; refreshSimStorage(); });
+
+  document.getElementById("btn-sim-refresh").addEventListener("click", refreshSimStorage);
+
+  document.getElementById("btn-sim-new").addEventListener("click", async () => {
+    const name = prompt("New array name:", "tank");
+    if (!name) return;
+    try {
+      const result = await getJSON("/api/simstorage/create", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, num_blocks: 64, block_size: 64 }),
+      });
+      output.textContent = JSON.stringify(result, null, 2);
+      await refreshSimStorage();
+    } catch (err) { output.textContent = `error: ${err.message}`; }
+  });
+
+  const withArray = (fn) => async () => {
+    if (!currentSimArray) { output.textContent = "error: no array selected"; return; }
+    try {
+      await fn();
+      await refreshSimStorage();
+    } catch (err) {
+      output.textContent = `error: ${err.message}`;
+    }
+  };
+
+  document.getElementById("btn-sim-write").addEventListener("click", withArray(async () => {
+    const block_index = document.getElementById("sim-block-index").value;
+    const data = document.getElementById("sim-block-data").value;
+    const result = await getJSON("/api/simstorage/write", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: currentSimArray, block_index, data }),
+    });
+    output.textContent = JSON.stringify(result, null, 2);
+  }));
+
+  document.getElementById("btn-sim-read").addEventListener("click", withArray(async () => {
+    const block_index = document.getElementById("sim-block-index").value;
+    const result = await getJSON(`/api/simstorage/read?name=${encodeURIComponent(currentSimArray)}&block_index=${block_index}`);
+    output.textContent = JSON.stringify(result, null, 2);
+  }));
+
+  const memberAction = (path) => withArray(async () => {
+    const label = document.getElementById("sim-member-label").value;
+    if (!label) throw new Error("enter a member label, e.g. tank-0");
+    const result = await getJSON(path, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: currentSimArray, label, delay_per_block: 0.05 }),
+    });
+    output.textContent = JSON.stringify(result, null, 2);
+  });
+  document.getElementById("btn-sim-fail").addEventListener("click", memberAction("/api/simstorage/fail"));
+  document.getElementById("btn-sim-remove").addEventListener("click", memberAction("/api/simstorage/remove"));
+  document.getElementById("btn-sim-add").addEventListener("click", memberAction("/api/simstorage/add"));
+  document.getElementById("btn-sim-hwfail").addEventListener("click", memberAction("/api/simstorage/hardware-fail"));
+
+  document.getElementById("btn-sim-corrupt").addEventListener("click", withArray(async () => {
+    const label = document.getElementById("sim-member-label").value;
+    const block_index = document.getElementById("sim-corrupt-block").value;
+    if (!label) throw new Error("enter a member label, e.g. tank-0");
+    const result = await getJSON("/api/simstorage/corrupt", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: currentSimArray, label, block_index }),
+    });
+    output.textContent = JSON.stringify(result, null, 2);
+  }));
+
+  document.getElementById("btn-sim-scrub").addEventListener("click", withArray(async () => {
+    const result = await getJSON("/api/simstorage/scrub", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: currentSimArray, repair: true }),
+    });
+    output.textContent = JSON.stringify(result, null, 2);
+  }));
+}
+
 async function refreshAll() {
   try {
-    await Promise.all([refreshOverview(), refreshStorage(), refreshTelemetry(), refreshNetwork(), refreshAlerts()]);
+    await Promise.all([
+      refreshOverview(), refreshStorage(), refreshTelemetry(), refreshNetwork(), refreshAlerts(), refreshSimStorage(),
+    ]);
     setConn(true);
   } catch (err) {
     console.error(err);
@@ -226,5 +352,6 @@ function wireOobControls() {
 }
 
 wireOobControls();
+wireSimStorageControls();
 refreshAll();
 setInterval(refreshAll, REFRESH_MS);

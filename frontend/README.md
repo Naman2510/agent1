@@ -2,9 +2,10 @@
 
 A single-page operations dashboard for the platform: live power/RAID/thermal
 status, S.M.A.R.T. and thermal detail, network state, a live alert feed fed
-by telemetryd's webhook, and Redfish-based OOB control buttons (power-cycle,
-boot override, drive LED) — all backed by the same code the CLI/daemon use,
-not a reimplementation of it.
+by telemetryd's webhook, Redfish-based OOB control buttons (power-cycle,
+boot override, drive LED), and a **Storage Simulation** panel driving the
+RAID1 model in `phase1-host-provisioning/storage_sim/` — all backed by the
+same code the CLI/daemon use, not a reimplementation of it.
 
 ## Architecture
 
@@ -14,11 +15,17 @@ not a reimplementation of it.
 - **`static/`** — plain HTML/CSS/JS, no framework or build step. Served
   directly by `server.py`.
 
-It does not reimplement anything: RAID state comes from parsing
+It does not reimplement anything: real RAID state comes from parsing
 `/proc/mdstat` directly, S.M.A.R.T./thermal data comes from parsing
-telemetryd's own Prometheus textfile output, and every OOB action calls
-into `phase4-oob-lifecycle/oob_control.py`'s `RedfishClient` by importing
-the module directly.
+telemetryd's own Prometheus textfile output, every OOB action calls into
+`phase4-oob-lifecycle/oob_control.py`'s `RedfishClient` by importing the
+module directly, and the storage-simulation panel drives a single
+long-lived `storage_sim.manager.ArrayManager` instance owned by this
+server process for its whole run — imported directly, not reimplemented.
+That long-lived-process property is also *why* the dashboard, unlike the
+CLI, can show a rebuild's progress bar move in real time: see
+`storage_sim/README.md`'s "known limitations" for the CLI-side
+constraint this sidesteps.
 
 ## Run it
 
@@ -66,6 +73,17 @@ internal admin surface, not internet-facing).
 | POST | `/api/oob/boot-override` | `{"target": "pxe"\|"hdd"\|"cd"\|"usb"\|"bios-setup"\|"none", "persistent": bool}` |
 | POST | `/api/oob/set-led` | `{"drive": "1", "state": "Lit"\|"Blinking"\|"Off"}` |
 | POST | `/api/drill/run` | Runs `fault_drill.sh` **forced to `SIMULATE=1`** — see below |
+| GET | `/api/simstorage/list` | All simulated arrays and their status |
+| GET | `/api/simstorage/status?name=X` | One simulated array's status (state, members, rebuild progress) |
+| GET | `/api/simstorage/read?name=X&block_index=N` | Read one block back as text |
+| POST | `/api/simstorage/create` | `{"name": "tank", "num_blocks": 64, "block_size": 64}` |
+| POST | `/api/simstorage/write` | `{"name": "tank", "block_index": 0, "data": "..."}` |
+| POST | `/api/simstorage/fail` | `{"name": "tank", "label": "tank-0"}` |
+| POST | `/api/simstorage/remove` | `{"name": "tank", "label": "tank-0"}` |
+| POST | `/api/simstorage/add` | `{"name": "tank", "label": "tank-0", "delay_per_block": 0.05}` — async, poll `status` for rebuild progress |
+| POST | `/api/simstorage/scrub` | `{"name": "tank", "repair": true}` |
+| POST | `/api/simstorage/corrupt` | `{"name": "tank", "label": "tank-1", "block_index": 5}` — fault injection |
+| POST | `/api/simstorage/hardware-fail` | `{"name": "tank", "label": "tank-1"}` — fault injection |
 
 ### Why the drill button is simulate-only
 
@@ -86,7 +104,10 @@ talking to each other. Confirmed working: every GET endpoint, all three
 OOB POST actions (verified `power-cycle` actually flips the mock BMC's
 `PowerState`, `boot-override` and `set-led` both persist), the simulated
 drill endpoint, live alerts arriving from telemetryd's webhook in
-real time, and static file serving (including a path-traversal check).
+real time, static file serving (including a path-traversal check), and
+every `/api/simstorage/*` endpoint including watching a real rebuild's
+progress advance across repeated status polls while it ran in the
+background.
 
 ```
 python3 ../phase4-oob-lifecycle/redfish-mockup/redfish_mock_server.py --port 8443 &

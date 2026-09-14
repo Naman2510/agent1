@@ -5,6 +5,9 @@
 #                      script and every YAML/JSON config. Safe on any
 #                      machine — never touches real disks/network/hardware.
 #   make lint       — syntax/compile checks only (subset of simulate).
+#   make sim-test   — runs storage_sim's full automated test suite (48+ tests:
+#                      normal/degraded/rebuild/corruption/cross-process
+#                      persistence) plus the scripted `raidsim demo`.
 #   make telemetry-test — runs telemetryd.py in --mock --once mode.
 #   make oob-test   — spins up the local Redfish mock and exercises oob_control.py.
 #   make dashboard  — runs the full local stack (Redfish mock + telemetryd
@@ -14,7 +17,7 @@
 #   make clean      — removes scratch output from the targets above.
 
 SHELL := /bin/bash
-.PHONY: simulate lint telemetry-test oob-test dashboard clean
+.PHONY: simulate lint sim-test telemetry-test oob-test dashboard clean
 
 lint:
 	@echo "== bash -n on every script =="
@@ -24,6 +27,7 @@ lint:
 	@python3 -m py_compile phase4-oob-lifecycle/oob_control.py
 	@python3 -m py_compile phase4-oob-lifecycle/redfish-mockup/redfish_mock_server.py
 	@python3 -m py_compile frontend/server.py
+	@find phase1-host-provisioning/storage_sim -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 	@command -v node >/dev/null && node --check frontend/static/app.js || echo "node not installed, skipped JS syntax check"
 	@echo "== YAML/JSON config validation =="
 	@python3 -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('**/*.yml', recursive=True) + glob.glob('**/*.yaml', recursive=True)]"
@@ -51,6 +55,14 @@ simulate: lint
 	@rm -rf netcheck-* thermal-profile-*
 	@echo "simulate OK — nothing above touched real disks, network, or hardware"
 
+sim-test:
+	@echo "== storage_sim automated test suite =="
+	cd phase1-host-provisioning && python3 -W error::ResourceWarning -m unittest discover -s storage_sim/tests
+	@echo "== storage_sim scripted end-to-end demo =="
+	@rm -rf phase1-host-provisioning/storage_sim/data
+	cd phase1-host-provisioning && python3 -m storage_sim.cli demo
+	@rm -rf phase1-host-provisioning/storage_sim/data
+
 telemetry-test:
 	python3 phase3-telemetry/telemetryd/telemetryd.py --mock --once -v \
 		--config phase3-telemetry/telemetryd/config.yaml.example
@@ -74,4 +86,4 @@ dashboard:
 	wait
 
 clean:
-	rm -rf netcheck-* thermal-profile-* /var/lib/node_exporter
+	rm -rf netcheck-* thermal-profile-* /var/lib/node_exporter phase1-host-provisioning/storage_sim/data

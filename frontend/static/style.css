@@ -123,6 +123,38 @@ button:active { filter: brightness(0.95); }
   overflow: auto;
 }
 
+.panel-wide { grid-column: 1 / -1; }
+
+.badge-sim {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--amber) 25%, transparent);
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.progress-track {
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  height: 10px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
 #alerts-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
 #alerts-list li {
   padding: 8px 0;

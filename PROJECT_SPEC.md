@@ -184,15 +184,33 @@ OS, 2 dedicated, blank disks for the mirror.
 
 ## Testing Status (honesty ledger — see CLAUDE.md's Honesty section)
 
-| Phase | What has been genuinely tested, and where |
-| --- | --- |
-| 1 — Storage/Boot | Shell logic only, via `SIMULATE=1` dry runs in a cloud sandbox with **no real block devices**. Zero real `mdadm`/`sgdisk`/`grub-install` execution has occurred anywhere yet. |
-| 2 — Networking | `nftables.conf` syntax-validated against a real `nft` binary. VLAN/netns/diagnostic scripts are `SIMULATE=1` dry-run only — no real interface was ever created. |
-| 3 — Telemetry | `telemetryd.py --mock` actually run end-to-end against a live mock webhook receiver: sliding-window thermal-drift detection fired real alerts, Prometheus textfile output was valid. Real `smartctl`/sysfs/`/dev/kmsg` polling has never been exercised (not installed/available in the sandbox). |
-| 4 — OOB/Redfish | `oob_control.py` run for real against a self-written stateful mock Redfish server: `power-cycle` actually flipped mock `PowerState`, `boot-override`/`set-led` actually persisted. No real BMC or OpenBMC/QEMU instance has ever been used. |
-| 5 — Physical/DR | Documentation and a `SIMULATE=1`-only profiling script. No physical cabling, thermal, or power measurement has been performed — there is no physical hardware. |
-| Frontend | Full local stack (mock Redfish + mock telemetryd + dashboard backend) run together; every API endpoint and OOB button exercised for real against the mocks. |
+Three distinct tiers appear below, and they are not equivalent — see
+CLAUDE.md's Virtualization section:
 
-**Nothing above constitutes real hardware validation.** The next real
-milestone is Phase 1 on the user's actual VirtualBox VM, which requires a
-third disk (see above) before it's safe to run.
+- **Simulation-tested**: exercised against a from-scratch software model
+  (storage_sim) with no real or virtual block device involved at all.
+- **Mock-tested**: exercised against a real, running mock service
+  (a Redfish server, a webhook receiver) that stands in for real
+  hardware/firmware, over real network/process I/O.
+- **VM/hardware-tested**: exercised against the user's actual VirtualBox
+  VM or real hardware. **Nothing in this project has reached this tier
+  yet.**
+
+| Phase | Tier | What has been genuinely tested, and where |
+| --- | --- | --- |
+| 1 — Storage/Boot (real scripts) | Simulation-tested (shell logic only) | `phase1-host-provisioning/scripts/*.sh` — `SIMULATE=1` dry runs only, in a cloud sandbox with **no real block devices**. Zero real `mdadm`/`sgdisk`/`grub-install` execution has occurred anywhere. |
+| 1 — Storage/Boot (RAID1 logic) | Simulation-tested (real, executed code) | `phase1-host-provisioning/storage_sim/` — 48 automated tests plus a scripted, asserting demo, all actually run: normal read/write, degraded mode, member fail/remove/add, background rebuild (including one interrupted by a second failure), silent-corruption detection + self-heal, `scrub`, and cross-process reassembly (stale-event-count exclusion, untrusted-role-state exclusion). This validates the *logic*; it is a software model, not mdadm, and says so throughout its own README. |
+| 2 — Networking | Simulation-tested (config) + Simulation-tested (shell logic) | `nftables.conf` syntax-validated against a real `nft` binary. VLAN/netns/diagnostic scripts are `SIMULATE=1` dry-run only — no real interface was ever created. |
+| 3 — Telemetry | Mock-tested | `telemetryd.py --mock` run end-to-end against a live mock webhook receiver: sliding-window thermal-drift detection fired real alerts, Prometheus textfile output was valid. Real `smartctl`/sysfs/`/dev/kmsg` polling has never been exercised (not installed/available in the sandbox). |
+| 4 — OOB/Redfish | Mock-tested | `oob_control.py` run for real against a self-written stateful mock Redfish server: `power-cycle` actually flipped mock `PowerState`, `boot-override`/`set-led` actually persisted. No real BMC or OpenBMC/QEMU instance has ever been used. |
+| 5 — Physical/DR | Simulation-tested (shell logic) + docs | A `SIMULATE=1`-only profiling script and written documentation. No physical cabling, thermal, or power measurement has been performed — there is no physical hardware. |
+| Frontend | Mock-tested | Full local stack (mock Redfish + mock telemetryd + dashboard backend) run together; every API endpoint and OOB button exercised for real against the mocks, including the storage-simulation panel's live async rebuild-progress polling. |
+
+**Nothing above constitutes real hardware or real-VM validation.** The
+next real milestone is Phase 1 on the user's actual VirtualBox VM, which
+requires a third disk (see above) before it's safe to run.
+`storage_sim`'s value is narrowing that step: the RAID *logic* (mirroring,
+degraded mode, rebuild, corruption/staleness handling) is already
+implemented, tested, and documented — what remains for real-hardware
+validation is integration with actual `/dev/sdX` devices via
+`phase1-host-provisioning/scripts/`, not designing the logic itself.
