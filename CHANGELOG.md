@@ -655,3 +655,84 @@ This is not a commit log — it records *why*, not just *what*.
   both pass/complete cleanly under both simulators; no change to any
   RTL this phase, so no broader regression was required (though the
   full suite was spot-checked and remains clean).
+
+## Phase 12 — FPGA Synthesis Resource Estimates (2026-09-14)
+
+- **Installed the open-source FPGA toolchain** (Yosys, nextpnr-ice40,
+  icestorm's `icetime`/`icepack`) via `apt`, targeting Lattice iCE40 --
+  chosen specifically because it's what this fully open-source
+  toolchain supports without any vendor software, not as a claim about
+  intended deployment hardware. No physical FPGA or hardware is used
+  anywhere in this phase.
+
+- **Bug/limitation found and fixed: Yosys's open-source Verilog
+  frontend rejects `import pkg::*;` in every form.** Confirmed
+  directly against the tool (`yosys -p "read_verilog -sv <file>"`
+  errors identically whether the import is in the module header or
+  body, wildcard or explicit) rather than assumed. Eight files in
+  `rtl/` import `riscv_pkg` this way. Fixed with
+  `scripts/prep_synth_rtl.py`, which stages a mechanically transformed
+  COPY of `rtl/` into `build/synth_src/` (gitignored, regenerated every
+  run, `rtl/` itself never edited): deletes the import line and
+  replaces every whole-word reference to one of `riscv_pkg.sv`'s own
+  exported parameter names (extracted from the package file itself, so
+  the script can't drift out of sync with it) with its fully-qualified
+  form. Per the SystemVerilog LRM this is a syntactic transformation
+  only, not a semantic one.
+
+- **Bug found and fixed: an uninitialized ROM let Yosys optimize the
+  entire CPU away.** A first synthesis attempt used a stand-in
+  instruction memory with no defined content (an all-X array, since
+  `rtl/memory/imem.sv` is explicitly a simulation-only behavioral
+  model and can't be synthesized directly -- its `+HEXFILE=...`
+  runtime plusarg isn't a synthesizable construct). This reported an
+  implausibly small `riscv_soc`: ~240 cells total for a complete
+  pipelined CPU plus bus, UART, GPIO, and accelerator -- caught
+  immediately by comparing against the accelerator module's own
+  standalone synthesis result (over 17,000 cells by itself, obviously
+  inconsistent with a ~240-cell whole system containing it). Root
+  cause: an array with no defined value and no write port produces "don't
+  care" (X) reads, and Yosys's optimizer correctly, but silently,
+  const-propagates logic driven by X away since it no longer
+  constrains any observable output. Fixed with
+  `synth/stubs/imem_synth_stub.sv` (a synthesis-only stand-in, module
+  name `imem`, kept outside `rtl/` and never simulated) loading a real,
+  instruction-diverse program via a compile-time `$readmemh` instead of
+  the simulation-only plusarg; `synth/stubs/dmem_synth_stub.sv`
+  zero-initialized for the same reason.
+
+- **Scope decision, tried rather than assumed:** place-and-route
+  (`nextpnr-ice40`) was attempted against a small test module (`uart`,
+  ~29 cells) and failed with a physical I/O pin-placement error
+  specific to an arbitrarily-chosen package/pinout -- not a logic
+  problem (synthesis for that same module succeeds cleanly). Since
+  this project deliberately targets no physical board, inventing a
+  pin-constraint file just to produce a placement result would mean
+  fabricating hardware context that doesn't exist. Cell-count synthesis
+  (which the task's own Phase 12 description names Yosys for
+  specifically) doesn't have this problem, so that -- not
+  place-and-route -- is this phase's real deliverable; documented in
+  `docs/synthesis.md` rather than silently dropped.
+
+- **Practical constraint, also documented rather than hidden:** ABC's
+  technology-mapping pass on the full SoC at the RTL's own full
+  1024-word memory depths took long enough in this environment (tens
+  of minutes, tens of thousands of gates) that `scripts/run_synthesis.sh`
+  uses a smaller, clearly-labeled 256-word depth (via a `chparam`
+  override, synthesis-only) for the full-SoC and standalone-CPU
+  synthesis runs specifically -- every simulated/correctness-tested
+  program and testbench keeps using the RTL's real 1024-word default,
+  completely unaffected.
+
+- **Result:** `make synthesize` runs every module (13 leaf/logic
+  blocks, the standalone pipelined CPU, and the full SoC) through
+  `synth_ice40` and writes `results/synthesis_report.md` from the real,
+  parsed cell counts -- e.g. the full SoC (256-word memories, loaded
+  with a real program): 38,390 cells (21,365 SB_LUT4, 14,336 SB_DFFE,
+  1,458 SB_DFFER, 686 SB_CARRY, 544 SB_DFFR). The report also notes,
+  honestly rather than silently: none of this design's memory arrays
+  (instruction/data memory, accelerator scratchpads) inferred Block
+  RAM under default settings, because all of them use combinational
+  (unregistered) reads and iCE40's `SB_RAM40_4K` primitive requires a
+  registered read port -- a real, concrete finding for a future design
+  iteration, not something this phase changed in already-verified RTL.

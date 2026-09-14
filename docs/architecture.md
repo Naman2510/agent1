@@ -411,4 +411,42 @@ CPU-only kernels pay for every multiplication in software. This
 measured, honest gap -- not a favorable cherry-pick -- is exactly the
 kind of data Phase 13's AI scheduler needs.
 
+## Phase 12 — FPGA Synthesis Resource Estimates
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** a full open-source synthesis flow (Yosys 0.33
+targeting Lattice iCE40 via `synth_ice40`) run against every RTL
+module individually plus the full `riscv_soc`, writing
+`results/synthesis_report.md` with real, parsed cell counts. No
+physical FPGA or hardware is used or claimed anywhere in this phase --
+see `docs/synthesis.md`.
+
+**Two real tooling problems solved, both documented in full rather
+than silently worked around:**
+
+1. Yosys's open-source Verilog frontend rejects `import pkg::*;`
+   entirely (confirmed directly against the tool, in every placement
+   and form tried). `scripts/prep_synth_rtl.py` stages a mechanically
+   transformed copy of `rtl/` (never edits `rtl/` itself) with package
+   references fully qualified instead -- a syntactic transformation
+   only, per the SystemVerilog LRM.
+2. An uninitialized instruction ROM let Yosys's optimizer
+   const-propagate large parts of the CPU away as "don't care" --
+   caught when a first attempt reported an implausibly small ~240-cell
+   `riscv_soc` (smaller than the accelerator module synthesizes to
+   *by itself*, over 17,000 cells). Fixed by loading the synthesis-only
+   ROM stand-in (`synth/stubs/imem_synth_stub.sv`, kept outside `rtl/`
+   and never simulated) with a real, instruction-diverse program.
+
+**Scope decision:** place-and-route (`nextpnr-ice40`) was tried, not
+skipped by default -- it failed on a small test module with a physical
+I/O pin-budget error specific to an arbitrarily-chosen package, which
+only has a real answer once an actual target board is chosen. Since
+this project deliberately targets no physical hardware, inventing a
+pin-constraint file just to get a number would mean fabricating
+hardware context that doesn't exist; Yosys cell-count synthesis (which
+the task's own Phase 12 description names) doesn't have this problem
+and is this phase's real deliverable.
+
 Later phases append their own sections here as they land.

@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize
 
 help:
 	@echo "Available targets:"
@@ -39,6 +39,8 @@ help:
 	@echo "                 kernels against Python-computed expected results"
 	@echo "  benchmarks_accel - Phase 11: run CPU-only vs. accelerator-driven"
 	@echo "                 benchmarks and write results/accelerator_benchmark_report.md"
+	@echo "  synthesize   - Phase 12: run every module through Yosys (iCE40) and"
+	@echo "                 write results/synthesis_report.md (requires yosys)"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -84,3 +86,6 @@ test_bench_correctness:
 
 benchmarks_accel:
 	@python3 scripts/run_benchmarks_accel.py
+
+synthesize:
+	@./scripts/run_synthesis.sh

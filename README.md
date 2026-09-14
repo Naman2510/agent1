@@ -56,6 +56,8 @@ ai-riscv/
 ├── software/        Bare-metal C programs and a minimal runtime
 ├── scheduler/        AI workload scheduler: models, benchmarks, training
 ├── scripts/          Setup, build, simulation and benchmark scripts
+├── synth/            Synthesis-only stand-ins (Phase 12) -- never simulated,
+│                      never part of the verified design under rtl/
 ├── docs/             Architecture and design documentation (see below)
 └── results/          Benchmark reports and synthesis reports (generated)
 ```
@@ -80,6 +82,7 @@ make test_accel              # Phase 9: accelerator unit test + CPU-driven end-t
 make test_accel_custom       # Phase 10: ACCEL.* custom instruction end-to-end demo
 make test_bench_correctness  # Phase 11: verify CPU-only benchmark kernels
 make benchmarks_accel        # Phase 11: CPU vs. accelerator benchmarks + report
+make synthesize               # Phase 12: Yosys (iCE40) resource estimates + report
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -110,7 +113,7 @@ container with no FPGA or other physical hardware attached.
 - [`docs/custom_extension.md`](docs/custom_extension.md) — the ACCEL.* custom RISC-V instructions: encoding, what they replace, and why some accelerator registers deliberately aren't covered (Phase 10).
 - `docs/scheduler.md` — AI scheduler design (Phase 13+).
 - [`docs/benchmarking.md`](docs/benchmarking.md) — CPU-vs-accelerator benchmark methodology, real measured results, and a real bug it caught (Phase 11).
-- `docs/synthesis.md` — synthesis methodology and resource estimates (Phase 12+).
+- [`docs/synthesis.md`](docs/synthesis.md) — Yosys/iCE40 synthesis methodology, two real tooling problems it solved, and why place-and-route was tried but not adopted (Phase 12).
 - `CHANGELOG.md` — chronological log of architectural decisions.
 
 ## Engineering rules this project follows
@@ -136,7 +139,7 @@ Tracked phase-by-phase; each phase below is only checked once it compiles, simul
 - [x] Phase 9 — Hardware accelerator RTL
 - [x] Phase 10 — Custom RISC-V extension for accelerator control
 - [x] Phase 11 — CPU vs accelerator benchmarking
-- [ ] Phase 12 — FPGA synthesis resource estimates
+- [x] Phase 12 — FPGA synthesis resource estimates
 - [ ] Phase 13 — AI workload scheduler (trained model)
 - [ ] Phase 14 — Scheduler decision pipeline + accuracy tracking
 - [ ] Phase 15 — Dynamic runtime scheduling

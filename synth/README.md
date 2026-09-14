@@ -1,0 +1,2 @@
+# synth
+Synthesis-only stand-ins (Phase 12), used exclusively by `scripts/run_synthesis.sh`. `stubs/imem_synth_stub.sv` and `stubs/dmem_synth_stub.sv` replace `rtl/memory/imem.sv`/`dmem.sv` (behavioral simulation models Yosys's open-source frontend can't parse) with synthesizable equivalents. Nothing here is ever simulated or substituted into the verified design under `rtl/` -- see `docs/synthesis.md`.
