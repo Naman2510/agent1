@@ -736,3 +736,102 @@ This is not a commit log — it records *why*, not just *what*.
   (unregistered) reads and iCE40's `SB_RAM40_4K` primitive requires a
   registered read port -- a real, concrete finding for a future design
   iteration, not something this phase changed in already-verified RTL.
+
+## Phase 13 — AI Workload Scheduler: Dataset + Trained Model (2026-09-14)
+
+- **Generated, rather than hand-wrote, 12 new benchmark programs.**
+  Phase 11 measured exactly one size per operation (vecadd/dot N=16,
+  matmul 4x4) -- not enough comparison points to fit or evaluate any
+  model. `scheduler/benchmarks/gen_scheduler_programs.py` generates
+  `sim/programs/scheduler/{cpu,accel}_{vecadd,dot}_n{1,4,64}.s` and
+  `{cpu,accel}_matmul_n{2,8}.s` from f-string templates matching
+  Phase 11's already-verified register allocation exactly, specifically
+  to avoid re-risking that phase's `x1`/`ra` register-conflict bug
+  class across 12 more hand-written files.
+
+- **Bug avoided, not just fixed: matmul's hardcoded shift amount
+  doesn't generalize.** Phase 11's `cpu_matmul_bench.s` computed row
+  addresses with `slli x16, x13, 2  # i*N (N=4 -> i<<2)` -- correct
+  only because N happened to be 4. This couldn't be fixed by blind
+  text substitution: the same file also contains textually-identical
+  `slli ..., 2` instructions meaning "*4 bytes/word", an unrelated,
+  N-independent shift that must NOT change. The generator instead
+  computes `shift = int(math.log2(n))` explicitly in Python (asserting
+  `1 << shift == n`), which is also why generated matmul sizes are
+  restricted to powers of two (2, 8, matching the accelerator's own
+  `MAX_DIM=8`) -- this keeps `i*N` a single shift instruction rather
+  than introducing a runtime `mul32` call into address computation,
+  which would change what the benchmark measures. Full writeup:
+  `docs/scheduler.md`.
+
+- **Correctness verified before any new program's timing was
+  trusted.** `sim/testbenches/tb_scheduler_correctness.sv` checks all
+  12 new-size programs' actual computed results (not just completion)
+  against independently Python-computed expected values, across 14
+  `riscv_soc` instances -- 20 checks total, passing under both Icarus
+  Verilog and Verilator (`make test_scheduler_correctness`).
+
+- **Bug found and fixed: `cpu_matmul_n8` (512 software multiplies)
+  exceeded the shared benchmark harness's cycle budget.**
+  `sim/testbenches/tb_benchmark_soc.sv`'s `MAX_CYCLES` (20000, set in
+  Phase 7) was too small for this phase's largest CPU-only kernel;
+  raised to 150000. This is the only RTL/testbench file this phase
+  touched, and only raises a timeout ceiling -- confirmed by rerunning
+  the full existing regression suite (Phases 2-12, including
+  `benchmarks_accel`) after the change: every previously-measured
+  cycle count is bit-for-bit identical, only report timestamps differ.
+
+- **Built the labeled dataset**
+  (`scheduler/benchmarks/collect_dataset.py` / `make
+  collect_scheduler_dataset`): 22 rows (11 workloads x 2 engines) in
+  `scheduler/training/dataset.csv`, every cycle count read from real
+  Icarus Verilog simulation at the exact cycle each program's GPIO
+  sentinel fires -- confirmed bit-for-bit reproducible by rerunning the
+  collection script a second time.
+
+- **Headline finding, discovered rather than assumed: a genuine
+  CPU-favorable crossover exists.** The smallest possible workload
+  size (N=1) was deliberately tested specifically to look for a real
+  CPU-wins case. Found one: `vecadd N=1` is 37 CPU cycles vs. 39
+  accelerator cycles -- RV32I executes `ADD` natively in one cycle, so
+  at the smallest possible size the accelerator's fixed MMIO setup
+  overhead costs more than the CPU just doing the addition. `dot N=1`
+  does NOT show the same crossover (64 vs. 39 -- accelerator still
+  wins): even one software multiply-accumulate (RV32I has no hardware
+  multiplier) already costs more than the accelerator's setup
+  overhead. This makes the dataset non-degenerate: the model has a
+  real, non-trivial decision boundary to learn, not just "always pick
+  the accelerator."
+
+- **Trained a small, interpretable model**
+  (`scheduler/training/train_scheduler.py` / `make train_scheduler`):
+  pivots the 22 engine-rows into 11 workload rows (`workload_labels.csv`,
+  one per operation/size pair, labeled with the faster engine), extracts
+  6 features via the single shared function
+  `scheduler/models/features.py:extract_features()` (reused unchanged by
+  Phase 14's runtime decision pipeline, so training-time and
+  inference-time features can never silently drift apart), and fits a
+  shallow `DecisionTreeClassifier` (`max_depth=3`,
+  `class_weight="balanced"`). Reports **leave-one-out cross-validated
+  accuracy** (9/11 = 0.818) rather than a single train-set number, since
+  n=11 is too small for a held-out split to mean anything and a
+  same-data accuracy figure would overstate what a 6-feature/11-sample
+  tree can actually generalize. Model saved to
+  `scheduler/models/scheduler_tree.pkl`; full report at
+  `results/scheduler_report.md`.
+
+- **Honest scope, stated rather than glossed over**: 11 labeled
+  workloads, 10 sharing one label; the real vecadd crossover point
+  (somewhere in N=1..4) was never pinned down since N=2/N=3 were never
+  simulated; dot/matmul showed no CPU win at any tested size, and
+  whether either ever could is genuinely open; the model is not yet
+  wired into any live scheduling decision (that's Phase 14). See
+  `docs/scheduler.md`'s "Honest limitations" section.
+
+- **Tooling note**: this environment's system-wide numpy install is
+  broken for scikit-learn's needs (`ModuleNotFoundError:
+  numpy.core._multiarray_umath`, an apt/pip packaging conflict).
+  Worked around with an isolated venv (`scripts/setup_scheduler_venv.sh`
+  -> `.venv/`, gitignored) rather than fighting the system install --
+  a convenience for this environment, not a requirement of the code
+  itself.

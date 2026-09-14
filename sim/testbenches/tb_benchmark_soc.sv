@@ -36,7 +36,12 @@
 module tb_benchmark_soc;
 
   localparam logic [31:0] SENTINEL = 32'hDEADBEEF;
-  localparam int MAX_CYCLES = 20000;
+  // Phase 13's largest CPU-only kernel (cpu_matmul_n8: N=8, 512
+  // software multiplies via mul32 -- see mul32_test.s) needs
+  // substantially more than Phase 7-11's original 20000-cycle budget;
+  // raised here, once, for every program this generic harness runs
+  // rather than a program-specific special case.
+  localparam int MAX_CYCLES = 150000;
 
   logic clk;
   logic rst_n = 0;

@@ -449,4 +449,50 @@ hardware context that doesn't exist; Yosys cell-count synthesis (which
 the task's own Phase 12 description names) doesn't have this problem
 and is this phase's real deliverable.
 
+## Phase 13 — AI Workload Scheduler: Dataset + Trained Model
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** a labeled dataset of 11 real measured
+CPU-vs-accelerator workload comparisons (`scheduler/training/dataset.csv`,
+`make collect_scheduler_dataset`) and a shallow, interpretable
+`DecisionTreeClassifier` fit on it (`scheduler/training/train_scheduler.py`,
+`make train_scheduler`), predicting which engine finishes a workload
+faster from real measured cycle data -- not fabricated, estimated, or
+hand-picked to make the ML problem look tidier. Full methodology,
+including the matmul address-generation fix and the model's honest
+limitations at n=11, is in `docs/scheduler.md`.
+
+**Why this needed new benchmark programs:** Phase 11 measured exactly
+one size per operation -- three data points total, not enough to fit
+or evaluate anything. Twelve new-size programs were generated (not
+hand-written, to avoid re-risking Phase 11's register-allocation bug
+class) by `scheduler/benchmarks/gen_scheduler_programs.py`, each
+independently verified for correctness (not just completion) against
+Python-computed expected values before its timing was trusted
+(`sim/testbenches/tb_scheduler_correctness.sv`, `make
+test_scheduler_correctness`).
+
+**Real finding, not an assumption:** testing the smallest possible
+workload size (N=1) surfaced a genuine CPU-favorable crossover for
+vecadd (37 CPU cycles vs. 39 accelerator cycles) that does not occur
+for dot at the same size (RV32I's lack of a hardware multiplier makes
+even one software multiply-accumulate cost more than the
+accelerator's setup overhead). This is what keeps the scheduler's
+decision boundary non-trivial -- see `docs/scheduler.md` and
+`results/scheduler_report.md`.
+
+**Shared feature extraction, forward-looking:** `scheduler/models/features.py`
+is the single function both this phase's training and Phase 14's
+runtime decision pipeline will call, specifically so a feature can
+never silently differ between what the model was trained on and what
+it sees at inference time.
+
+**Honest scope:** 11 samples, 10 sharing one label, leave-one-out
+cross-validated accuracy 9/11 = 0.818 (reported, not a same-data
+number that would overstate generalization); the real vecadd crossover
+point was narrowed to "somewhere in N=1..4" but not pinned down further
+(N=2/N=3 were never simulated); the model is not yet wired into any
+live scheduling decision -- that is Phase 14's job.
+
 Later phases append their own sections here as they land.

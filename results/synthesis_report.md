@@ -1,6 +1,6 @@
 # FPGA Synthesis Resource Estimates (Phase 12)
 
-Generated 2026-09-14 22:42 UTC by `scripts/run_synthesis.sh` (`scripts/gen_synthesis_report.py`) from actual Yosys 0.33 `synth_ice40` output, targeting Lattice iCE40 as a representative open-source-toolchain-supported device -- **this is synthesis-tool resource estimation only. No physical FPGA or hardware was used or is claimed anywhere in this report.** See `docs/synthesis.md` for full methodology, including two non-obvious things this phase had to work around (a Yosys package-import limitation, and an uninitialized-ROM optimization pitfall) -- both documented there and in `CHANGELOG.md`'s Phase 12 entry, not silently patched over.
+Generated 2026-09-14 23:04 UTC by `scripts/run_synthesis.sh` (`scripts/gen_synthesis_report.py`) from actual Yosys 0.33 `synth_ice40` output, targeting Lattice iCE40 as a representative open-source-toolchain-supported device -- **this is synthesis-tool resource estimation only. No physical FPGA or hardware was used or is claimed anywhere in this report.** See `docs/synthesis.md` for full methodology, including two non-obvious things this phase had to work around (a Yosys package-import limitation, and an uninitialized-ROM optimization pitfall) -- both documented there and in `CHANGELOG.md`'s Phase 12 entry, not silently patched over.
 
 ## Per-module cell counts
 

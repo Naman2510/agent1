@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler
 
 help:
 	@echo "Available targets:"
@@ -41,6 +41,13 @@ help:
 	@echo "                 benchmarks and write results/accelerator_benchmark_report.md"
 	@echo "  synthesize   - Phase 12: run every module through Yosys (iCE40) and"
 	@echo "                 write results/synthesis_report.md (requires yosys)"
+	@echo "  test_scheduler_correctness - Phase 13: verify the 12 new-size scheduler"
+	@echo "                 benchmark programs against Python-computed expected results"
+	@echo "  collect_scheduler_dataset - Phase 13: run all 11 workloads (CPU + accelerator)"
+	@echo "                 and write scheduler/training/dataset.csv from real measured cycles"
+	@echo "  train_scheduler - Phase 13: fit the AI scheduler decision-tree model on"
+	@echo "                 dataset.csv and write results/scheduler_report.md"
+	@echo "                 (needs numpy/pandas/scikit-learn: see .venv/ in docs/scheduler.md)"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -89,3 +96,12 @@ benchmarks_accel:
 
 synthesize:
 	@./scripts/run_synthesis.sh
+
+test_scheduler_correctness:
+	@./scripts/run_scheduler_correctness.sh
+
+collect_scheduler_dataset:
+	@python3 scheduler/benchmarks/collect_dataset.py
+
+train_scheduler:
+	@.venv/bin/python3 scheduler/training/train_scheduler.py

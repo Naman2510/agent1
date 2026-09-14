@@ -1,0 +1,12 @@
+operation,size_n,cpu_cycles,accelerator_cycles,speedup,winner
+dot,1,64,39,1.641025641025641,accelerator
+dot,4,238,72,3.3055555555555554,accelerator
+dot,16,1086,216,5.027777777777778,accelerator
+dot,64,5270,792,6.654040404040404,accelerator
+matmul,2,501,96,5.21875,accelerator
+matmul,4,3857,324,11.904320987654321,accelerator
+matmul,8,32885,1458,22.554869684499312,accelerator
+vecadd,1,37,39,0.9487179487179487,cpu
+vecadd,4,109,72,1.5138888888888888,accelerator
+vecadd,16,397,216,1.837962962962963,accelerator
+vecadd,64,1549,792,1.9558080808080809,accelerator
