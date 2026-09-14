@@ -8,8 +8,9 @@
 #   make sim-test   — runs storage_sim's full automated test suite (48+ tests:
 #                      normal/degraded/rebuild/corruption/cross-process
 #                      persistence) plus the scripted `raidsim demo`.
-#   make unit-test  — runs every automated unittest suite in the repo:
-#                      storage_sim, telemetryd, and oob_control.
+#   make unit-test  — runs every automated unittest suite in the repo (96
+#                      tests): storage_sim, telemetryd, oob_control, and
+#                      the dashboard (over real HTTP against a real server).
 #   make telemetry-test — runs telemetryd.py in --mock --once mode (smoke test;
 #                      see `unit-test` for telemetryd's actual test suite).
 #   make oob-test   — spins up the local Redfish mock and exercises oob_control.py
@@ -32,7 +33,7 @@ lint:
 	@python3 -m py_compile phase4-oob-lifecycle/redfish-mockup/redfish_mock_server.py
 	@python3 -m py_compile frontend/server.py
 	@find phase1-host-provisioning/storage_sim -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
-	@find phase3-telemetry/telemetryd/tests phase4-oob-lifecycle/tests -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
+	@find phase3-telemetry/telemetryd/tests phase4-oob-lifecycle/tests frontend/tests -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 	@command -v node >/dev/null && node --check frontend/static/app.js || echo "node not installed, skipped JS syntax check"
 	@echo "== YAML/JSON config validation =="
 	@python3 -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('**/*.yml', recursive=True) + glob.glob('**/*.yaml', recursive=True)]"
@@ -75,7 +76,9 @@ unit-test:
 	cd phase3-telemetry/telemetryd && python3 -W error::ResourceWarning -m unittest discover -s tests
 	@echo "== oob_control (14 tests) =="
 	cd phase4-oob-lifecycle && python3 -W error::ResourceWarning -m unittest discover -s tests
-	@echo "unit-test OK"
+	@echo "== dashboard (15 tests, real HTTP against a real server) =="
+	cd frontend && python3 -W error::ResourceWarning -m unittest discover -s tests
+	@echo "unit-test OK — 96 tests"
 
 telemetry-test:
 	python3 phase3-telemetry/telemetryd/telemetryd.py --mock --once -v \

@@ -95,19 +95,26 @@ operator who has confirmed the array/disk identifiers). A web button is
 the wrong place for a control that can take a production mirror down to
 one member.
 
-## Testing without real hardware
+## Testing
 
-This has been run in this repo's own build/test pass as a full local
-stack: `redfish_mock_server.py` (Phase 4) + `telemetryd.py --mock` (Phase
-3, with `webhook_url` pointed at this dashboard) + `server.py`, all
-talking to each other. Confirmed working: every GET endpoint, all three
-OOB POST actions (verified `power-cycle` actually flips the mock BMC's
-`PowerState`, `boot-override` and `set-led` both persist), the simulated
-drill endpoint, live alerts arriving from telemetryd's webhook in
-real time, static file serving (including a path-traversal check), and
-every `/api/simstorage/*` endpoint including watching a real rebuild's
-progress advance across repeated status polls while it ran in the
-background.
+There's a real automated test suite, not just manual runs:
+
+```
+python3 -m unittest discover -s tests -v   # 15 tests
+```
+
+It boots a real dashboard server and a real mock Redfish server on
+random ports and hits every endpoint over actual HTTP (`http.client`,
+not by calling handler methods directly) — static file serving
+(including the path-traversal check), every OOB action, the simulated
+drill endpoint, an alert ingest/list roundtrip, and a full
+`/api/simstorage/*` lifecycle including **polling real HTTP responses
+until a background rebuild finishes**, which is the dashboard's one
+genuinely distinguishing capability over the CLI (see
+`storage_sim/README.md`'s "known limitations").
+
+Manual verification during the original build covered the same ground
+once; this suite makes it repeatable:
 
 ```
 python3 ../phase4-oob-lifecycle/redfish-mockup/redfish_mock_server.py --port 8443 &
