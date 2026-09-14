@@ -191,27 +191,52 @@ OS, 2 dedicated, blank disks for the mirror.
 
 ## Testing Status (honesty ledger — see CLAUDE.md's Honesty section)
 
-Three distinct tiers appear below, and they are not equivalent — see
-CLAUDE.md's Virtualization section:
+Three distinct tiers of "not real hardware" appear below, and they are not
+equivalent — see CLAUDE.md's Virtualization section:
 
 - **Simulation-tested**: exercised against a from-scratch software model
-  (storage_sim) with no real or virtual block device involved at all.
-- **Mock-tested**: exercised against a real, running mock service
-  (a Redfish server, a webhook receiver) that stands in for real
-  hardware/firmware, over real network/process I/O.
+  (`storage_sim`, `policy_sim`) with no real or virtual block device or
+  network interface involved at all — the "hardware" being modeled never
+  existed anywhere in the test.
+- **Mock-tested**: exercised against a real, running process that stands
+  in for real hardware/firmware (a Redfish HTTP server, a webhook
+  receiver), over a real socket/subprocess — the transport and code path
+  are real, only the thing on the other end is a stand-in.
 - **VM/hardware-tested**: exercised against the user's actual VirtualBox
-  VM or real hardware. **Nothing in this project has reached this tier
-  yet.**
+  VM or real physical hardware. **Nothing in this project has reached
+  this tier yet.**
 
-| Phase | Tier | What has been genuinely tested, and where |
+Every row below is additionally tagged with one of the four required
+classification labels (`IMPLEMENTED + TESTED`, `IMPLEMENTED + SIMULATION
+TESTED`, `IMPLEMENTED + NOT YET VALIDATED`, `NOT IMPLEMENTED`). Per
+CLAUDE.md's Honesty section and this session's explicit instruction,
+`IMPLEMENTED + TESTED` is reserved for something exercised against the
+*real* target it claims to work with (a real BMC, a real block device, a
+real kernel network stack) — mock- and simulation-tested code is always
+labeled `IMPLEMENTED + SIMULATION TESTED` here, never plain `TESTED`,
+even though every test asserting it actually ran and passed in this
+sandbox.
+
+| Feature | Classification | What has been genuinely tested, and where |
 | --- | --- | --- |
-| 1 — Storage/Boot (real scripts) | Simulation-tested (shell logic only) | `phase1-host-provisioning/scripts/*.sh` — `SIMULATE=1` dry runs only, in a cloud sandbox with **no real block devices**. Zero real `mdadm`/`sgdisk`/`grub-install` execution has occurred anywhere. |
-| 1 — Storage/Boot (RAID1 logic) | Simulation-tested (real, executed code) | `phase1-host-provisioning/storage_sim/` — 50 automated tests plus a scripted, asserting demo, all actually run: normal read/write, degraded mode, member fail/remove/add, background rebuild (including one interrupted by a second failure), silent-corruption detection + self-heal, `scrub`, and cross-process reassembly (stale-event-count exclusion, untrusted-role-state exclusion). This validates the *logic*; it is a software model, not mdadm, and says so throughout its own README. |
-| 2 — Networking | Simulation-tested (config) + Simulation-tested (shell logic) | `nftables.conf` syntax-validated against a real `nft` binary. VLAN/netns/diagnostic scripts are `SIMULATE=1` dry-run only — no real interface was ever created. |
-| 3 — Telemetry | Mock-tested (automated suite: 19 tests) | `phase3-telemetry/telemetryd/tests/` — SlidingWindow math, Prometheus textfile output, WebhookSink dispatch (including a genuine unreachable-endpoint failure path), and a full TelemetryDaemon integration run, all as real automated tests. Two of those tests exercise code paths the *original* manual verification never actually reached: the real (non-mock) sysfs-thermal-glob path (via a configurable `base` added specifically to make this testable — see `ThermalCollector`) and the real (non-mock) `/dev/kmsg`-tailing fault-detection path (against a real temp file standing in for kmsg). Real `smartctl`/real `/dev/kmsg`/real sysfs on an actual machine have still never been exercised (not installed/available in this sandbox). |
-| 4 — OOB/Redfish | Mock-tested (automated suite: 14 tests) | `phase4-oob-lifecycle/tests/` — every RedfishClient action and CLI command path against the mock server running in-process, plus a consistency check that `oob_control.py`'s `RESET_TYPE_MAP` and the mock server's own reset-type table can't silently drift apart, plus real CLI argument-validation and unreachable-endpoint error-handling tests. No real BMC or OpenBMC/QEMU instance has ever been used. |
-| 5 — Physical/DR | Simulation-tested (shell logic) + docs | A `SIMULATE=1`-only profiling script and written documentation. No physical cabling, thermal, or power measurement has been performed — there is no physical hardware. |
-| Frontend | Mock-tested (automated suite: 15 tests, real HTTP) | `frontend/tests/` — a real dashboard server and a real mock Redfish server, both on random ports, hit over actual HTTP (not direct handler calls): static serving + path-traversal check, every OOB action, the simulate-forced drill endpoint, an alerts ingest/list roundtrip, and a full `/api/simstorage/*` lifecycle including polling real HTTP responses until a background rebuild finishes. |
+| Phase 1 — real provisioning scripts (`00`–`06-*.sh`) | IMPLEMENTED + SIMULATION TESTED (shell logic only) | `phase1-host-provisioning/scripts/*.sh` — `SIMULATE=1` dry runs only, in a cloud sandbox with **no real block devices**. Zero real `mdadm`/`sgdisk`/`grub-install` execution has occurred anywhere. |
+| Phase 1 — `storage_sim` RAID1 logic | IMPLEMENTED + SIMULATION TESTED (real, executed code) | `phase1-host-provisioning/storage_sim/` — 74 automated tests plus a scripted, asserting demo, all actually run: normal read/write, degraded mode, member fail/remove/add, background rebuild (including one interrupted by a second failure and one by a clean shutdown), silent-corruption detection + self-heal (including the double-corruption/unrecoverable case), `scrub`, cross-process reassembly (stale-event-count exclusion, untrusted-role-state exclusion, corrupted-superblock skip), and a cooperative rebuild-stop race fix verified by a 15-iteration stress test. This validates the *logic*; it is a software model, not mdadm, and says so throughout its own README. |
+| Phase 1 — `RealBlockDevice` adapter | IMPLEMENTED + NOT YET VALIDATED (against a real device; SIMULATION TESTED against a stand-in) | `phase1-host-provisioning/storage_sim/tests/test_real_block_device.py` — 15 tests, all against a plain temp file standing in for a device, including `RAID1Array` running unmodified over two `RealBlockDevice` instances. Proves the safety-gating (dry-run default, three independent opt-ins required, hardcoded boot-disk denylist) and the I/O code path. Has **never** opened a real `/dev/sdX` — see `storage_sim/README.md`'s dedicated section. |
+| Phase 1 — `plan_from_lsblk.py` safe real-disk planner | IMPLEMENTED + TESTED (against synthetic `lsblk -J` fixtures — not a real disk enumeration) | `phase1-host-provisioning/scripts/tests/test_plan_from_lsblk.py` — 17 tests against hand-built JSON fixtures covering in-use detection (mountpoint/fstype/RO/partition anywhere in a disk's subtree) and the blank-count gate. Never run against this sandbox's own real `lsblk` output (no block devices to enumerate here); will be exercised for real only once the user supplies real `lsblk -J` output per this project's hard safety boundary. |
+| Phase 2 — `nftables.conf` (real config) | IMPLEMENTED + SIMULATION TESTED (syntax only) | Syntax-validated against a real `nft -c` binary (`make lint`). The ruleset has never been loaded (`nft -f`) or exercised against real traffic — loading it into this sandbox's own network namespace was attempted once and blocked by the harness's own security policy, so `policy_sim/` (below) was built instead of attempting a workaround. |
+| Phase 2 — `policy_sim` firewall decision logic | IMPLEMENTED + SIMULATION TESTED | `phase2-networking/policy_sim/` — 34 automated tests against a from-scratch Python model of the INPUT/FORWARD/OUTPUT chains and the token-bucket rate limiter, including a literal-text consistency check against `nftables.conf` itself so the two can't silently drift apart. No packet has ever actually traversed a real or virtual NIC under this ruleset. |
+| Phase 2 — VLAN/netns/diagnostic shell scripts | IMPLEMENTED + SIMULATION TESTED (shell logic only) | `SIMULATE=1` dry-run only — no real interface, VLAN, or network namespace was ever created. |
+| Phase 3 — `telemetryd.py` daemon | IMPLEMENTED + SIMULATION TESTED (automated suite: 29 tests) | `phase3-telemetry/telemetryd/tests/` — SlidingWindow math, Prometheus textfile output, WebhookSink dispatch (including a genuine unreachable-endpoint failure path), a full TelemetryDaemon integration run, `load_config()`/`parse_args()`/`main()` end-to-end (including clean Ctrl-C shutdown), all as real automated tests. Two tests exercise code paths the *original* manual verification never reached: the real (non-mock) sysfs-thermal-glob path (via a configurable `base` added to `ThermalCollector` specifically to make this testable) and the real (non-mock) `/dev/kmsg`-tailing fault-detection path (against a real temp file standing in for kmsg). Real `smartctl`/real `/dev/kmsg`/real sysfs on an actual machine have still never been exercised (not installed/available in this sandbox). |
+| Phase 4 — `oob_control.py` Redfish CLI | IMPLEMENTED + SIMULATION TESTED (mock-tested; automated suite: 22 tests) | `phase4-oob-lifecycle/tests/test_oob_control.py` — every RedfishClient action and CLI command path against `redfish_mock_server.py` running in-process, a consistency check that `RESET_TYPE_MAP` and the mock server's own reset-type table can't silently drift apart, CLI argument-validation (including missing `--base-url`/subcommand, env-var defaults, explicit-flag overrides), a genuine unreachable-endpoint error-handling path, and — by capturing the real `Authorization` header the mock server received — proof that HTTP Basic Auth is actually sent, not just parsed. No real BMC or OpenBMC/QEMU instance has ever been used. |
+| Phase 4 — `fault_drill.sh` fault-injection drill | IMPLEMENTED + SIMULATION TESTED (shell logic; automated suite: 7 tests) | `phase4-oob-lifecycle/tests/test_fault_drill.py` — runs the real script as a subprocess under `SIMULATE=1` and asserts the exact expected `mdadm`/`set-led` command sequence, in order, with every mdadm-looking line confirmed marked `(simulated)`, plus a parameterized run proving no hardcoded device-name fallback exists. The script's real-mode branch (actual `mdadm --fail` etc. against a real array) has never been exercised, and won't be without real/VM hardware. |
+| Phase 5 — Physical/DR | IMPLEMENTED + SIMULATION TESTED (shell logic) + docs | A `SIMULATE=1`-only thermal/power profiling script and written documentation (`docs/runbook.md`, `docs/cabling.md`, `docs/network-topology.md`). No physical cabling, thermal, or power measurement has been performed — there is no physical hardware. |
+| Frontend (`frontend/`) dashboard | IMPLEMENTED + SIMULATION TESTED (mock-tested; automated suite: 15 tests, real HTTP) | `frontend/tests/` — a real dashboard server and a real mock Redfish server, both on random ports, hit over actual HTTP (not direct handler calls): static serving + path-traversal check, every OOB action, the simulate-forced drill endpoint, an alerts ingest/list roundtrip, and a full `/api/simstorage/*` lifecycle including polling real HTTP responses until a background rebuild finishes. |
+| Real `mdadm`/`sgdisk`/GRUB integration on the user's VM | NOT IMPLEMENTED | Blocked on the user supplying real `lsblk -J` output after adding a third disk, per this project's hard safety boundary — no destructive storage command has been run, or will be run, against a guessed device name. |
+| Real OpenBMC/QEMU or physical BMC integration | NOT IMPLEMENTED | No OpenBMC/QEMU virtual BMC has been stood up in this sandbox; all Redfish testing to date is against the hand-written mock server, not a spec-compliant BMC implementation. |
+
+**Total automated tests, all actually run in this sandbox as of this
+session:** 198 (`make unit-test`) — storage_sim 74, plan_from_lsblk 17,
+policy_sim 34, telemetryd 29, oob_control+fault_drill 29, frontend 15.
 
 **Nothing above constitutes real hardware or real-VM validation.** The
 next real milestone is Phase 1 on the user's actual VirtualBox VM, which
