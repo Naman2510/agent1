@@ -41,8 +41,22 @@ echo "== Generating scheduler-dataset + held-out programs =="
 python3 scheduler/benchmarks/gen_scheduler_programs.py
 
 echo
-echo "== Assembling generated programs =="
-for f in sim/programs/scheduler/*.s; do
+echo "== Assembling this phase's own programs =="
+# Only the 18 files tb_scheduler_heldout_correctness.sv actually
+# references -- NOT a directory-wide glob. See
+# scripts/run_scheduler_correctness.sh's identical comment (and
+# CHANGELOG.md's Phase 17 entry) for why: sim/programs/scheduler/ is
+# shared with Phase 15/16's larger dynamic-scheduling demo programs,
+# and a blind `*.s` glob broke here the same way.
+STEMS=(
+  cpu_vecadd_n2 cpu_dot_n2 accel_vecadd_n2 accel_dot_n2
+  cpu_vecadd_n3 cpu_dot_n3 accel_vecadd_n3 accel_dot_n3
+  cpu_vecadd_n8 cpu_dot_n8 accel_vecadd_n8 accel_dot_n8
+  cpu_vecadd_n32 cpu_dot_n32 accel_vecadd_n32 accel_dot_n32
+  cpu_matmul_n1 accel_matmul_n1
+)
+for stem in "${STEMS[@]}"; do
+  f="sim/programs/scheduler/${stem}.s"
   python3 scripts/asm_to_hex.py "$f" -o "${f%.s}.hex" --words 512
 done
 

@@ -1015,3 +1015,62 @@ This is not a commit log — it records *why*, not just *what*.
   reframing), README.md/CHANGELOG.md/docs/architecture.md updated for
   Phase 16, Makefile gained
   `test_mixed_workload_correctness`/`run_mixed_workload_demo` targets.
+
+## Phase 17 — Final End-to-End Demo + Full Documentation (2026-09-14)
+
+- **Built `scripts/run_full_demo.sh` (`make demo`)**: runs every
+  phase's own verified test/build step, Phase 2 through Phase 16, in
+  order, then prints a consolidated summary of real headline numbers
+  read directly from each phase's own `results/*.md` report (never
+  hand-typed into the script). Phase 12's FPGA synthesis (this
+  project's slowest single step, and orthogonal to the scheduler
+  results) is skipped by default; `ARGS=--with-synthesis` includes it.
+
+- **Bug found and fixed: a real cross-phase regression, caught only by
+  running the whole pipeline together for the first time.**
+  `scripts/run_scheduler_correctness.sh` (Phase 13) and
+  `scripts/run_scheduler_heldout_correctness.sh` (Phase 14) both
+  glob-assembled every `.s` file in the shared
+  `sim/programs/scheduler/` directory with a word-count budget sized
+  for their own (small) programs. Phase 15/16 later added larger
+  dynamic-scheduling demo programs to that same shared directory; the
+  first full `make demo` run failed with
+  `error: program has 539 words, exceeds --words 512` when Phase 13's
+  script tried to assemble one of Phase 15's files it never actually
+  needed. This is exactly the class of bug a test suite run only
+  phase-by-phase cannot catch -- each phase's own tests pass in
+  isolation, and the interaction only shows up when everything runs
+  together. Fixed by having each script assemble only the specific
+  files its own testbench references (an explicit list, not a
+  directory glob) -- immune to whatever later phases add to that
+  directory; reconfirmed passing under both simulators, then
+  reconfirmed the full `make demo` run completes end-to-end with every
+  step passing.
+
+- **`docs/final_summary.md`**: the project's capstone document --
+  headline real findings from every phase (Phase 7's CPI through Phase
+  16's mixed-workload result), and this project's own honest
+  conclusion drawn from its OWN data: this accelerator design and
+  these three kernels give a learned scheduler only a narrow
+  opportunity to add value (one small corner of workload-size space),
+  not a broad "AI always wins" story -- stated plainly rather than
+  spun into a more exciting-sounding claim the measurements don't
+  support.
+
+- **Scope decision: the optional LLM layer was not built.** Reasoned
+  explicitly in `docs/final_summary.md` rather than silently skipped:
+  this simulated environment has no live general-purpose LLM API
+  credential for a running program to call at inference time, so an
+  "LLM decides the schedule" layer here could only ever be a fabricated
+  stand-in -- exactly what this project's own engineering rules (no
+  Python shortcut standing in for hardware, never claim what wasn't
+  measured) have refused to build for 16 phases. Phase 16's own finding
+  (this system has little room for any scheduler to add much value)
+  further argues against adding a far more expensive decision
+  mechanism on top of it without new justification.
+
+- README.md/docs/architecture.md updated for Phase 17 (all 17 phases
+  now checked complete); `results/*.md` reports reconfirmed unchanged
+  in substance (timestamps only) by the full `make demo` run.
+
+This is the final phase of the original 17-phase specification.

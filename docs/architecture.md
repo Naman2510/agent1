@@ -600,4 +600,45 @@ dominate every program's total so completely that the four programs'
 results would look nearly identical, obscuring rather than answering
 the question this phase asked.
 
-Later phases append their own sections here as they land.
+## Phase 17 — Final End-to-End Demo + Full Documentation
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** `scripts/run_full_demo.sh` (`make demo`) runs every
+phase's own verified test/build step in order -- Phase 2 through
+Phase 16 -- and prints a consolidated summary of real headline numbers
+pulled directly from each phase's own `results/*.md` report (never
+retyped by hand into the script, so the summary can't drift out of
+sync with what was actually measured). Phase 12's FPGA synthesis is
+skipped by default (it is this project's slowest single step and
+orthogonal to the scheduler results) and available via
+`ARGS=--with-synthesis`. `docs/final_summary.md` is the project's
+capstone document: headline findings from every phase, this project's
+own honest conclusion about where its AI scheduler actually helps
+(a narrow one), and why the specification's optional LLM layer was
+deliberately not built.
+
+**Real regression caught and fixed by running the whole pipeline
+together for the first time:** Phase 13's and Phase 14's own
+correctness scripts (`scripts/run_scheduler_correctness.sh`,
+`scripts/run_scheduler_heldout_correctness.sh`) glob-assembled every
+`.s` file in the shared `sim/programs/scheduler/` directory with a
+fixed word-count budget sized for their own programs. Once Phase 15/16
+added larger files to that same directory, the glob started trying (and
+failing) to assemble programs neither script actually needed. This is
+exactly the kind of cross-phase interaction a phase-by-phase test
+suite, run only phase-by-phase, cannot catch -- caught here by
+`scripts/run_full_demo.sh` itself, on its first real end-to-end run.
+Fixed by having each script assemble only the exact files its own
+testbench references, rather than glob the shared directory -- immune
+to whatever later phases add there. See `CHANGELOG.md`'s Phase 17
+entry.
+
+**Scope decision:** the LLM layer named as optional in the original
+specification was not built -- see `docs/final_summary.md` for the
+full reasoning (no live LLM credential available to this simulated
+environment to make a fabricated "AI decides" layer honest, and Phase
+16's own finding that this system has little room for ANY scheduler,
+however implemented, to add much value here).
+
+This is the final phase of the original 17-phase specification.

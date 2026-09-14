@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo demo
 
 help:
 	@echo "Available targets:"
@@ -62,6 +62,8 @@ help:
 	@echo "                 heterogeneous stream demo (+ 3 static baselines)"
 	@echo "  run_mixed_workload_demo - Phase 16: measure the dynamic scheduler at larger"
 	@echo "                 scale + write results/mixed_workloads_report.md"
+	@echo "  demo         - Phase 17: run the entire verified pipeline end-to-end"
+	@echo "                 (scripts/run_full_demo.sh; pass ARGS=--with-synthesis for Phase 12 too)"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -140,3 +142,6 @@ test_mixed_workload_correctness:
 
 run_mixed_workload_demo:
 	@python3 scheduler/runtime/run_mixed_workload_demo.py
+
+demo:
+	@./scripts/run_full_demo.sh $(ARGS)
