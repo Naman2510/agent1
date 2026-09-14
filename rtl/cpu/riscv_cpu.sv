@@ -120,7 +120,12 @@ module riscv_cpu
     .branch    (branch),
     .jal       (jal),
     .jalr      (jalr),
-    .illegal   (illegal)
+    .illegal   (illegal),
+    // Phase 10: ACCEL.* custom instructions target the SoC bus this
+    // single-cycle CPU doesn't have (it predates Phase 8's bus-master
+    // refactor and still uses its own internal dmem -- see
+    // docs/soc.md) -- deliberately left unconnected, not overlooked.
+    .accel_sel ()
   );
 
   // -----------------------------------------------------------------

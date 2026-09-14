@@ -40,7 +40,13 @@ fi
 echo
 echo "== Verilator =="
 VOUT=$(mktemp -d)
-verilator --binary --timing -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM \
+# -Wno-PINCONNECTEMPTY: riscv_cpu.sv (Phase 2) deliberately leaves
+# control_unit's Phase 10 `accel_sel` output unconnected -- this
+# single-cycle CPU predates the SoC bus that port exists to drive (see
+# riscv_cpu.sv's own comment at that instantiation) -- and an explicit
+# empty connection is exactly how SystemVerilog spells "intentionally
+# unconnected," not an oversight this warning class should flag.
+verilator --binary --timing -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY \
   --top-module tb_riscv_cpu "${RTL_FILES[@]}" "$TB" -o simv --Mdir "$VOUT" >/tmp/phase2_verilator_build.log 2>&1
 "$VOUT/simv" | tee /tmp/phase2_verilator.log
 rm -rf "$VOUT"

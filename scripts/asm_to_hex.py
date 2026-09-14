@@ -107,7 +107,22 @@ OPCODES = {
     "R": 0b0110011, "I": 0b0010011, "LOAD": 0b0000011, "STORE": 0b0100011,
     "BRANCH": 0b1100011, "LUI": 0b0110111, "AUIPC": 0b0010111,
     "JAL": 0b1101111, "JALR": 0b1100111,
+    "CUSTOM0": 0b0001011,  # Phase 10: ACCEL.* accelerator-control extension
 }
+
+# Phase 10 ACCEL.* instructions (docs/custom_extension.md). The three
+# START variants take no operands -- the accelerator's LEN register
+# still has to be set separately via an ordinary `sw` (see
+# sim/programs/soc/accel_custom_demo.s) -- and encode as opcode=CUSTOM0
+# with rd=rs1=rs2=funct7=0 (those R-type fields are simply unused by
+# this extension's hardware, see rtl/cpu/control_unit.sv's
+# OP_CUSTOM0 case).
+ACCEL_NOOP_OPS = {  # mnemonic -> funct3
+    "accel.vecadd": 0b000,
+    "accel.dot":    0b001,
+    "accel.matmul": 0b010,
+}
+F3_ACCEL_STAT = 0b011  # accel.stat rd (one operand: destination register)
 
 R_OPS = {  # mnemonic -> (funct3, funct7)
     "add": (0b000, 0b0000000), "sub": (0b000, 0b0100000),
@@ -269,6 +284,12 @@ def assemble(lines):
             rd = reg(ops[0])
             target = resolve_branch_target(ops[1], 21)
             words.append(enc_j(target, rd, OPCODES["JAL"]))
+        elif mnem in ACCEL_NOOP_OPS:
+            f3 = ACCEL_NOOP_OPS[mnem]
+            words.append(enc_r(0, 0, 0, f3, 0, OPCODES["CUSTOM0"]))
+        elif mnem == "accel.stat":
+            rd = reg(ops[0])
+            words.append(enc_r(0, 0, 0, F3_ACCEL_STAT, rd, OPCODES["CUSTOM0"]))
         elif mnem == "jalr":
             rd = reg(ops[0])
             if len(ops) == 3:

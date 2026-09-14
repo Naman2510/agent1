@@ -95,6 +95,7 @@ module id_ex_reg
   input  logic        jal_in,
   input  logic        jalr_in,
   input  logic        illegal_in,
+  input  logic [2:0]  accel_sel_in,  // Phase 10: see riscv_pkg.sv's ACCEL_SEL_*
   input  logic [31:0] instr_dbg_in,
   input  logic        valid_in,
 
@@ -118,6 +119,7 @@ module id_ex_reg
   output logic        jal_out,
   output logic        jalr_out,
   output logic        illegal_out,
+  output logic [2:0]  accel_sel_out,
   output logic [31:0] instr_dbg_out,
   output logic        valid_out
 );
@@ -144,6 +146,7 @@ module id_ex_reg
       jal_out        <= 1'b0;
       jalr_out       <= 1'b0;
       illegal_out    <= 1'b0;
+      accel_sel_out  <= ACCEL_SEL_NONE;
       instr_dbg_out  <= 32'b0;
       valid_out      <= 1'b0;
     end else if (flush) begin
@@ -167,6 +170,7 @@ module id_ex_reg
       jal_out        <= 1'b0;
       jalr_out       <= 1'b0;
       illegal_out    <= 1'b0;
+      accel_sel_out  <= ACCEL_SEL_NONE;
       instr_dbg_out  <= 32'b0;
       valid_out      <= 1'b0;
     end else begin
@@ -190,6 +194,7 @@ module id_ex_reg
       jal_out        <= jal_in;
       jalr_out       <= jalr_in;
       illegal_out    <= illegal_in;
+      accel_sel_out  <= accel_sel_in;
       instr_dbg_out  <= instr_dbg_in;
       valid_out      <= valid_in;
     end

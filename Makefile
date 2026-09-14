@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom
 
 help:
 	@echo "Available targets:"
@@ -33,6 +33,8 @@ help:
 	@echo "  test_accel   - Phase 9: run the accelerator unit test (direct MMIO)"
 	@echo "                 and the CPU-driven end-to-end demo (vector add,"
 	@echo "                 dot product, matrix multiply) under both simulators"
+	@echo "  test_accel_custom - Phase 10: run the ACCEL.* custom-instruction"
+	@echo "                 end-to-end demo under both simulators"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -69,3 +71,6 @@ sim_soc:
 
 test_accel:
 	@./scripts/run_sim_accel.sh
+
+test_accel_custom:
+	@./scripts/run_sim_accel_custom.sh

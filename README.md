@@ -77,6 +77,7 @@ make sim_soc                # Phase 8: assemble + run the top-level SoC testbenc
                               # (RAM/UART/GPIO through the real address-decoded bus)
 make test_accel              # Phase 9: accelerator unit test + CPU-driven end-to-end
                               # demo (vector add, dot product, matrix multiply)
+make test_accel_custom       # Phase 10: ACCEL.* custom instruction end-to-end demo
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -104,7 +105,7 @@ container with no FPGA or other physical hardware attached.
 - `docs/hazards.md` — data/load-use/control hazard handling, forwarding, stalling, flush, and the directed tests + waveforms that verify them (Phase 6).
 - [`docs/soc.md`](docs/soc.md) — SoC memory map, peripherals, and the CPU's bus-master refactor (Phase 8).
 - [`docs/accelerator.md`](docs/accelerator.md) — accelerator architecture, register interface, and the two real bugs found building/verifying it (Phase 9).
-- `docs/custom_extension.md` — custom RISC-V instruction encoding (Phase 10+).
+- [`docs/custom_extension.md`](docs/custom_extension.md) — the ACCEL.* custom RISC-V instructions: encoding, what they replace, and why some accelerator registers deliberately aren't covered (Phase 10).
 - `docs/scheduler.md` — AI scheduler design (Phase 13+).
 - `docs/benchmarking.md` — benchmark methodology and results (Phase 11+).
 - `docs/synthesis.md` — synthesis methodology and resource estimates (Phase 12+).
@@ -131,7 +132,7 @@ Tracked phase-by-phase; each phase below is only checked once it compiles, simul
 - [x] Phase 7 — Performance counters / CPI
 - [x] Phase 8 — SoC (memory map, peripherals)
 - [x] Phase 9 — Hardware accelerator RTL
-- [ ] Phase 10 — Custom RISC-V extension for accelerator control
+- [x] Phase 10 — Custom RISC-V extension for accelerator control
 - [ ] Phase 11 — CPU vs accelerator benchmarking
 - [ ] Phase 12 — FPGA synthesis resource estimates
 - [ ] Phase 13 — AI workload scheduler (trained model)

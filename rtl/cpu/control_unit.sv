@@ -35,7 +35,8 @@ module control_unit
   output logic       branch,
   output logic       jal,
   output logic       jalr,
-  output logic       illegal
+  output logic       illegal,
+  output logic [2:0] accel_sel   // Phase 10: see riscv_pkg.sv's ACCEL_SEL_*
 );
 
   // ALU op is shared by OP and OP-IMM; see header comment.
@@ -68,6 +69,7 @@ module control_unit
     jal        = 1'b0;
     jalr       = 1'b0;
     illegal    = 1'b0;
+    accel_sel  = ACCEL_SEL_NONE;
 
     case (opcode)
       OP_R: begin
@@ -144,6 +146,48 @@ module control_unit
         alu_op     = ALU_ADD; // ALU computes rs1 + imm; top level masks bit0
         jalr       = 1'b1;
         result_src = RESULT_PC4;
+      end
+
+      OP_CUSTOM0: begin
+        // Phase 10: ACCEL.* custom accelerator-control instructions.
+        // See docs/custom_extension.md for the encoding and
+        // rtl/cpu/riscv_cpu_pipeline.sv's MEM stage for how accel_sel
+        // is consumed -- this instruction's real destination address
+        // and (for the START variants) its data are both HARDWIRED,
+        // not computed by the ALU or read from rs2, so alu_src_a/
+        // alu_src_b/alu_op/imm_type are simply left at their harmless
+        // defaults above (their result is never observed for this
+        // opcode -- see the MEM-stage override).
+        case (funct3)
+          F3_ACCEL_VECADD: begin
+            mem_write = 1'b1;
+            accel_sel = ACCEL_SEL_VECADD;
+          end
+          F3_ACCEL_DOT: begin
+            mem_write = 1'b1;
+            accel_sel = ACCEL_SEL_DOT;
+          end
+          F3_ACCEL_MATMUL: begin
+            mem_write = 1'b1;
+            accel_sel = ACCEL_SEL_MATMUL;
+          end
+          F3_ACCEL_STAT: begin
+            // Reads the accelerator's STATUS register into rd, reusing
+            // the existing RESULT_MEM writeback path -- functionally
+            // identical to a LW's timing (including the load-use
+            // hazard the hazard_unit already detects via mem_read),
+            // just with a hardwired address instead of rs1+imm.
+            reg_write  = 1'b1;
+            mem_read   = 1'b1;
+            result_src = RESULT_MEM;
+            accel_sel  = ACCEL_SEL_STAT;
+          end
+          default: begin
+            // funct3 values 100-111 are not defined for this custom-0
+            // extension: diagnose rather than silently do nothing.
+            illegal = 1'b1;
+          end
+        endcase
       end
 
       default: begin

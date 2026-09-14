@@ -161,13 +161,15 @@ module riscv_cpu_pipeline
   logic [2:0] imm_type_id;
   logic [3:0] alu_op_id;
   logic [1:0] result_src_id;
+  logic [2:0] accel_sel_id; // Phase 10: see riscv_pkg.sv's ACCEL_SEL_*
 
   control_unit control_inst (
     .opcode(opcode_id), .funct3(funct3_id), .funct7(funct7_id),
     .reg_write(reg_write_id), .alu_src_a(alu_src_a_id), .alu_src_b(alu_src_b_id),
     .imm_type(imm_type_id), .alu_op(alu_op_id),
     .mem_read(mem_read_id), .mem_write(mem_write_id), .result_src(result_src_id),
-    .branch(branch_id), .jal(jal_id), .jalr(jalr_id), .illegal(illegal_id)
+    .branch(branch_id), .jal(jal_id), .jalr(jalr_id), .illegal(illegal_id),
+    .accel_sel(accel_sel_id)
   );
 
   logic [31:0] rs1_data_id, rs2_data_id;
@@ -224,6 +226,7 @@ module riscv_cpu_pipeline
   logic        branch_ex, jal_ex, jalr_ex, illegal_ex, valid_ex;
   logic [3:0]  alu_op_ex;
   logic [1:0]  result_src_ex;
+  logic [2:0]  accel_sel_ex;
 
   id_ex_reg id_ex_inst (
     .clk(clk), .rst_n(rst_n), .flush(id_ex_flush),
@@ -234,7 +237,8 @@ module riscv_cpu_pipeline
     .reg_write_in(reg_write_id), .alu_src_a_in(alu_src_a_id), .alu_src_b_in(alu_src_b_id),
     .alu_op_in(alu_op_id), .mem_read_in(mem_read_id), .mem_write_in(mem_write_id),
     .result_src_in(result_src_id), .branch_in(branch_id), .jal_in(jal_id),
-    .jalr_in(jalr_id), .illegal_in(illegal_id), .instr_dbg_in(instr_id), .valid_in(valid_id),
+    .jalr_in(jalr_id), .illegal_in(illegal_id), .accel_sel_in(accel_sel_id),
+    .instr_dbg_in(instr_id), .valid_in(valid_id),
 
     .pc_out(pc_ex), .pc_plus4_out(pc_plus4_ex),
     .rs1_data_out(rs1_data_ex), .rs2_data_out(rs2_data_ex), .imm_out_out(imm_out_ex),
@@ -243,7 +247,8 @@ module riscv_cpu_pipeline
     .reg_write_out(reg_write_ex), .alu_src_a_out(alu_src_a_ex), .alu_src_b_out(alu_src_b_ex),
     .alu_op_out(alu_op_ex), .mem_read_out(mem_read_ex), .mem_write_out(mem_write_ex),
     .result_src_out(result_src_ex), .branch_out(branch_ex), .jal_out(jal_ex),
-    .jalr_out(jalr_ex), .illegal_out(illegal_ex), .instr_dbg_out(instr_ex), .valid_out(valid_ex)
+    .jalr_out(jalr_ex), .illegal_out(illegal_ex), .accel_sel_out(accel_sel_ex),
+    .instr_dbg_out(instr_ex), .valid_out(valid_ex)
   );
 
   // ===================================================================
@@ -356,6 +361,7 @@ module riscv_cpu_pipeline
   logic [4:0]  rd_mem;
   logic        reg_write_mem, mem_read_mem, mem_write_mem, illegal_mem, valid_mem;
   logic [1:0]  result_src_mem;
+  logic [2:0]  accel_sel_mem;
 
   // rs2_data_fwd (not the raw rs2_data_ex) is what SW's store data must
   // carry forward -- a store whose data operand was itself just
@@ -366,20 +372,68 @@ module riscv_cpu_pipeline
     .pc_plus4_in(pc_plus4_ex), .alu_result_in(alu_result_ex), .rs2_data_in(rs2_data_fwd),
     .rd_addr_in(rd_ex), .reg_write_in(reg_write_ex), .mem_read_in(mem_read_ex),
     .mem_write_in(mem_write_ex), .result_src_in(result_src_ex), .illegal_in(illegal_ex),
-    .instr_dbg_in(instr_ex), .valid_in(valid_ex),
+    .accel_sel_in(accel_sel_ex), .instr_dbg_in(instr_ex), .valid_in(valid_ex),
 
     .pc_plus4_out(pc_plus4_mem), .alu_result_out(alu_result_mem), .rs2_data_out(rs2_data_mem),
     .rd_addr_out(rd_mem), .reg_write_out(reg_write_mem), .mem_read_out(mem_read_mem),
     .mem_write_out(mem_write_mem), .result_src_out(result_src_mem), .illegal_out(illegal_mem),
-    .instr_dbg_out(instr_mem), .valid_out(valid_mem)
+    .accel_sel_out(accel_sel_mem), .instr_dbg_out(instr_mem), .valid_out(valid_mem)
   );
 
   // ===================================================================
   // MEM stage -- drives the external data bus instead of an internal
   // dmem instance (Phase 8; see module header comment).
+  //
+  // Phase 10: an ACCEL.* custom instruction (accel_sel_mem !=
+  // ACCEL_SEL_NONE) targets a fixed accelerator register address with
+  // data derived purely from WHICH sub-opcode it is -- never from the
+  // ALU-computed address or an rs2 register value the way an ordinary
+  // LW/SW does. This mux substitutes that hardwired address/data pair
+  // in place of alu_result_mem/rs2_data_mem for exactly those four
+  // instructions; every other instruction takes the unchanged Phase
+  // 5-9 path (accel_sel_mem == ACCEL_SEL_NONE, the default for every
+  // opcode control_unit.sv doesn't explicitly set it for). See
+  // docs/custom_extension.md.
   // ===================================================================
-  assign dbus_addr      = alu_result_mem;
-  assign dbus_wdata     = rs2_data_mem;
+  // The {opcode[1:0], start} bit layout written here (bits[2:1]=opcode,
+  // bit0=START) matches rtl/accelerator/accelerator.sv's CTRL register
+  // exactly -- see that module's header comment. This custom extension
+  // is intentionally, tightly coupled to that one peripheral's control
+  // protocol (the whole point of a *custom* instruction), so the
+  // opcode encoding is deliberately duplicated here rather than shared
+  // via the package: a real custom RISC-V instruction's hardware
+  // behavior for a specific accelerator is expected to be baked into
+  // the CPU, not parameterized around a peripheral that might change.
+  logic [31:0] accel_addr_ovr, accel_wdata_ovr;
+  always_comb begin
+    unique case (accel_sel_mem)
+      ACCEL_SEL_VECADD: begin
+        accel_addr_ovr  = ACCEL_CTRL_ADDR;
+        accel_wdata_ovr = {29'b0, 2'b01, 1'b1}; // opcode=01 (OP_VECADD), start=1
+      end
+      ACCEL_SEL_DOT: begin
+        accel_addr_ovr  = ACCEL_CTRL_ADDR;
+        accel_wdata_ovr = {29'b0, 2'b10, 1'b1}; // opcode=10 (OP_DOT), start=1
+      end
+      ACCEL_SEL_MATMUL: begin
+        accel_addr_ovr  = ACCEL_CTRL_ADDR;
+        accel_wdata_ovr = {29'b0, 2'b11, 1'b1}; // opcode=11 (OP_MATMUL), start=1
+      end
+      ACCEL_SEL_STAT: begin
+        accel_addr_ovr  = ACCEL_STATUS_ADDR;
+        accel_wdata_ovr = 32'b0; // unused: this variant reads, never writes
+      end
+      default: begin
+        accel_addr_ovr  = 32'b0;
+        accel_wdata_ovr = 32'b0;
+      end
+    endcase
+  end
+
+  wire accel_active = (accel_sel_mem != ACCEL_SEL_NONE);
+
+  assign dbus_addr      = accel_active ? accel_addr_ovr  : alu_result_mem;
+  assign dbus_wdata     = accel_active ? accel_wdata_ovr : rs2_data_mem;
   assign dbus_mem_read  = mem_read_mem;
   assign dbus_mem_write = mem_write_mem;
 

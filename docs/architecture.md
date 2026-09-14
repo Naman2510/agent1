@@ -344,4 +344,41 @@ as real verification tools rather than formalities -- 11 substantive
 bugs found and fixed across Phases 2-9 now, every one documented rather
 than glossed over.
 
+## Phase 10 — Custom RISC-V Extension for Accelerator Control
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** four `ACCEL.*` instructions (`accel.vecadd`,
+`accel.dot`, `accel.matmul`, `accel.stat rd`) on RISC-V's reserved
+custom-0 opcode, decoded by `control_unit.sv` into a 3-bit `accel_sel`
+signal threaded through `id_ex_reg`/`ex_mem_reg` alongside the ordinary
+control signals, consumed by one new MEM-stage mux in
+`riscv_cpu_pipeline.sv` that substitutes a hardwired address/data pair
+for the ordinary ALU-computed one. See `docs/custom_extension.md` for
+the full design rationale, especially why this extension deliberately
+does NOT cover every accelerator register (only `CTRL`'s start pulse
+and `STATUS`'s read, the two with fixed address/data per operation).
+
+**Verification:** `sim/programs/soc/accel_custom_demo.s` is
+deliberately a near-line-for-line copy of Phase 9's `accel_demo.s`,
+with only the CTRL-write and STATUS-read instructions swapped for
+their `ACCEL.*` equivalents, so a pass on both proves the custom
+extension reaches the *same* accelerator behavior through a different
+instruction path. Full Phase 2-9 regression re-run and clean after this
+change (touching `control_unit.sv`'s port list and two shared pipeline
+registers affects every instruction that flows through them).
+
+**One build-tooling wrinkle, documented rather than silently worked
+around:** adding a new `control_unit` output port required Phase 2's
+single-cycle CPU (`riscv_cpu.sv`, which shares `control_unit.sv` but
+predates the SoC bus this extension targets) to explicitly leave the
+new port unconnected. Verilator's default lint flagged this two
+different ways in succession (`PINMISSING` for the omitted port, then
+`PINCONNECTEMPTY` for the explicit empty connection that fixed the
+first warning) -- resolved by explicitly connecting the port to nothing
+(the correct way to spell "intentionally unconnected" in SystemVerilog)
+and suppressing the resulting, now-expected `PINCONNECTEMPTY` warning
+in `scripts/run_sim_phase2.sh`'s Verilator invocation, with a comment
+explaining why.
+
 Later phases append their own sections here as they land.

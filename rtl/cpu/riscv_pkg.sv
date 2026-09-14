@@ -28,6 +28,38 @@ package riscv_pkg;
   parameter logic [6:0] OP_JAL    = 7'b1101111; // JAL
   parameter logic [6:0] OP_JALR   = 7'b1100111; // JALR
 
+  // Phase 10: custom accelerator-control extension. 0001011 is the
+  // "custom-0" opcode the RISC-V spec sets aside for exactly this
+  // purpose (see docs/riscv.md section 3 intro), so it cannot collide
+  // with any standard RV32I encoding in the table above.
+  parameter logic [6:0] OP_CUSTOM0 = 7'b0001011;
+
+  // OP_CUSTOM0 funct3 sub-opcodes -- see docs/custom_extension.md.
+  parameter logic [2:0] F3_ACCEL_VECADD = 3'b000; // ACCEL.VECADD
+  parameter logic [2:0] F3_ACCEL_DOT    = 3'b001; // ACCEL.DOT
+  parameter logic [2:0] F3_ACCEL_MATMUL = 3'b010; // ACCEL.MATMUL
+  parameter logic [2:0] F3_ACCEL_STAT   = 3'b011; // ACCEL.STAT rd
+
+  // Fixed accelerator register addresses these instructions target
+  // directly (see rtl/accelerator/accelerator.sv, docs/soc.md). Unlike
+  // the SoC memory map in general (a microarchitectural choice of this
+  // implementation), these two specific addresses ARE architectural
+  // for this custom extension: they are baked into the ACCEL.*
+  // instructions' hardware behavior, not just a convention software
+  // happens to follow.
+  parameter logic [31:0] ACCEL_CTRL_ADDR   = 32'h3000_0000;
+  parameter logic [31:0] ACCEL_STATUS_ADDR = 32'h3000_0004;
+
+  // accel_sel: threaded ID->EX->MEM to tell the MEM stage which (if
+  // any) hardwired address/data pair to substitute for the ordinary
+  // ALU-computed address / rs2 store-data path -- see
+  // rtl/cpu/riscv_cpu_pipeline.sv's MEM-stage section.
+  parameter logic [2:0] ACCEL_SEL_NONE   = 3'b000; // not an ACCEL.* instruction
+  parameter logic [2:0] ACCEL_SEL_VECADD = 3'b001;
+  parameter logic [2:0] ACCEL_SEL_DOT    = 3'b010;
+  parameter logic [2:0] ACCEL_SEL_MATMUL = 3'b011;
+  parameter logic [2:0] ACCEL_SEL_STAT   = 3'b100;
+
   // ---------------------------------------------------------------------
   // Internal ALU operation codes (microarchitectural, not ISA-visible)
   // ---------------------------------------------------------------------

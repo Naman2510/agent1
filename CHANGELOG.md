@@ -525,3 +525,66 @@ This is not a commit log — it records *why*, not just *what*.
   simulators; full Phase 2-8 regression (`tb_soc.sv`'s RAM/UART/GPIO
   checks included) re-verified clean after wiring the accelerator onto
   the shared bus.
+
+## Phase 10 — Custom RISC-V Extension for Accelerator Control (2026-09-14)
+
+- **Added four `ACCEL.*` instructions** (`accel.vecadd`, `accel.dot`,
+  `accel.matmul`, `accel.stat rd`) on RISC-V's custom-0 opcode
+  (`0001011`, reserved by the spec for exactly this purpose). These
+  replace the two most repetitive parts of Phase 9's MMIO accelerator
+  driver -- hand-encoding `CTRL`'s `{opcode, START}` bit pattern, and
+  knowing `STATUS`'s offset -- with one instruction each; every other
+  accelerator register (`LEN`, `VECA`/`VECB`, `RESULT`/`VECOUT`) is
+  deliberately left as ordinary `LW`/`SW`, since those accesses carry
+  genuinely variable addresses/data a fixed-encoding instruction can't
+  usefully shortcut. See `docs/custom_extension.md` for the full
+  rationale.
+
+- **Implementation reuses every existing pipeline mechanism rather than
+  adding new ones.** `control_unit.sv` decodes `OP_CUSTOM0`+`funct3`
+  into a new 3-bit `accel_sel` signal (`riscv_pkg.sv`'s new
+  `ACCEL_SEL_*` constants) alongside the SAME `mem_read`/`mem_write`/
+  `reg_write`/`result_src` signals an ordinary load or store would set
+  -- so forwarding, the load-use hazard detector, and the MEM/WB
+  writeback mux all handle these instructions correctly with zero
+  changes of their own (`accel.stat` behaves exactly like a `LW` to the
+  hazard unit). `accel_sel` is threaded through `id_ex_reg` and
+  `ex_mem_reg` like any other control signal (forced to
+  `ACCEL_SEL_NONE` on reset/flush, so a bubble is never mistaken for an
+  `ACCEL.*` instruction). The only new logic is one MEM-stage mux in
+  `riscv_cpu_pipeline.sv` substituting a hardwired address/data pair
+  for `alu_result_mem`/`rs2_data_mem` when `accel_sel_mem !=
+  ACCEL_SEL_NONE`; every other instruction takes the unchanged
+  pre-Phase-10 path.
+
+- **Build-tooling wrinkle found and fixed (not a functional bug):**
+  adding a new `control_unit` output port meant `riscv_cpu.sv` (Phase
+  2's single-cycle CPU, which shares `control_unit.sv` but predates the
+  SoC bus this extension targets and has nothing to drive with it) had
+  to explicitly leave the port unconnected. Verilator's default lint
+  flagged this twice in a row: first `%Warning-PINMISSING` for simply
+  omitting the port, then `%Warning-PINCONNECTEMPTY` for the explicit
+  `.accel_sel()` connection that fixed the first warning -- both
+  correctly describing the same underlying fact (an intentionally
+  unconnected port) from two different angles. Resolved by keeping the
+  explicit empty connection (the SystemVerilog-correct way to spell
+  "intentional," not an oversight) and suppressing
+  `PINCONNECTEMPTY` specifically in `scripts/run_sim_phase2.sh`'s
+  Verilator invocation, with a comment explaining why -- not by
+  disabling the warning class project-wide, since it remains a useful
+  check everywhere else.
+
+- **Added `sim/programs/soc/accel_custom_demo.s`**, deliberately a
+  near-line-for-line copy of Phase 9's `accel_demo.s` with only the
+  CTRL-write and STATUS-read instructions swapped for their `ACCEL.*`
+  equivalents (same operands, same expected VECADD/DOT/MATMUL results)
+  -- so the diff between the two files IS the demonstration of what
+  this extension buys, and a pass on both testbenches proves the
+  extension reaches the *same* accelerator behavior through a different
+  instruction path, not a separately-verified, potentially-divergent
+  one. Verified via `sim/testbenches/tb_soc_accel_custom.sv`.
+
+- **Result:** `make test_accel_custom` passes under both simulators;
+  full Phase 2-9 regression re-verified clean after the shared
+  `control_unit.sv`/`id_ex_reg.sv`/`ex_mem_reg.sv` changes (every
+  instruction in every existing test flows through those modules).

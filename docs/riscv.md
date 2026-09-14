@@ -114,9 +114,11 @@ hardware. Phase 2's immediate generator implements exactly this table.
 ## 3. Supported Instructions (Phase 1 subset)
 
 All instructions below are standard, unmodified RV32I encodings — no
-custom encodings are introduced yet (that happens in Phase 10, in an
-opcode space reserved by the spec for custom extensions, so it cannot
-collide with anything in this table).
+custom encodings are introduced in this Phase 1 subset. Phase 10 later
+adds four `ACCEL.*` instructions on RISC-V's custom-0 opcode
+(`0001011`), reserved by the spec for exactly this purpose so it cannot
+collide with anything in this table — see `docs/custom_extension.md`
+for that encoding.
 
 ### 3.1 R-type — Register-Register ALU ops
 

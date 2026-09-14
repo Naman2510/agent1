@@ -17,6 +17,11 @@
 //   rd_addr     - destination register, needed by MEM/WB and WB.
 //   reg_write, mem_read, mem_write, result_src, illegal - control
 //   signals MEM and WB still need to act on this instruction.
+//   accel_sel   - Phase 10: which (if any) ACCEL.* custom instruction
+//                 this is, consumed by the MEM stage's address/data
+//                 override mux (see riscv_cpu_pipeline.sv). Threaded
+//                 straight through from id_ex_reg unchanged, same
+//                 pattern as `valid` below.
 //
 // branch/jal/jalr and funct3 stop here: EX is where they were consumed
 // (to decide whether to redirect the PC -- see riscv_cpu_pipeline.sv),
@@ -46,6 +51,7 @@ module ex_mem_reg
   input  logic        mem_write_in,
   input  logic [1:0]  result_src_in,
   input  logic        illegal_in,
+  input  logic [2:0]  accel_sel_in,  // Phase 10: see riscv_pkg.sv's ACCEL_SEL_*
   input  logic [31:0] instr_dbg_in,
   input  logic        valid_in,
 
@@ -58,6 +64,7 @@ module ex_mem_reg
   output logic        mem_write_out,
   output logic [1:0]  result_src_out,
   output logic        illegal_out,
+  output logic [2:0]  accel_sel_out,
   output logic [31:0] instr_dbg_out,
   output logic        valid_out
 );
@@ -73,6 +80,7 @@ module ex_mem_reg
       mem_write_out  <= 1'b0;
       result_src_out <= RESULT_ALU;
       illegal_out    <= 1'b0;
+      accel_sel_out  <= ACCEL_SEL_NONE;
       instr_dbg_out  <= 32'b0;
       valid_out      <= 1'b0;
     end else begin
@@ -85,6 +93,7 @@ module ex_mem_reg
       mem_write_out  <= mem_write_in;
       result_src_out <= result_src_in;
       illegal_out    <= illegal_in;
+      accel_sel_out  <= accel_sel_in;
       instr_dbg_out  <= instr_dbg_in;
       valid_out      <= valid_in;
     end
