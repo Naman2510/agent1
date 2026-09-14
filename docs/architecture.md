@@ -203,4 +203,34 @@ test caught it immediately (6 of 19 checks failed, every one exactly a
 loosening or removing the check. See `docs/pipeline.md` and
 `CHANGELOG.md` for the full account.
 
+## Phase 6 — Pipeline Hazards
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** `rtl/pipeline/forwarding_unit.sv` and
+`rtl/pipeline/hazard_unit.sv`, wired into `riscv_cpu_pipeline.sv`
+(evolved in place, not a new module -- see `docs/hazards.md` for why
+that's the right call here unlike Phase 2 -> Phase 5). Data-hazard
+forwarding, the load-use stall, and branch/JAL/JALR flush are all
+implemented and verified with directed tests and real GTKWave waveform
+data.
+
+**Verification for this phase found two real bugs, in two different
+places, both documented in full rather than smoothed over:**
+
+1. A genuine RTL gap: neither the EX-stage forwarding unit nor the
+   register file's ordinary same-cycle behavior correctly handles a RAW
+   dependency exactly 2 instructions apart -- caught by a load computing
+   the wrong address, fixed with a parameterized write-to-read bypass in
+   `regfile.sv` that is carefully scoped to never affect the
+   single-cycle CPU (where it would create a combinational loop).
+2. A test methodology bug: reusing Phase 3's "illegal opcode ever seen"
+   check verbatim against a pipelined CPU fails on 100% of programs,
+   because ordinary pipeline bubbles decode as illegal opcodes by
+   construction -- true and harmless for a pipeline, unlike the
+   single-cycle CPU this check was designed for.
+
+Both are in `docs/hazards.md` and `CHANGELOG.md` with full root-cause
+explanations, not just "fixed it."
+
 Later phases append their own sections here as they land.

@@ -264,3 +264,72 @@ This is not a commit log — it records *why*, not just *what*.
   under Icarus Verilog and Verilator (`make sim_pipeline`). Data
   hazards closer than 3 instructions apart, and all branches/jumps,
   are known-unhandled by design and are Phase 6's job.
+
+## Phase 6 — Pipeline Hazards (2026-09-13)
+
+- **Decision: evolve `riscv_cpu_pipeline.sv` in place, not a third
+  top-level module.** Unlike Phase 2 -> Phase 5 (genuinely different
+  microarchitectures kept side by side on purpose), the task frames
+  hazard handling as completing the Phase 5 pipeline, not building
+  another one. Phase 5's own straight-line, branch-free test
+  (`sim/programs/pipeline_straightline.s`) was specifically constructed
+  to have zero hazards, so it continues to pass completely unchanged as
+  a standing regression check that Phase 6 never altered hazard-free
+  behavior (now also asserts `dbg_stall`/`dbg_flush` are never raised
+  for that program, added as part of this phase).
+
+- **Added `rtl/pipeline/forwarding_unit.sv`** (EX/MEM and MEM/WB
+  forwarding into both ALU inputs, the branch comparison, and a store's
+  data operand) **and `rtl/pipeline/hazard_unit.sv`** (load-use stall
+  detection; branch/JAL/JALR flush), plus `stall`/`flush` control inputs
+  on `if_id_reg.sv` and `id_ex_reg.sv`.
+
+- **Bug found and fixed: forwarding_unit and the register file together
+  left a gap at a RAW dependency exactly 2 instructions apart** (2
+  independent instructions in between). Neither `EX/MEM` nor `MEM/WB`
+  forwarding can reach it -- by the time the consumer is in EX, the
+  producer has already fully retired and no longer exists in any
+  pipeline register -- and the register file's own read races the
+  producer's write on the same clock edge for exactly this gap (the
+  same class of same-edge race Phase 5 found for a different gap
+  distance). Caught by `load_use_hazard.s` computing a load address of
+  `0` instead of `0x40`. Fixed with a new `BYPASS_WRITE_TO_READ`
+  parameter on `regfile.sv` (default off, a same-cycle write-to-read
+  bypass implemented as a plain combinational address comparison, not
+  reliant on event ordering), enabled only for the pipelined CPU's
+  regfile instance. It must stay off for the single-cycle CPU
+  (`riscv_cpu.sv`): there, a self-referential instruction like `add
+  x1,x1,x2` would close the bypass into a combinational loop through
+  that instruction's own ALU output, since read and write there belong
+  to the same instruction in the same cycle rather than two independent
+  ones. Full explanation in `regfile.sv`'s header comment and
+  `docs/hazards.md` §1.1.
+
+- **Bug found and fixed in the test methodology, not the RTL: a sticky
+  "illegal opcode ever seen" check (reused verbatim from Phase 3) fails
+  100% of pipelined programs regardless of correctness.** A pipeline
+  bubble (all-zero pipeline-register state -- present during fill,
+  every flush, and every stall) decodes to opcode `0000000`, which
+  `control_unit.sv` correctly flags `illegal` since it isn't a
+  supported opcode -- correct for the single-cycle CPU (which never has
+  bubbles) but not a meaningful check for a pipeline (which always
+  does). Removed from `tb_pipeline_directed_test.sv`; verification
+  relies solely on the x31 pass/fail convention, matching Phase 5's
+  `tb_pipeline.sv`.
+
+- **Added directed tests** (`sim/programs/pipeline_tests/`: forwarding
+  at every reachable gap, the load-use stall including a load feeding a
+  store operand and a branch condition, and control-hazard flush for
+  taken/not-taken branches and JAL/JALR) and a waveform generation
+  script (`scripts/generate_waveforms.sh`, `make waves`) producing real
+  `.vcd` files for GTKWave, since this container has no display to run
+  it interactively. `docs/hazards.md` documents actual signal
+  transition timestamps read out of those generated files (the
+  load-use stall is confirmed exactly one clock period wide; flush
+  fires once per taken branch/JAL/JALR).
+
+- **Result:** all 3 directed hazard test programs pass under both
+  Icarus Verilog and Verilator (`make test_hazards`); Phase 5's
+  hazard-free regression test still passes unchanged; Phases 2-4 are
+  unaffected (`regfile.sv`'s new parameter defaults to its old,
+  unparameterized behavior).

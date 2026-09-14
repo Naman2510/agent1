@@ -8,11 +8,15 @@
 // against hand-computed expected values, the same style as Phase 2's
 // tb_riscv_cpu.sv.
 //
-// This test program deliberately contains no branches or jumps (see its
-// header comment and docs/pipeline.md): Phase 5 does not yet flush
-// wrong-path instructions after a taken redirect, so the testbench runs
-// for a precisely bounded cycle count instead of relying on a `j halt`
-// parking loop.
+// This test program deliberately contains no branches or jumps: it
+// predates Phase 6's forwarding/stall/flush additions to this same
+// module (which does now handle them -- see
+// sim/programs/pipeline_tests/ and docs/pipeline.md for the tests that
+// exercise that), and is kept exactly as originally written as a
+// standing regression check that Phase 6's changes never altered
+// hazard-free straight-line execution. dbg_stall/dbg_flush (added in
+// Phase 6) are connected below for completeness but not asserted on by
+// this test, since a program with no hazards never drives either.
 
 `timescale 1ns/1ps
 
@@ -30,6 +34,7 @@ module tb_pipeline;
   logic [4:0]  dbg_rd_addr;
   logic [31:0] dbg_rd_data;
   logic        dbg_illegal;
+  logic        dbg_stall, dbg_flush;
 
   riscv_cpu_pipeline #(
     .IMEM_INIT_FILE("sim/programs/pipeline_straightline.hex")
@@ -41,7 +46,7 @@ module tb_pipeline;
     .dbg_mem_instr(dbg_mem_instr),
     .dbg_wb_instr(dbg_wb_instr),
     .dbg_reg_write(dbg_reg_write), .dbg_rd_addr(dbg_rd_addr), .dbg_rd_data(dbg_rd_data),
-    .dbg_illegal(dbg_illegal)
+    .dbg_illegal(dbg_illegal), .dbg_stall(dbg_stall), .dbg_flush(dbg_flush)
   );
 
   initial begin
@@ -50,6 +55,16 @@ module tb_pipeline;
   end
 
   int errors = 0;
+
+  // This program has no data hazards closer than 3 instructions and no
+  // branches/jumps at all (see its header comment), so hazard_unit
+  // should never assert either signal here -- a standing regression
+  // check that Phase 6's additions didn't change hazard-free behavior.
+  logic saw_stall = 1'b0, saw_flush = 1'b0;
+  always_ff @(posedge clk) begin
+    if (dbg_stall) saw_stall <= 1'b1;
+    if (dbg_flush) saw_flush <= 1'b1;
+  end
 
   task automatic check(string name, logic [31:0] actual, logic [31:0] expected);
     if (actual !== expected) begin
@@ -112,6 +127,8 @@ module tb_pipeline;
     check("x17 (lw mem[0])",       dut.regfile_inst.regs[17], 32'd100);
     check("x18 (copy of x17)",     dut.regfile_inst.regs[18], 32'd100);
     check("x19 (x0 hardwire)",     dut.regfile_inst.regs[19], 32'd0);
+    check("no stall ever asserted", {31'b0, saw_stall}, 32'b0);
+    check("no flush ever asserted", {31'b0, saw_flush}, 32'b0);
 
     $display("");
     if (errors == 0) begin

@@ -43,12 +43,24 @@
 // beyond that, since no control signal will ever act on them while they
 // hold reset garbage, but they are cleared to 0 anyway for clean,
 // glitch-free waveforms and simulation traces.
+//
+// Phase 6 hazard control: `flush` (driven by rtl/pipeline/hazard_unit.sv)
+// forces the output to the same all-zero bubble as reset, regardless of
+// the *_in values, for two distinct reasons: (1) a load-use hazard --
+// the instruction that would otherwise enter EX must wait, so EX gets a
+// bubble instead this cycle while IF/ID holds; (2) the cycle after EX
+// resolves a taken branch/JAL/JALR, discarding the wrong-path
+// instruction that was sitting in ID (about to become the new EX
+// instruction) when the redirect fired. Unlike if_id_reg, this register
+// never needs a plain `stall` (hold) -- when ID can't yet issue, EX
+// simply gets an empty bubble, not a repeat of an old instruction.
 
 module id_ex_reg
   import riscv_pkg::*;
 (
   input  logic        clk,
   input  logic        rst_n,
+  input  logic        flush,
 
   input  logic [31:0] pc_in,
   input  logic [31:0] pc_plus4_in,
@@ -97,6 +109,28 @@ module id_ex_reg
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
+      pc_out         <= 32'b0;
+      pc_plus4_out   <= 32'b0;
+      rs1_data_out   <= 32'b0;
+      rs2_data_out   <= 32'b0;
+      imm_out_out    <= 32'b0;
+      rd_addr_out    <= 5'b0;
+      rs1_addr_out   <= 5'b0;
+      rs2_addr_out   <= 5'b0;
+      funct3_out     <= 3'b0;
+      reg_write_out  <= 1'b0;
+      alu_src_a_out  <= 1'b0;
+      alu_src_b_out  <= 1'b0;
+      alu_op_out     <= ALU_ADD;
+      mem_read_out   <= 1'b0;
+      mem_write_out  <= 1'b0;
+      result_src_out <= RESULT_ALU;
+      branch_out     <= 1'b0;
+      jal_out        <= 1'b0;
+      jalr_out       <= 1'b0;
+      illegal_out    <= 1'b0;
+      instr_dbg_out  <= 32'b0;
+    end else if (flush) begin
       pc_out         <= 32'b0;
       pc_plus4_out   <= 32'b0;
       rs1_data_out   <= 32'b0;

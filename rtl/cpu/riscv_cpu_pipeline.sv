@@ -1,27 +1,32 @@
 `timescale 1ns/1ps
 // riscv_cpu_pipeline.sv
 //
-// Phase 5: five-stage pipelined RV32I CPU (IF / ID / EX / MEM / WB).
-// Reuses every submodule the single-cycle CPU (rtl/cpu/riscv_cpu.sv,
-// Phase 2) already implemented and verified (decoder, control_unit,
-// regfile, imm_gen, alu, branch_unit, imem, dmem) -- only the datapath
-// wiring around them changes, split across four pipeline registers
-// (rtl/pipeline/if_id_reg.sv, id_ex_reg.sv, ex_mem_reg.sv,
-// mem_wb_reg.sv). The single-cycle CPU is left untouched so Phases 2-4
-// keep passing against it unmodified; this is a new, separate top-level
-// module, not a replacement, per the task's "replace/extend" wording.
+// Five-stage pipelined RV32I CPU (IF / ID / EX / MEM / WB). Reuses every
+// submodule the single-cycle CPU (rtl/cpu/riscv_cpu.sv, Phase 2) already
+// implemented and verified (decoder, control_unit, regfile, imm_gen,
+// alu, branch_unit, imem, dmem) -- only the datapath wiring around them
+// changes, split across four pipeline registers (rtl/pipeline/
+// if_id_reg.sv, id_ex_reg.sv, ex_mem_reg.sv, mem_wb_reg.sv). The
+// single-cycle CPU is left untouched so Phases 2-4 keep passing against
+// it unmodified; this pipelined CPU is a separate top-level module, not
+// a replacement, per the task's "replace/extend" wording.
 //
-// See docs/pipeline.md for the full stage-by-stage explanation,
-// register contents, and -- importantly -- what this phase deliberately
-// does NOT yet handle: data hazards (RAW hazards closer than 3
-// instructions apart) and control hazards (branches/JAL/JALR do
-// redirect the PC correctly, but the 2 instructions already fetched
-// from the wrong path before that redirect are NOT flushed and will
-// incorrectly execute). Both are Phase 6's job
-// (forwarding/stalling/flush); Phase 5's own test suite
-// (sim/programs/pipeline_tests/) is deliberately restricted to
-// straight-line code with enough instruction spacing to avoid both, so
-// that what Phase 5 verifies is the pipeline plumbing itself.
+// This module is built up across two phases:
+//   Phase 5 built the five stages and pipeline registers with NO hazard
+//     handling (see CHANGELOG.md and git history for that milestone).
+//   Phase 6 (this version) adds data-hazard forwarding
+//     (rtl/pipeline/forwarding_unit.sv), the load-use stall, and the
+//     branch/JAL/JALR flush (both from rtl/pipeline/hazard_unit.sv).
+// Unlike Phase 2 -> Phase 5 (a genuinely different microarchitecture
+// kept side by side for comparison), Phase 6 evolves THIS SAME pipeline
+// in place, because the task frames hazard handling as completing this
+// pipeline, not building a third one -- and Phase 5's own straight-line,
+// branch-free test program (sim/programs/pipeline_straightline.s)
+// continues to pass unchanged here, since it was constructed to have no
+// hazards for forwarding/stalling/flushing to ever engage on. See
+// docs/pipeline.md for the full explanation of both phases, including a
+// same-clock-edge race found and fixed during Phase 5's own
+// verification, and the hazard-by-hazard account of Phase 6.
 
 module riscv_cpu_pipeline
   import riscv_pkg::*;
@@ -38,17 +43,29 @@ module riscv_cpu_pipeline
   // stages in the same cycle -- the actual, observable point of
   // pipelining (see sim/testbenches/tb_pipeline.sv) -- plus the WB-stage
   // writeback bus and an illegal-opcode flag, matching the visibility
-  // convention established in Phase 2 (rtl/cpu/riscv_cpu.sv).
+  // convention established in Phase 2 (rtl/cpu/riscv_cpu.sv), and the
+  // Phase 6 hazard signals so a testbench can show exactly when a stall
+  // or flush fires.
   output logic [31:0] dbg_if_pc,    output logic [31:0] dbg_if_instr,
   output logic [31:0] dbg_id_pc,    output logic [31:0] dbg_id_instr,
   output logic [31:0] dbg_ex_pc,    output logic [31:0] dbg_ex_instr,
   output logic [31:0] dbg_mem_instr,
   output logic [31:0] dbg_wb_instr,
-  output logic         dbg_reg_write,
+  output logic        dbg_reg_write,
   output logic [4:0]  dbg_rd_addr,
   output logic [31:0] dbg_rd_data,
-  output logic        dbg_illegal
+  output logic        dbg_illegal,
+  output logic        dbg_stall,
+  output logic        dbg_flush
 );
+
+  // ===================================================================
+  // Hazard control (computed here at the top so every stage below can
+  // reference it; see rtl/pipeline/hazard_unit.sv for what each signal
+  // means and why load-use and branch-flush can never collide)
+  // ===================================================================
+  logic pc_stall, if_id_stall, if_id_flush, id_ex_flush;
+  logic ex_redirect_valid; // driven by the EX stage further down
 
   // ===================================================================
   // IF stage
@@ -57,8 +74,9 @@ module riscv_cpu_pipeline
   logic [31:0] next_pc, pc_plus4_if, instr_if;
 
   always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) pc <= 32'b0;
-    else        pc <= next_pc;
+    if (!rst_n)          pc <= 32'b0;
+    else if (pc_stall)   ; // hold: load-use hazard, wait for it to clear
+    else                 pc <= next_pc;
   end
 
   assign pc_plus4_if = pc + 32'd4;
@@ -77,7 +95,7 @@ module riscv_cpu_pipeline
   logic [31:0] pc_id, pc_plus4_id, instr_id;
 
   if_id_reg if_id_inst (
-    .clk(clk), .rst_n(rst_n),
+    .clk(clk), .rst_n(rst_n), .stall(if_id_stall), .flush(if_id_flush),
     .pc_in(pc), .pc_plus4_in(pc_plus4_if), .instr_in(instr_if),
     .pc_out(pc_id), .pc_plus4_out(pc_plus4_id), .instr_out(instr_id)
   );
@@ -113,25 +131,26 @@ module riscv_cpu_pipeline
   logic [31:0] rs1_data_id, rs2_data_id;
 
   // Write port (rd_addr_wb/rd_wdata_wb/reg_write_wb) driven by the WB
-  // stage below. This regfile's write (posedge clk, nonblocking) and
-  // this ID stage's read feeding id_ex_reg's OWN posedge-clk capture
-  // are two flip-flops racing on the same clock edge whenever the
-  // producer's WB and this consumer's ID happen to land in the same
-  // cycle -- Verilog resolves that race to the PRE-write value, not the
-  // new one (nonblocking RHS evaluation for every block sensitive to an
-  // edge uses pre-edge values, regardless of write-vs-read intent). So
-  // this does NOT forward a value from an instruction 3 positions
-  // behind its producer, only from 4 or more positions behind, where
-  // the producer's WB has already fully committed and settled a whole
-  // clock period earlier. See docs/pipeline.md for the cycle-by-cycle
-  // account (verified empirically against simulation, not just
-  // reasoned about) and what Phase 6's forwarding unit adds for
-  // anything closer than that.
+  // stage below. BYPASS_WRITE_TO_READ=1 here is what makes a RAW
+  // dependency exactly 2 instructions apart correct: without it, this
+  // regfile's write (posedge clk, nonblocking) and this ID stage's read
+  // feeding id_ex_reg's OWN posedge-clk capture are two flip-flops
+  // racing on the same clock edge for that exact gap, which Verilog
+  // resolves to the pre-write value -- found and explained in full,
+  // including why it's specifically gap=2 and not some other distance,
+  // in regfile.sv's header comment and docs/pipeline.md. A gap of 0 or
+  // 1 is handled by the EX-stage forwarding_unit below instead (the
+  // producer's value isn't in the register file yet at all in those
+  // cases); a gap of 3 or more needs neither mechanism, since the
+  // write has then settled a full clock period before this read, with
+  // no same-edge ambiguity.
   logic [31:0] rd_wdata_wb;
   logic [4:0]  rd_addr_wb;
   logic        reg_write_wb;
 
-  regfile regfile_inst (
+  regfile #(
+    .BYPASS_WRITE_TO_READ(1'b1)
+  ) regfile_inst (
     .clk(clk), .rst_n(rst_n),
     .rs1_addr(rs1_id), .rs2_addr(rs2_id),
     .rd_addr(rd_addr_wb), .rd_data(rd_wdata_wb), .reg_write(reg_write_wb),
@@ -156,7 +175,7 @@ module riscv_cpu_pipeline
   logic [1:0]  result_src_ex;
 
   id_ex_reg id_ex_inst (
-    .clk(clk), .rst_n(rst_n),
+    .clk(clk), .rst_n(rst_n), .flush(id_ex_flush),
     .pc_in(pc_id), .pc_plus4_in(pc_plus4_id),
     .rs1_data_in(rs1_data_id), .rs2_data_in(rs2_data_id), .imm_out_in(imm_out_id),
     .rd_addr_in(rd_id), .rs1_addr_in(rs1_id), .rs2_addr_in(rs2_id),
@@ -177,36 +196,101 @@ module riscv_cpu_pipeline
   );
 
   // ===================================================================
+  // Hazard unit (Phase 6) -- driven by ID and EX state, consumed by IF,
+  // IF/ID, ID/EX above and referenced by name only here for locality.
+  // ===================================================================
+  hazard_unit hazard_unit_inst (
+    .id_ex_mem_read(mem_read_ex),
+    .id_ex_rd_addr (rd_ex),
+    .id_rs1_addr   (rs1_id),
+    .id_rs2_addr   (rs2_id),
+    .branch_flush  (ex_redirect_valid),
+    .pc_stall      (pc_stall),
+    .if_id_stall   (if_id_stall),
+    .if_id_flush   (if_id_flush),
+    .id_ex_flush   (id_ex_flush)
+  );
+
+  // ===================================================================
   // EX stage
   // ===================================================================
+
+  // --- Forwarding (Phase 6) ---------------------------------------
+  // EX/MEM and MEM/WB rd_addr/reg_write come from further down this
+  // file (ex_mem_reg / mem_wb_reg outputs); declared here via forward
+  // reference through the module's flat scope, matching how `pc_stall`
+  // etc. are used above before their producing instance. rd_wdata_wb is
+  // the WB stage's already-muxed writeback value (ALU result, memory
+  // data, or PC+4 -- whichever this instruction's result_src selects),
+  // exactly what MEM/WB-path forwarding needs to supply, including for
+  // a load (see forwarding_unit.sv header for why EX/MEM's plain
+  // alu_result is the wrong thing to forward for a load one stage
+  // earlier -- that case is handled by the load-use stall instead).
+  logic [1:0] forward_a, forward_b;
+
+  forwarding_unit forwarding_unit_inst (
+    .id_ex_rs1_addr  (rs1_addr_ex),
+    .id_ex_rs2_addr  (rs2_addr_ex),
+    .ex_mem_rd_addr  (rd_mem),
+    .ex_mem_reg_write(reg_write_mem),
+    .mem_wb_rd_addr  (rd_addr_wb),
+    .mem_wb_reg_write(reg_write_wb),
+    .forward_a       (forward_a),
+    .forward_b       (forward_b)
+  );
+
+  logic [31:0] rs1_data_fwd, rs2_data_fwd;
+
+  always_comb begin
+    case (forward_a)
+      2'b01:   rs1_data_fwd = alu_result_mem; // EX/MEM
+      2'b10:   rs1_data_fwd = rd_wdata_wb;    // MEM/WB
+      default: rs1_data_fwd = rs1_data_ex;    // no hazard
+    endcase
+  end
+
+  always_comb begin
+    case (forward_b)
+      2'b01:   rs2_data_fwd = alu_result_mem; // EX/MEM
+      2'b10:   rs2_data_fwd = rd_wdata_wb;    // MEM/WB
+      default: rs2_data_fwd = rs2_data_ex;    // no hazard
+    endcase
+  end
+
+  // --- ALU ---------------------------------------------------------
+  // Both ALU inputs use the FORWARDED operands, not the raw id_ex_reg
+  // outputs -- rs1_data_fwd/rs2_data_fwd already fall back to
+  // rs1_data_ex/rs2_data_ex when forwarding isn't needed (forward_a/b
+  // == 2'b00), so this is correct for every instruction, hazard or not.
   logic [31:0] alu_a_ex, alu_b_ex, alu_result_ex;
   logic        alu_zero_ex;
 
-  assign alu_a_ex = alu_src_a_ex ? pc_ex      : rs1_data_ex;
-  assign alu_b_ex = alu_src_b_ex ? imm_out_ex : rs2_data_ex;
+  assign alu_a_ex = alu_src_a_ex ? pc_ex      : rs1_data_fwd;
+  assign alu_b_ex = alu_src_b_ex ? imm_out_ex : rs2_data_fwd;
 
   alu alu_inst (
     .a(alu_a_ex), .b(alu_b_ex), .alu_op(alu_op_ex),
     .result(alu_result_ex), .zero(alu_zero_ex)
   );
 
+  // --- Branch condition ---------------------------------------------
+  // Also uses the forwarded operands: a branch comparing against a
+  // value produced 1-2 instructions earlier needs the same forwarding
+  // the ALU gets, or it would compare against a stale pre-forwarding
+  // value and reach the wrong taken/not-taken decision.
   logic branch_taken_ex;
 
   branch_unit branch_unit_inst (
-    .rs1_data(rs1_data_ex), .rs2_data(rs2_data_ex), .funct3(funct3_ex),
+    .rs1_data(rs1_data_fwd), .rs2_data(rs2_data_fwd), .funct3(funct3_ex),
     .branch_taken(branch_taken_ex)
   );
 
   logic [31:0] pc_target_ex;
   assign pc_target_ex = pc_ex + imm_out_ex;
 
-  // Branch/jump resolution happens here, in EX -- and the redirect it
-  // produces IS correctly computed and DOES change next_pc (below).
-  // What Phase 5 does not do is flush the two instructions already
-  // fetched from the sequential (wrong) path while this redirect was in
-  // flight through ID and EX; those will incorrectly continue through
-  // the pipeline. See the module header comment and docs/pipeline.md.
-  logic        ex_redirect_valid;
+  // Branch/jump resolution: correctly computed AND, as of Phase 6,
+  // correctly flushed -- hazard_unit's if_id_flush/id_ex_flush above
+  // discard the 2 wrong-path instructions the cycle this fires.
   logic [31:0] ex_redirect_target;
 
   assign ex_redirect_valid  = jal_ex || jalr_ex || (branch_ex && branch_taken_ex);
@@ -222,9 +306,13 @@ module riscv_cpu_pipeline
   logic        reg_write_mem, mem_read_mem, mem_write_mem, illegal_mem;
   logic [1:0]  result_src_mem;
 
+  // rs2_data_fwd (not the raw rs2_data_ex) is what SW's store data must
+  // carry forward -- a store whose data operand was itself just
+  // computed 1-2 instructions earlier needs that value forwarded here
+  // exactly like an ALU operand would.
   ex_mem_reg ex_mem_inst (
     .clk(clk), .rst_n(rst_n),
-    .pc_plus4_in(pc_plus4_ex), .alu_result_in(alu_result_ex), .rs2_data_in(rs2_data_ex),
+    .pc_plus4_in(pc_plus4_ex), .alu_result_in(alu_result_ex), .rs2_data_in(rs2_data_fwd),
     .rd_addr_in(rd_ex), .reg_write_in(reg_write_ex), .mem_read_in(mem_read_ex),
     .mem_write_in(mem_write_ex), .result_src_in(result_src_ex), .illegal_in(illegal_ex),
     .instr_dbg_in(instr_ex),
@@ -293,5 +381,7 @@ module riscv_cpu_pipeline
   assign dbg_rd_addr   = rd_addr_wb;
   assign dbg_rd_data   = rd_wdata_wb;
   assign dbg_illegal   = illegal_id; // this cycle's freshly-decoded instruction
+  assign dbg_stall     = pc_stall;
+  assign dbg_flush     = if_id_flush;
 
 endmodule

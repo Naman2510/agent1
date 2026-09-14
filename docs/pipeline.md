@@ -1,5 +1,14 @@
 # Five-Stage Pipeline (Phase 5)
 
+> **Status note:** this document describes the pipeline as Phase 5 left
+> it -- deliberately without forwarding, stalling, or flush. Phase 6 has
+> since added all three to this same module; see `docs/hazards.md` for
+> that work. This document is kept as originally written (not rewritten
+> after the fact) because it accurately explains *why* Phase 5 was built
+> hazard-free first and documents design decisions (the stage split, the
+> pipeline registers, the same-clock-edge race in the register file)
+> that are still exactly how the CPU works today.
+
 This document describes `rtl/cpu/riscv_cpu_pipeline.sv`, a five-stage
 (IF / ID / EX / MEM / WB) pipelined implementation of the same RV32I
 subset the single-cycle CPU (`rtl/cpu/riscv_cpu.sv`, Phase 2) implements.

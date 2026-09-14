@@ -24,6 +24,8 @@ RTL_FILES=(
   rtl/pipeline/id_ex_reg.sv
   rtl/pipeline/ex_mem_reg.sv
   rtl/pipeline/mem_wb_reg.sv
+  rtl/pipeline/forwarding_unit.sv
+  rtl/pipeline/hazard_unit.sv
   rtl/cpu/riscv_cpu_pipeline.sv
 )
 TB=sim/testbenches/tb_pipeline.sv

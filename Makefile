@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves
 
 help:
 	@echo "Available targets:"
@@ -19,6 +19,10 @@ help:
 	@echo "                 real RISC-V GCC toolchain and run it on the CPU"
 	@echo "  sim_pipeline - Phase 5: assemble and run the pipelined CPU testbench"
 	@echo "                 under both Icarus Verilog and Verilator"
+	@echo "  test_hazards - Phase 6: run the pipeline hazard directed test suite"
+	@echo "                 (sim/programs/pipeline_tests/) under both simulators"
+	@echo "  waves        - Phase 6: generate GTKWave .vcd waveforms for the"
+	@echo "                 hazard directed tests (sim/waveforms/)"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -37,3 +41,9 @@ run_c_demo:
 
 sim_pipeline:
 	@./scripts/run_sim_pipeline.sh
+
+test_hazards:
+	@python3 scripts/run_pipeline_hazard_tests.py
+
+waves:
+	@./scripts/generate_waveforms.sh
