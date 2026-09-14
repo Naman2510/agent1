@@ -55,10 +55,10 @@ be validated before it ever touches a disk, a NIC, or a chassis.
 
 | Path | Phase | Contents |
 | --- | --- | --- |
-| `phase1-host-provisioning/` | 1 | Real RAID 1/boot/SSH/sudo scripts (`scripts/`) **plus** `storage_sim/` — a from-scratch, 50-test-covered software RAID1 model built and verified with zero real disks |
-| `phase2-networking/` | 2 | Netplan static/VLAN config, nftables default-deny firewall, diagnostic network namespace |
-| `phase3-telemetry/` | 3 | `telemetryd.py` async daemon, Prometheus/Alertmanager/Grafana wiring |
-| `phase4-oob-lifecycle/` | 4 | `oob_control.py` Redfish CLI, `fault_drill.sh` fault-injection drill, mock/real BMC options |
+| `phase1-host-provisioning/` | 1 | Real RAID 1/boot/SSH/sudo scripts (`scripts/`, plus `scripts/plan_from_lsblk.py`, a safe real-disk classifier — see storage README) **plus** `storage_sim/` — a from-scratch, 74-test-covered software RAID1 model (including a safety-gated `RealBlockDevice` adapter) built and verified with zero real disks |
+| `phase2-networking/` | 2 | Netplan static/VLAN config, nftables default-deny firewall, diagnostic network namespace, **plus** `policy_sim/` — a 34-test firewall-decision-logic simulation cross-checked against the real `nftables.conf` |
+| `phase3-telemetry/` | 3 | `telemetryd.py` async daemon (29-test suite), Prometheus/Alertmanager/Grafana wiring |
+| `phase4-oob-lifecycle/` | 4 | `oob_control.py` Redfish CLI, `fault_drill.sh` fault-injection drill, mock/real BMC options (29-test suite covering both) |
 | `phase5-physical-dr/` | 5 | Thermal/power profiling script, hardware requirements |
 | `docs/` | 5 | Cabling standard, network topology reference, disaster-recovery runbook |
 | `frontend/` | — | Web dashboard: live power/RAID/thermal status, alert feed, Redfish OOB controls |
@@ -73,8 +73,9 @@ Phase 1's RAID array exists).
 
 ```
 make simulate         # dry-runs every destructive script across all 5 phases
-make unit-test         # runs every automated test suite in the repo: 98 tests
-                        # (storage_sim 50, telemetryd 19, oob_control 14, dashboard 15)
+make unit-test         # runs every automated test suite in the repo: 198 tests
+                        # (storage_sim 74, plan_from_lsblk 17, policy_sim 34,
+                        #  telemetryd 29, oob_control+fault_drill 29, dashboard 15)
 make sim-test          # storage_sim's suite alone, plus the scripted RAID1 demo
 make telemetry-test    # runs telemetryd.py in --mock mode, one poll cycle
 make oob-test          # spins up the local Redfish mock, exercises oob_control.py
@@ -84,7 +85,7 @@ make dashboard         # full local stack: Redfish mock + telemetryd --mock +
 
 All of the above have been run against this exact repo as part of
 building it — `make simulate` dry-runs cleanly end to end, `make
-unit-test` passes all 98 tests, `sim-test` runs a real, executed RAID1
+unit-test` passes all 198 tests, `sim-test` runs a real, executed RAID1
 mirror through normal operation/failure/rebuild/corruption/cross-process
 persistence, `telemetry-test` produces valid Prometheus textfile output
 and fires a webhook on a sliding-window thermal breach, `oob-test` proves
@@ -100,14 +101,21 @@ principles software model of a RAID1 mirror — simulated block devices,
 partitioning, a superblock/metadata layer, mirrored writes, degraded-mode
 reads, member fail/remove/add, background rebuild with live progress,
 silent-corruption detection with self-heal, and `scrub`. It is not a fake
-demo: 50 automated tests plus a scripted, asserting `raidsim demo` walk
-through every one of those behaviors for real, including a genuine bug
-this build caught and fixed (a failed disk being silently reactivated
-across a process restart — see the README's "Why `member_roles` exists").
-It's wired into the dashboard's new **Storage Simulation** panel, and its
-`README.md` maps every concept onto the real `mdadm`/Linux equivalent,
-including an explicit list of what it deliberately does *not* claim to
-replicate.
+demo: 74 automated tests plus a scripted, asserting `raidsim demo` walk
+through every one of those behaviors for real, including several genuine
+bugs this build caught and fixed (a failed disk being silently
+reactivated across a process restart — see the README's "Why
+`member_roles` exists" — and a `close_all()`/background-rebuild race
+found only by looping the test suite, among others). A safety-gated
+`RealBlockDevice` adapter lets the same RAID1 logic run against a real
+device path instead of the simulation, and `scripts/plan_from_lsblk.py`
+is the required, human-reviewed first step before it's ever pointed at
+one — see `storage_sim/README.md` and `docs/runbook.md` for the exact
+integration path and what remains genuinely unvalidated without real
+hardware. It's wired into the dashboard's new **Storage Simulation**
+panel, and its `README.md` maps every concept onto the real `mdadm`/
+Linux equivalent, including an explicit list of what it deliberately does
+*not* claim to replicate.
 
 ## Web dashboard
 

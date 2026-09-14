@@ -7,6 +7,60 @@ serve this page.
 
 ---
 
+## 0. Before this runbook applies: simulation vs. real hardware
+
+Everything below describes procedure against **real** `/dev/sdX` devices
+and a **real** `mdadm` array. As of this writing, none of it has been
+executed against real or virtual block devices in this project — see
+`PROJECT_SPEC.md`'s testing ledger and `phase1-host-provisioning/
+storage_sim/README.md`'s "What has and hasn't been validated" section for
+the honest, current status. What *has* been built and tested is:
+
+- **`storage_sim/`** — a from-scratch software model of RAID1 mirroring
+  (mirroring, degraded reads/writes, member fail/remove/add, background
+  rebuild, corruption detection + self-heal, `scrub`, cross-process
+  reassembly). This validates the *logic* this runbook's Section 1–2
+  procedures are built around, entirely in software — it never opens a
+  real device file. See `storage_sim/README.md`'s "mdadm equivalence
+  table" for the exact mapping between simulated operations and the real
+  commands in Sections 1–2 below.
+- **`storage_sim/real_block_device.py`** (`RealBlockDevice`) — a
+  safety-gated adapter that lets the *same* `RAID1Array` logic run against
+  a real path instead of the simulation's in-memory/file model. It is
+  fully implemented and tested against a stand-in (a plain temp file, not
+  a device), but has never opened an actual `/dev/sdX` — see its README
+  section for the precise IMPLEMENTED+TESTED / NOT YET VALIDATED split.
+  It refuses to do real I/O at all unless three independent things are
+  true: `allow_real_io=True`, `i_have_confirmed_with_lsblk=True`, and the
+  target path isn't on its hardcoded boot-disk-prefix denylist
+  (`/dev/sda`, `/dev/nvme0n1`, `/dev/vda`, `/dev/xvda`, `/dev/hda`).
+- **`phase1-host-provisioning/scripts/plan_from_lsblk.py`** — the
+  required *first step* of real integration, and the tool that produces
+  the human check this runbook assumes happened before Section 1–2 ever
+  touch a device. Feed it real `lsblk -J` output; it classifies every
+  disk as in-use (has a mountpoint, filesystem, RO flag, or existing
+  partition anywhere in its subtree) or blank, and refuses to print a
+  concrete wipe/partition/assemble command plan unless **exactly two**
+  disks come back unambiguously blank *and* you pass
+  `--i-confirm-these-are-blank-disks` yourself:
+  ```bash
+  lsblk -J | python3 phase1-host-provisioning/scripts/plan_from_lsblk.py - \
+      --i-confirm-these-are-blank-disks
+  ```
+  It never runs a command itself — it only ever prints a plan for a human
+  to read and then execute (or not) by hand, using the real
+  `phase1-host-provisioning/scripts/*.sh` scripts.
+
+**The integration path, in order:** (1) run `storage_sim`'s test suite and
+`raidsim demo` to understand the logic with zero risk — nothing below
+requires a device; (2) once real disks exist, capture `lsblk -J` and run
+it through `plan_from_lsblk.py` to get an explicit, human-reviewed blank/
+in-use classification — never hand-pick a device name by guessing; (3)
+only then follow Sections 1–4 below against the disks `plan_from_lsblk.py`
+confirmed blank. Skipping step (2) — assuming you know which disk is
+blank instead of having a tool confirm it from real `lsblk` output — is
+exactly how a hot-swap procedure ends up wiping the OS disk.
+
 ## 1. Diagnosing a degraded RAID array
 
 **Symptom:** Alertmanager fires `DiskReallocatedSectorsRising` /

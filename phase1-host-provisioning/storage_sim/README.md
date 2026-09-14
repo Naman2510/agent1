@@ -228,7 +228,7 @@ models exactly the one layout that matters, and no more.
 
 ```bash
 cd phase1-host-provisioning
-python3 -m unittest discover -s storage_sim/tests -v   # 65 tests as of this writing
+python3 -m unittest discover -s storage_sim/tests -v   # 74 tests as of this writing
 python3 -m storage_sim.cli demo                          # scripted, narrated, asserting walkthrough
 python3 -m storage_sim.cli create tank --num-blocks 4096 --block-size 4096
 python3 -m storage_sim.cli status tank
@@ -245,7 +245,7 @@ failure, and one interrupted by a clean shutdown mid-rebuild), silent-
 corruption detection and self-heal, `scrub`, cross-process persistence/
 reassembly (including the stale-event-count and untrusted-role-state
 cases), and the `RealBlockDevice` safety-gating + I/O path against a
-stand-in file — via 65 real automated tests plus a scripted demo, all
+stand-in file — via 74 real automated tests plus a scripted demo, all
 actually executed, not just asserted to work.
 
 **Not tested, and cannot be, without real hardware:** real `mdadm`,
