@@ -76,6 +76,13 @@ A `LEN` of 0, or a `LEN` exceeding the operation's bound, is caught at
 START time: the FSM asserts `ERR` and `DONE` immediately without
 touching any memory, rather than hanging or computing garbage.
 
+`VECA`/`VECB` remain plain CPU-writable memory even while an operation
+is `BUSY` -- there is no write-lock. This mirrors real accelerator
+hardware: it is the driver's responsibility (as `LEN` already is, via
+the "ignored while busy" rule) not to overwrite an operand the FSM is
+still reading. `sim/programs/soc/accel_demo.s`'s poll-until-not-busy
+loops exist precisely so the driver never does this.
+
 ### Multiplication semantics
 
 Multiplication is 32x32 -> 64 bits, truncated to the low 32 bits and
