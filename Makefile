@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo
 
 help:
 	@echo "Available targets:"
@@ -58,6 +58,10 @@ help:
 	@echo "                 demo (+ 3 static baselines) against Python-computed expected results"
 	@echo "  run_dynamic_scheduler_demo - Phase 15: measure the dynamic scheduler's real"
 	@echo "                 runtime overhead + write results/dynamic_scheduling_report.md"
+	@echo "  test_mixed_workload_correctness - Phase 16: verify the 12-workload mixed"
+	@echo "                 heterogeneous stream demo (+ 3 static baselines)"
+	@echo "  run_mixed_workload_demo - Phase 16: measure the dynamic scheduler at larger"
+	@echo "                 scale + write results/mixed_workloads_report.md"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -130,3 +134,9 @@ test_dynamic_scheduler_correctness:
 
 run_dynamic_scheduler_demo:
 	@python3 scheduler/runtime/run_dynamic_scheduler_demo.py
+
+test_mixed_workload_correctness:
+	@./scripts/run_mixed_workload_correctness.sh
+
+run_mixed_workload_demo:
+	@python3 scheduler/runtime/run_mixed_workload_demo.py

@@ -567,4 +567,37 @@ a stream this small.
 fixed and small by design, to keep this phase's result cleanly
 attributable; testing at larger/more varied scale is Phase 16's job.
 
+## Phase 16 — Mixed Heterogeneous Workloads
+
+**Status:** complete (see `README.md` checklist).
+
+**What exists:** `scheduler/runtime/gen_mixed_workload_demo.py` reuses
+Phase 15's per-block body generators, decision logic, and `mul32`
+subroutine (imported, not copy-pasted) against a larger, 12-workload
+stream (`vecadd` N=1,2,4,8,16,32; `dot` N=4,8,16,32; `matmul` N=2,4 --
+roughly 4-32x Phase 15's average per-workload scale), to test whether
+Phase 15's finding (decision overhead outweighs the benefit) holds at
+a more realistic scale. Full writeup: `docs/mixed_workloads.md`.
+
+**Real result:** dynamic scheduling is still slower than
+always-accelerator (2590 vs. 2366 cycles, 9.5% worse) -- but that is a
+large improvement over Phase 15's 26.5% worse on the small stream,
+confirming that the decision's fixed per-block overhead matters
+proportionally less as each workload grows. The more important
+finding, though: the oracle baseline only beats always-accelerator by
+10 cycles on this entire 12-workload stream, because in this project's
+real measured data the accelerator wins almost every workload except
+`vecadd` at N=1 -- so even a perfect, zero-overhead scheduler has very
+little room to add value for this specific accelerator design and
+these three kernels. This reframes Phase 15's result: the limiting
+factor was never primarily overhead, but a narrow oracle-vs-baseline
+ceiling.
+
+**Scope decision:** `matmul N=8` (32885 CPU cycles standalone, by far
+this project's largest measured single workload) was deliberately
+excluded from the stream -- including it would let one outlier
+dominate every program's total so completely that the four programs'
+results would look nearly identical, obscuring rather than answering
+the question this phase asked.
+
 Later phases append their own sections here as they land.
