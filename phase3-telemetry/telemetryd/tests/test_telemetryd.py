@@ -337,5 +337,129 @@ class TestTelemetryDaemonIntegration(unittest.TestCase):
         self.assertEqual(len(_CapturingWebhookHandler.received), 1)
 
 
+class TestLoadConfig(unittest.TestCase):
+    """load_config() had zero test coverage before this — every branch
+    (no path, missing file, valid YAML, empty YAML, PyYAML unavailable)
+    is exercised below."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="telemetryd_config_test_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_no_path_returns_defaults(self):
+        self.assertEqual(telemetryd.load_config(None), telemetryd.DEFAULT_CONFIG)
+
+    def test_nonexistent_path_returns_defaults(self):
+        cfg = telemetryd.load_config(str(self.tmpdir / "does-not-exist.yaml"))
+        self.assertEqual(cfg, telemetryd.DEFAULT_CONFIG)
+
+    def test_valid_yaml_overrides_defaults_but_keeps_unspecified_keys(self):
+        path = self.tmpdir / "config.yaml"
+        path.write_text("poll_interval_seconds: 5\ndisks:\n  - /dev/testdisk\n")
+        cfg = telemetryd.load_config(str(path))
+        self.assertEqual(cfg["poll_interval_seconds"], 5)
+        self.assertEqual(cfg["disks"], ["/dev/testdisk"])
+        self.assertEqual(cfg["window_seconds"], telemetryd.DEFAULT_CONFIG["window_seconds"])
+
+    def test_empty_yaml_file_returns_defaults(self):
+        path = self.tmpdir / "empty.yaml"
+        path.write_text("")
+        self.assertEqual(telemetryd.load_config(str(path)), telemetryd.DEFAULT_CONFIG)
+
+    def test_missing_pyyaml_falls_back_to_defaults_with_a_warning(self):
+        # Monkeypatches the module's own `yaml` global rather than
+        # actually uninstalling PyYAML — this exercises the real
+        # `if yaml is None:` branch in load_config(), not a re-implementation.
+        path = self.tmpdir / "config.yaml"
+        path.write_text("poll_interval_seconds: 999\n")
+        original_yaml = telemetryd.yaml
+        telemetryd.yaml = None
+        try:
+            cfg = telemetryd.load_config(str(path))
+        finally:
+            telemetryd.yaml = original_yaml
+        self.assertEqual(cfg, telemetryd.DEFAULT_CONFIG)  # file ignored entirely, not partially applied
+
+
+class TestParseArgs(unittest.TestCase):
+    def test_defaults(self):
+        args = telemetryd.parse_args([])
+        self.assertIsNone(args.config)
+        self.assertFalse(args.mock)
+        self.assertFalse(args.once)
+        self.assertIsNone(args.interval)
+        self.assertFalse(args.verbose)
+
+    def test_all_flags_parsed(self):
+        args = telemetryd.parse_args(
+            ["--config", "/tmp/x.yaml", "--mock", "--once", "--interval", "2.5", "-v"]
+        )
+        self.assertEqual(args.config, "/tmp/x.yaml")
+        self.assertTrue(args.mock)
+        self.assertTrue(args.once)
+        self.assertEqual(args.interval, 2.5)
+        self.assertTrue(args.verbose)
+
+
+class TestMainEntryPoint(unittest.TestCase):
+    """main() — the actual `python3 telemetryd.py ...` entry point — had
+    zero direct test coverage before this; only its constituent pieces
+    were tested individually. This runs it exactly as a real invocation
+    would, argv and all."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="telemetryd_main_test_"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_config(self, textfile: Path) -> Path:
+        config_path = self.tmpdir / "config.yaml"
+        config_path.write_text(f"textfile_collector_path: {textfile}\ndisks: [/dev/fake0]\n")
+        return config_path
+
+    def test_main_mock_once_writes_textfile_and_returns_zero(self):
+        textfile = self.tmpdir / "hardware.prom"
+        config_path = self._write_config(textfile)
+        rc = telemetryd.main(["--mock", "--once", "--config", str(config_path)])
+        self.assertEqual(rc, 0)
+        self.assertTrue(textfile.exists())
+        self.assertIn("telemetryd_thermal_celsius", textfile.read_text())
+
+    def test_main_with_interval_override_and_verbose_completes_quickly(self):
+        textfile = self.tmpdir / "hardware.prom"
+        config_path = self._write_config(textfile)
+        start = time.time()
+        rc = telemetryd.main(
+            ["--mock", "--once", "--interval", "0.01", "--config", str(config_path), "-v"]
+        )
+        elapsed = time.time() - start
+        self.assertEqual(rc, 0)
+        self.assertLess(elapsed, 5, "a single --once iteration should never take this long")
+
+    def test_main_handles_keyboard_interrupt_gracefully(self):
+        # Simulates Ctrl-C landing inside asyncio.run() — main() must
+        # catch it and return 0, not propagate a traceback to the shell.
+        import unittest.mock as mock
+
+        def _raise_keyboard_interrupt(coro):
+            # asyncio.run(coro) is mocked out entirely, so the real
+            # coroutine it would have awaited is never awaited by
+            # anyone — close it explicitly, or Python emits a spurious
+            # "coroutine was never awaited" RuntimeWarning (observed
+            # landing on a LATER, unrelated test's output, since garbage
+            # collection timing is non-deterministic — a real, if minor,
+            # test-hygiene bug this fixed rather than ignored).
+            coro.close()
+            raise KeyboardInterrupt
+
+        config_path = self._write_config(self.tmpdir / "hardware.prom")
+        with mock.patch("telemetryd.asyncio.run", side_effect=_raise_keyboard_interrupt):
+            rc = telemetryd.main(["--mock", "--config", str(config_path)])
+        self.assertEqual(rc, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

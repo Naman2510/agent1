@@ -78,13 +78,13 @@ unit-test:
 	cd phase1-host-provisioning && python3 -W error::ResourceWarning -m unittest discover -s scripts/tests
 	@echo "== policy_sim firewall logic (34 tests, SIMULATION TESTED — see README) =="
 	cd phase2-networking && python3 -W error::ResourceWarning -m unittest discover -s policy_sim/tests
-	@echo "== telemetryd (19 tests) =="
+	@echo "== telemetryd (29 tests) =="
 	cd phase3-telemetry/telemetryd && python3 -W error::ResourceWarning -m unittest discover -s tests
 	@echo "== oob_control (14 tests) =="
 	cd phase4-oob-lifecycle && python3 -W error::ResourceWarning -m unittest discover -s tests
 	@echo "== dashboard (15 tests, real HTTP against a real server) =="
 	cd frontend && python3 -W error::ResourceWarning -m unittest discover -s tests
-	@echo "unit-test OK — 173 tests"
+	@echo "unit-test OK — 183 tests"
 
 telemetry-test:
 	python3 phase3-telemetry/telemetryd/telemetryd.py --mock --once -v \

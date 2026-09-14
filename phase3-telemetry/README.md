@@ -9,7 +9,7 @@ plus a webhook alert channel.
 | Path | Purpose |
 | --- | --- |
 | `telemetryd/telemetryd.py` | The async daemon itself (stdlib + PyYAML only) |
-| `telemetryd/tests/` | Automated test suite (19 tests) — see "Testing" below |
+| `telemetryd/tests/` | Automated test suite (29 tests) — see "Testing" below |
 | `telemetryd/telemetryd.service` | systemd unit, `CAP_SYS_RAWIO`, no root |
 | `telemetryd/config.yaml.example` | Poll intervals, thresholds, webhook URL |
 | `prometheus/prometheus.yml.example` | Scrapes node_exporter (with the textfile collector enabled) |
@@ -56,7 +56,7 @@ python3 telemetryd/telemetryd.py --mock --once -v --config telemetryd/config.yam
 There's also a real automated test suite, not just manual runs:
 
 ```
-cd telemetryd && python3 -m unittest discover -s tests -v   # 19 tests
+cd telemetryd && python3 -m unittest discover -s tests -v   # 29 tests
 ```
 
 It covers the sliding-window math, the Prometheus textfile writer, webhook
@@ -69,6 +69,12 @@ files standing in for hardware this sandbox doesn't have. Those two code
 paths were never actually exercised by the original manual verification,
 since this sandbox has no real thermal zones or `/dev/kmsg` to fall
 through to them. Real `smartctl` on a real disk has still never run.
+
+Also covers the CLI entry point directly: `load_config()`'s every branch
+(no path, missing file, valid/empty YAML, PyYAML unavailable),
+`parse_args()`'s defaults and flag parsing, and `main()` itself run
+end-to-end with real argv (`--mock --once --config ...`), including a
+clean-shutdown-on-Ctrl-C test.
 
 ## Wiring into Prometheus/Grafana
 
