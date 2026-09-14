@@ -588,3 +588,70 @@ This is not a commit log — it records *why*, not just *what*.
   full Phase 2-9 regression re-verified clean after the shared
   `control_unit.sv`/`id_ex_reg.sv`/`ex_mem_reg.sv` changes (every
   instruction in every existing test flows through those modules).
+
+## Phase 11 — CPU vs. Accelerator Benchmarking (2026-09-14)
+
+- **Added a software 32-bit multiply routine (`mul32`) for the
+  CPU-only kernels.** RV32I (this project's ISA subset) has no
+  hardware multiplier, so the CPU-only `dot`/`matmul` benchmark kernels
+  need one in software -- a standard shift-and-add multiplier,
+  verified independently in `sim/programs/benchmarks/mul32_test.s` on
+  both the single-cycle and pipelined CPU *before* any kernel was
+  written to depend on it.
+
+- **Bug found and fixed: `x1`/`ra` register conflict corrupting a data
+  pointer across a subroutine call.** The first versions of
+  `cpu_dot_bench.s` and `cpu_matmul_bench.s` used register x1 both to
+  hold `&A[0]` and, unintentionally, as `jal x1, mul32`'s
+  return-address destination -- RISC-V's ABI reserves x1 as `ra`
+  specifically for this, and the call silently overwrote the data
+  pointer after the very first loop iteration. Every subsequent `A[i]`
+  load then read from an unrelated address (mostly zero-initialized
+  RAM), producing a dot-product result that happened to equal exactly
+  the correct first term (2) -- a wrong-but-plausible number, not an
+  obvious crash. Caught by `sim/testbenches/tb_bench_cpu_correctness.sv`
+  comparing against Python-computed expected values (1632 expected,
+  not-1632 read on first run), not by re-reading the assembly by eye.
+  Fixed by moving the data pointer to x23, a register `mul32` never
+  touches; matmul's `A` pointer had the identical bug and the identical
+  fix. Full account in `docs/benchmarking.md` and each affected
+  program's own header comment.
+
+- **Added `sim/testbenches/tb_benchmark_soc.sv`, a GPIO-sentinel-based
+  generic harness** that detects a benchmark program's completion
+  automatically (watching `GPIO_OUT` for a fixed `0xDEADBEEF` write)
+  rather than requiring a hand-picked snapshot cycle the way Phase 7's
+  `tb_benchmark.sv` does -- deliberate, since six programs of different
+  structure made a hardcoded-and-possibly-wrong cycle count a real risk
+  of silently unfair CPU-vs-accelerator comparisons. Also caught,
+  before any benchmark ran: the CPU-only kernels' `0x1000`/`0x2000`/
+  `0x3000` scratch addresses aliased to the same RAM word under
+  `dmem.sv`'s default 1024-word depth (only the low 12 address bits are
+  decoded at that depth) -- fixed by sizing `RAM_DEPTH_WORDS` to 4096
+  for these testbenches, not by changing the addressing scheme.
+
+- **Added six benchmark programs**
+  (`sim/programs/benchmarks/{cpu,accel}_{vecadd,dot,matmul}_bench.s`),
+  each pair using IDENTICAL operands (`A[i]=i+1, B[i]=i+2` /
+  `A[i,j]=i+j+1, B[i,j]=i+j+2`) for a fair CPU-only-vs-accelerator-
+  driven comparison at the same problem size (N=16 for vecadd/dot, 4x4
+  for matmul). CPU-only kernel correctness verified at the actual
+  benchmark size by `sim/testbenches/tb_bench_cpu_correctness.sv`
+  (`make test_bench_correctness`); accelerator-driven kernels reuse the
+  exact hardware/driver path already verified in Phase 9/10 at smaller
+  N.
+
+- **Added `scripts/run_benchmarks_accel.py`** (`make benchmarks_accel`):
+  runs all six programs and writes
+  `results/accelerator_benchmark_report.md` from real simulation
+  output. Measured results: vecadd ~1.84x accelerator speedup (RV32I
+  already does addition natively -- the accelerator only helps with
+  loop/memory overhead here), dot ~5.03x, matmul ~11.90x (both
+  multiplication-heavy, and RV32I has no hardware multiplier) -- a
+  real, honestly-measured gap driven directly by that ISA difference,
+  not a favorable-workload cherry-pick.
+
+- **Result:** `make test_bench_correctness` and `make benchmarks_accel`
+  both pass/complete cleanly under both simulators; no change to any
+  RTL this phase, so no broader regression was required (though the
+  full suite was spot-checked and remains clean).

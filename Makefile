@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel
 
 help:
 	@echo "Available targets:"
@@ -35,6 +35,10 @@ help:
 	@echo "                 dot product, matrix multiply) under both simulators"
 	@echo "  test_accel_custom - Phase 10: run the ACCEL.* custom-instruction"
 	@echo "                 end-to-end demo under both simulators"
+	@echo "  test_bench_correctness - Phase 11: verify the CPU-only benchmark"
+	@echo "                 kernels against Python-computed expected results"
+	@echo "  benchmarks_accel - Phase 11: run CPU-only vs. accelerator-driven"
+	@echo "                 benchmarks and write results/accelerator_benchmark_report.md"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -74,3 +78,9 @@ test_accel:
 
 test_accel_custom:
 	@./scripts/run_sim_accel_custom.sh
+
+test_bench_correctness:
+	@./scripts/run_bench_correctness.sh
+
+benchmarks_accel:
+	@python3 scripts/run_benchmarks_accel.py
