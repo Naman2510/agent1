@@ -1,0 +1,40 @@
+# Phase 2 — Deterministic networking configuration.
+# Install to: /etc/netplan/01-netcfg.yaml  (mode 0600, root:root)
+# Apply with: netplan generate && netplan apply
+#
+# Renders via systemd-networkd (not NetworkManager) for a minimal, headless,
+# server-appropriate network stack. Replace eth0 / addresses / gateway with
+# your actual interface name and site addressing plan.
+
+network:
+  version: 2
+  renderer: networkd
+
+  ethernets:
+    eth0:
+      dhcp4: false
+      dhcp6: false
+      addresses:
+        - 10.10.0.10/24
+      routes:
+        - to: default
+          via: 10.10.0.1
+      nameservers:
+        addresses:
+          - 1.1.1.1     # Cloudflare
+          - 9.9.9.9     # Quad9
+      mtu: 1500
+      # For 10G links doing bulk east-west traffic, switch to jumbo frames
+      # (must match the switch port and every intermediate hop):
+      # mtu: 9000
+      link-local: []
+
+  vlans:
+    # 802.1Q tagged VLAN sub-interface, e.g. for a dedicated management or
+    # diagnostic segment. Bound on top of the physical link above.
+    vlan100:
+      id: 100
+      link: eth0
+      addresses:
+        - 10.10.100.10/24
+      mtu: 1500

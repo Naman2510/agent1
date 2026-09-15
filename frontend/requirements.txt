@@ -1,0 +1,5 @@
+# server.py itself only needs PyYAML for config parsing (stdlib http.server
+# handles everything else) — but it imports oob_control.py directly to
+# reuse its RedfishClient, which pulls in `requests` transitively.
+PyYAML>=6.0
+requests>=2.31

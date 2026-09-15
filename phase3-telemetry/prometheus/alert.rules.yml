@@ -1,0 +1,49 @@
+# Phase 3 — Prometheus alerting rules over telemetryd's textfile metrics.
+# Install to: /etc/prometheus/alert.rules.yml (referenced by prometheus.yml.example)
+
+groups:
+  - name: hardware-telemetry
+    rules:
+      - alert: DiskReallocatedSectorsRising
+        expr: telemetryd_smart_attribute{attribute="reallocated_sector_count"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk {{ $labels.disk }} has reallocated sectors"
+          description: "S.M.A.R.T. attribute 5 (reallocated sector count) is non-zero on {{ $labels.disk }}. Early indicator of media degradation."
+
+      - alert: DiskPendingSectorsCritical
+        expr: telemetryd_smart_attribute{attribute="current_pending_sector_count"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk {{ $labels.disk }} has pending sectors"
+          description: "S.M.A.R.T. attribute 197 is non-zero on {{ $labels.disk }} — plan for replacement."
+
+      - alert: DiskUncorrectableSectors
+        expr: telemetryd_smart_attribute{attribute="offline_uncorrectable_sector_count"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk {{ $labels.disk }} has uncorrectable sectors"
+          description: "S.M.A.R.T. attribute 198 is non-zero on {{ $labels.disk }} — data loss risk, replace immediately."
+
+      - alert: ThermalDriftHigh
+        expr: telemetryd_thermal_celsius > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Thermal zone {{ $labels.zone }} running hot"
+          description: "{{ $labels.zone }} at {{ $value }}°C for 2+ minutes."
+
+      - alert: HardwareFaultsDetected
+        expr: increase(telemetryd_kmsg_faults_total[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "MCE/ECC/AER fault(s) detected"
+          description: "{{ $value }} hardware fault line(s) seen in kmsg over the last 10 minutes."

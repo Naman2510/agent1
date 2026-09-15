@@ -1,0 +1,109 @@
+{
+  "title": "Bare-Metal Edge Server — Hardware Telemetry",
+  "uid": "edge-hw-telemetry",
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Thermal Zones (°C)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "telemetryd_thermal_celsius",
+          "legendFormat": "{{zone}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 70 },
+              { "color": "red", "value": 85 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Disk Endurance — Reallocated Sectors (Attr 5)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "telemetryd_smart_attribute{attribute=\"reallocated_sector_count\"}",
+          "legendFormat": "{{disk}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Disk Endurance — Pending / Uncorrectable Sectors (Attr 197/198)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "telemetryd_smart_attribute{attribute=~\"current_pending_sector_count|offline_uncorrectable_sector_count\"}",
+          "legendFormat": "{{disk}} / {{attribute}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Hardware Faults (MCE / ECC / AER)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "increase(telemetryd_kmsg_faults_total[5m])",
+          "legendFormat": "faults / 5m"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Interface Drop Counters",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(node_network_receive_drop_total[5m])",
+          "legendFormat": "{{device}} rx drops/s"
+        },
+        {
+          "expr": "rate(node_network_transmit_drop_total[5m])",
+          "legendFormat": "{{device}} tx drops/s"
+        }
+      ]
+    }
+  ]
+}

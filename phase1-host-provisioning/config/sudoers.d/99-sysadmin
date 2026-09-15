@@ -1,0 +1,23 @@
+# Phase 1 — isolated sudoers policy with full command audit logging.
+# Install to: /etc/sudoers.d/99-sysadmin  (mode 0440, owned root:root)
+# ALWAYS validate before installing: visudo -c -f 99-sysadmin
+#
+# Every command run via sudo is logged to /var/log/sudo_audit.log in
+# addition to the syslog/journal, giving a durable, greppable audit trail
+# independent of journald rotation policy.
+
+Defaults    logfile="/var/log/sudo_audit.log"
+Defaults    log_input, log_output
+Defaults    iolog_dir="/var/log/sudo-io"
+Defaults    passwd_tries=3
+Defaults    timestamp_timeout=5
+Defaults    use_pty
+
+## Members of the sysadmin group get full root, but every action is audited.
+%sysadmin ALL=(ALL:ALL) ALL
+
+## The unprivileged telemetry service user is granted exactly the one
+## command it needs (smartctl) with no password prompt, nothing else —
+## see phase3-telemetry/README.md for why CAP_SYS_RAWIO on the binary is
+## preferred over this in production; kept here as a documented fallback.
+telemetry ALL=(root) NOPASSWD: /usr/sbin/smartctl --json=c /dev/*

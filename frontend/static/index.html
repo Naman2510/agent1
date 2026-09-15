@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edge Server Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Bare-Metal Edge Server</h1>
+    <div class="topbar-status">
+      <span id="conn-dot" class="dot dot-unknown"></span>
+      <span id="conn-label">connecting…</span>
+      <span class="refresh-label">auto-refresh 5s</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="cards">
+      <div class="card" id="card-power">
+        <h2>Power</h2>
+        <div class="big-value" id="power-state">—</div>
+        <div class="muted" id="power-detail">no data yet</div>
+      </div>
+      <div class="card" id="card-raid">
+        <h2>RAID</h2>
+        <div class="big-value" id="raid-state">—</div>
+        <div class="muted" id="raid-detail">no data yet</div>
+      </div>
+      <div class="card" id="card-thermal">
+        <h2>Thermal</h2>
+        <div class="big-value" id="thermal-max">—</div>
+        <div class="muted" id="thermal-detail">no data yet</div>
+      </div>
+      <div class="card" id="card-faults">
+        <h2>Hardware Faults</h2>
+        <div class="big-value" id="fault-count">—</div>
+        <div class="muted">MCE / ECC / AER (cumulative)</div>
+      </div>
+    </section>
+
+    <section class="panels">
+      <div class="panel" id="panel-storage">
+        <h2>Storage</h2>
+        <div id="mdstat-body" class="mono">loading…</div>
+        <h3>S.M.A.R.T. attributes</h3>
+        <table id="smart-table">
+          <thead><tr><th>Disk</th><th>Reallocated (5)</th><th>Pending (197)</th><th>Uncorrectable (198)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="panel" id="panel-thermal">
+        <h2>Thermal Zones</h2>
+        <table id="thermal-table">
+          <thead><tr><th>Zone</th><th>°C</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="panel" id="panel-network">
+        <h2>Network</h2>
+        <div id="network-body" class="mono">loading…</div>
+      </div>
+
+      <div class="panel panel-wide" id="panel-simstorage">
+        <h2>Storage Simulation <span class="badge-sim">SIMULATED — not real disks</span></h2>
+        <p class="muted">
+          A real, tested software RAID1 model — see
+          <code>phase1-host-provisioning/storage_sim/README.md</code>. Nothing
+          on this panel touches a real block device or real <code>mdadm</code>.
+        </p>
+
+        <div class="oob-row">
+          <label>Array
+            <select id="sim-array-select"><option value="">(none)</option></select>
+          </label>
+          <button id="btn-sim-refresh">Refresh</button>
+          <button id="btn-sim-new">+ New Array</button>
+        </div>
+
+        <div id="sim-status-body" class="mono">select or create an array</div>
+        <div id="sim-rebuild-bar-wrap" hidden>
+          <div class="progress-track"><div id="sim-rebuild-bar" class="progress-fill"></div></div>
+          <div class="muted" id="sim-rebuild-label"></div>
+        </div>
+
+        <div class="oob-row">
+          <label>Block # <input id="sim-block-index" value="0" size="4"></label>
+          <label>Data <input id="sim-block-data" placeholder="text to write" size="20"></label>
+          <button id="btn-sim-write">Write</button>
+          <button id="btn-sim-read">Read</button>
+        </div>
+
+        <div class="oob-row">
+          <label>Member <input id="sim-member-label" placeholder="e.g. tank-0" size="10"></label>
+          <button id="btn-sim-fail">Fail</button>
+          <button id="btn-sim-remove">Remove</button>
+          <button id="btn-sim-add">Add (rebuild)</button>
+        </div>
+
+        <div class="oob-row">
+          <label>Corrupt block # <input id="sim-corrupt-block" value="0" size="4"></label>
+          <button id="btn-sim-corrupt">Inject Corruption</button>
+          <button id="btn-sim-hwfail">Simulate Hardware Failure</button>
+          <button id="btn-sim-scrub">Scrub + Repair</button>
+        </div>
+
+        <pre id="sim-output" class="mono output-box">no action taken yet</pre>
+      </div>
+
+      <div class="panel" id="panel-oob">
+        <h2>Out-of-Band Control</h2>
+        <p class="muted">Talks to the Redfish endpoint configured in <code>frontend/config.yaml</code>.</p>
+        <div class="oob-row">
+          <label>Reset type
+            <select id="reset-type">
+              <option value="cycle">Power Cycle</option>
+              <option value="on">On</option>
+              <option value="off">Force Off</option>
+              <option value="graceful-shutdown">Graceful Shutdown</option>
+              <option value="force-restart">Force Restart</option>
+            </select>
+          </label>
+          <button id="btn-power-cycle">Send Reset</button>
+        </div>
+        <div class="oob-row">
+          <label>Boot target
+            <select id="boot-target">
+              <option value="pxe">PXE</option>
+              <option value="hdd">HDD</option>
+              <option value="cd">CD</option>
+              <option value="usb">USB</option>
+              <option value="bios-setup">BIOS Setup</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          <button id="btn-boot-override">Set Next Boot</button>
+        </div>
+        <div class="oob-row">
+          <label>Drive <input id="led-drive" value="1" size="3"></label>
+          <select id="led-state">
+            <option value="Blinking">Blinking</option>
+            <option value="Lit">Lit</option>
+            <option value="Off">Off</option>
+          </select>
+          <button id="btn-set-led">Set LED</button>
+        </div>
+        <pre id="oob-output" class="mono output-box">no action taken yet</pre>
+      </div>
+
+      <div class="panel" id="panel-drill">
+        <h2>Fault Drill (simulate only)</h2>
+        <p class="muted">
+          Runs <code>fault_drill.sh</code> with <code>SIMULATE=1</code> —
+          this never touches a real array or a real BMC, regardless of what
+          you enter below. To run a real drill, use the CLI directly (see
+          <code>phase4-oob-lifecycle/README.md</code>).
+        </p>
+        <div class="oob-row">
+          <label>Failed partition <input id="drill-part" value="/dev/sdb1"></label>
+          <label>Drive slot id <input id="drill-drive" value="2" size="3"></label>
+          <button id="btn-run-drill">Run Simulated Drill</button>
+        </div>
+        <pre id="drill-output" class="mono output-box">no drill run yet</pre>
+      </div>
+
+      <div class="panel" id="panel-alerts">
+        <h2>Alert Feed</h2>
+        <p class="muted">
+          Populated live when telemetryd's <code>webhook_url</code> points
+          at this dashboard's <code>/api/alerts/ingest</code>.
+        </p>
+        <ul id="alerts-list"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

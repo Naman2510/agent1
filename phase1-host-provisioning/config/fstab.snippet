@@ -1,0 +1,5 @@
+# Append the real UUID=... line to /etc/fstab (03-format-mount.sh does this
+# for you). noatime avoids write amplification on every read; nodev/nosuid
+# reduce the blast radius of anything landing on this data volume.
+#
+# UUID=<replace-me>  /srv/data  ext4  defaults,noatime,nodev,nosuid  0  2

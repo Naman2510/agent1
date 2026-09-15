@@ -1,0 +1,24 @@
+# telemetryd configuration.
+# Install to: /etc/telemetryd/config.yaml
+
+poll_interval_seconds: 30
+
+# Sliding window for anomaly detection (spec: 5 minutes) — a value must
+# stay elevated across this whole window before it's treated as a real
+# breach rather than a transient spike.
+window_seconds: 300
+thermal_drift_threshold_c: 15.0
+
+disks:
+  - /dev/sda
+  - /dev/sdb
+
+thermal_zones_glob: "/sys/class/thermal/thermal_zone*/temp"
+kmsg_path: "/dev/kmsg"
+
+textfile_collector_path: "/var/lib/node_exporter/textfile_collector/hardware.prom"
+
+# Slack incoming webhook, Discord webhook, or an Alertmanager
+# /api/v2/alerts-compatible receiver — any endpoint that accepts a JSON POST.
+webhook_url: "https://hooks.slack.com/services/REPLACE/ME/WITH_YOUR_WEBHOOK"
+webhook_timeout_seconds: 5

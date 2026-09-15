@@ -1,0 +1,10 @@
+# Example /etc/mdadm/mdadm.conf entry produced by:
+#   mdadm --detail --scan >> /etc/mdadm/mdadm.conf
+#
+# Replace the UUID with the real one from your array (mdadm --detail /dev/md0).
+
+DEVICE partitions
+ARRAY /dev/md0 metadata=1.2 name=any:0 UUID=00000000:00000000:00000000:00000000
+
+# After editing, always rebuild initramfs so the array assembles at boot:
+#   update-initramfs -u
