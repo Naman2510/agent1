@@ -1,0 +1,70 @@
+# Local development stack. Run from the repository root:
+#   docker compose -f infra/compose.yaml up --build
+#
+# Phase 1 brings up postgres, redis, and the backend. The frontend, worker, and MLflow services
+# arrive with the phases that need them (7, 6, 8).
+
+name: vaanios
+
+services:
+  postgres:
+    # pgvector from the start, so the Phase 5 migration needs no infrastructure change and CI
+    # matches local development.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: vaanios
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vaanios}
+      POSTGRES_DB: vaanios
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vaanios -d vaanios"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # No persistence: everything in Redis is ephemeral and rebuildable by design
+    # (ARCHITECTURE §13). Persisting it would imply a durability guarantee we do not make.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: infra/docker/backend.Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      VAANIOS_DATABASE_URL: postgresql+asyncpg://vaanios:${POSTGRES_PASSWORD:-vaanios}@postgres:5432/vaanios
+      VAANIOS_REDIS_URL: redis://redis:6379/0
+      VAANIOS_JWT_SECRET: ${VAANIOS_JWT_SECRET:?set VAANIOS_JWT_SECRET in .env - see .env.example}
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/docker/backend.Dockerfile
+    environment:
+      VAANIOS_ENVIRONMENT: ${VAANIOS_ENVIRONMENT:-development}
+      VAANIOS_DATABASE_URL: postgresql+asyncpg://vaanios:${POSTGRES_PASSWORD:-vaanios}@postgres:5432/vaanios
+      VAANIOS_REDIS_URL: redis://redis:6379/0
+      VAANIOS_JWT_SECRET: ${VAANIOS_JWT_SECRET:?set VAANIOS_JWT_SECRET in .env - see .env.example}
+      VAANIOS_CORS_ORIGINS: ${VAANIOS_CORS_ORIGINS:-http://localhost:3000}
+      VAANIOS_LOG_JSON: ${VAANIOS_LOG_JSON:-true}
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+
+volumes:
+  pgdata:

@@ -1,0 +1,126 @@
+"""Conversation session and message persistence."""
+
+import uuid
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any, cast
+
+from sqlalchemy import CursorResult, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import Message, MessageRole, Session, SessionStatus
+
+
+class SessionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self, *, student_id: uuid.UUID, transport: str, client_info: dict[str, Any]
+    ) -> Session:
+        row = Session(student_id=student_id, transport=transport, client_info=client_info)
+        self._session.add(row)
+        await self._session.flush()
+        return row
+
+    async def get_for_student(self, session_id: uuid.UUID, student_id: uuid.UUID) -> Session | None:
+        """Scoped lookup. There is deliberately no unscoped get_by_id: an IDOR needs a caller to
+        be able to ask for someone else's row, and this repository offers no way to."""
+        result = await self._session.execute(
+            select(Session).where(Session.id == session_id, Session.student_id == student_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_for_student(
+        self, student_id: uuid.UUID, *, limit: int = 20, offset: int = 0
+    ) -> Sequence[Session]:
+        result = await self._session.execute(
+            select(Session)
+            .where(Session.student_id == student_id)
+            .order_by(Session.started_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return result.scalars().all()
+
+    async def count_for_student(self, student_id: uuid.UUID) -> int:
+        result = await self._session.execute(
+            select(func.count()).select_from(Session).where(Session.student_id == student_id)
+        )
+        return int(result.scalar_one())
+
+    async def end(
+        self, session_id: uuid.UUID, student_id: uuid.UUID, status: SessionStatus
+    ) -> bool:
+        result = await self._session.execute(
+            update(Session)
+            .where(
+                Session.id == session_id,
+                Session.student_id == student_id,
+                Session.status == SessionStatus.ACTIVE,
+            )
+            .values(status=status, ended_at=datetime.now(UTC))
+        )
+        return bool(cast(CursorResult[Any], result).rowcount)
+
+    async def count_active(self) -> int:
+        result = await self._session.execute(
+            select(func.count()).select_from(Session).where(Session.status == SessionStatus.ACTIVE)
+        )
+        return int(result.scalar_one())
+
+
+class MessageRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def append(
+        self,
+        *,
+        session_id: uuid.UUID,
+        turn_index: int,
+        seq: int,
+        role: MessageRole,
+        content: str,
+        language: str | None = None,
+        was_interrupted: bool = False,
+        spoken_prefix_chars: int | None = None,
+        unspoken_remainder: str | None = None,
+        latency_ms: dict[str, Any] | None = None,
+        token_usage: dict[str, Any] | None = None,
+    ) -> Message:
+        message = Message(
+            session_id=session_id,
+            turn_index=turn_index,
+            seq=seq,
+            role=role,
+            content=content,
+            language=language,
+            was_interrupted=was_interrupted,
+            spoken_prefix_chars=spoken_prefix_chars,
+            unspoken_remainder=unspoken_remainder,
+            latency_ms=latency_ms or {},
+            token_usage=token_usage,
+        )
+        self._session.add(message)
+        await self._session.flush()
+        return message
+
+    async def list_for_session(
+        self, session_id: uuid.UUID, *, limit: int = 200
+    ) -> Sequence[Message]:
+        result = await self._session.execute(
+            select(Message)
+            .where(Message.session_id == session_id)
+            .order_by(Message.turn_index, Message.seq)
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def next_turn_index(self, session_id: uuid.UUID) -> int:
+        result = await self._session.execute(
+            select(func.coalesce(func.max(Message.turn_index), -1)).where(
+                Message.session_id == session_id
+            )
+        )
+        return int(result.scalar_one()) + 1

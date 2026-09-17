@@ -12,9 +12,19 @@ design by walking the barge-in, injection, and cancellation paths by hand.
 **Grading.** **Critical** blocks Phase 1. **Major** must be scheduled into a named phase.
 **Minor** is recorded and may be deferred indefinitely.
 
-**Outcome:** 5 Critical (4 resolved in this phase, **1 open and blocking**), 11 Major, 7 Minor.
-**Gate status: CONDITIONALLY PASSED — Phase 1 is blocked on C-05 only**, which needs a decision from
-the project owner rather than engineering work. Details in §7.
+**Outcome:** 5 Critical (4 resolved in this phase, 1 partially resolved), 11 Major, 7 Minor.
+**Gate status: PASSED for Phases 1–2.** Phase 3 remains gated on the outstanding half of C-05 (the
+truncated source specification). Details in §7.
+
+**Update 2026-09-17 — owner decisions received:**
+- **C-05(a) scope: resolved.** The MVP cut line in [ROADMAP.md](ROADMAP.md#mvp-cut-line) is agreed.
+- **C-05(b) truncated specification: still open.** Phases 1–10 remain a reconstruction from spec
+  §1–42. Phase 1 proceeds because it is scope-insensitive; the reconstruction should be confirmed
+  before Phase 3.
+- **M-01 Tamil: resolved — deferred past the MVP.** The README now claims three languages.
+- **M-11 spend ceiling: mechanism scheduled, value deferred.** Phase 2 ships the cap and the daily
+  voice-minute limit reading `VAANIOS_MONTHLY_SPEND_CAP_USD`; unset means no cap is enforced and the
+  application logs that fact at startup rather than implying a limit exists.
 
 ---
 
@@ -269,10 +279,12 @@ gate that only lists unresolved problems hides the reasoning that shaped the arc
 C-05 is answered; they are the least scope-sensitive work in the project and would survive most
 answers unchanged. Phase 3 onward must not begin until:
 
-- [ ] **C-05 (blocking):** the MVP cut line is agreed, including whether Tamil is in scope (M-01), and
-      the truncated specification is either supplied or the reconstructed roadmap is confirmed.
-- [ ] **M-11:** a monthly spend ceiling is stated.
-- [ ] M-01 decision recorded in the README so the language claim matches the plan.
+- [x] **C-05(a):** MVP cut line agreed (2026-09-17).
+- [ ] **C-05(b) (blocks Phase 3):** the remainder of the truncated specification is supplied, or the
+      reconstructed roadmap is confirmed.
+- [x] **M-11:** disposition agreed — mechanism in Phase 2, value set later in `.env`; no cap is
+      claimed while none is configured.
+- [x] **M-01:** Tamil deferred; the README language claim now matches the plan.
 
 All Major findings are scheduled into named phases above. Minor findings are recorded and require no
 action before Phase 1.

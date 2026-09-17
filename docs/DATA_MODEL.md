@@ -1,8 +1,14 @@
 # Data Model
 
-**Status:** Phase 0 design. [`db/schema.sql`](../db/schema.sql) is a *design reference*; once Phase 1
-lands, Alembic migrations in `backend/migrations/` are authoritative and the reference file is
-regenerated from them (`scripts/dump_schema.sh`) so the two cannot silently diverge.
+**Status:** Phase 1. Two schema files, with different jobs:
+
+| File | What it is |
+|---|---|
+| [`db/schema.sql`](../db/schema.sql) | The full **designed** schema — all 20 tables, including the RAG, memory, quiz and evaluation tables that later phases add. A design reference, not executed by the application. |
+| [`db/schema.current.sql`](../db/schema.current.sql) | **Generated** from a database built by `alembic upgrade head` — the schema that actually exists today (8 tables). Regenerate with `scripts/dump_schema.sh`. |
+
+Alembic migrations under `backend/migrations/` are authoritative. A migration arrives with the code
+that reads it, so Phase 1 creates only the identity and conversation tables.
 
 ## 1. Entity overview
 
@@ -123,7 +129,20 @@ written at run completion so the dashboard never depends on MLflow being up
   (DPDP Act erasure obligations — see [SECURITY.md](SECURITY.md)).
 - No application-level soft deletes in v1; erasure means erasure.
 
-## 8. Validation status
+## 8. Guarding against model/migration drift
+
+Phase 1 hit this for real. The migration declared server defaults (`role DEFAULT 'student'`,
+`is_active DEFAULT true`, and seven more) that the SQLAlchemy models did not, so
+`Base.metadata.create_all` and `alembic upgrade head` produced **different schemas** — and the test
+suite, which used `create_all`, was validating a schema that existed nowhere else.
+
+Two changes close it permanently:
+
+1. **The test suite builds its schema by running the migrations** (`tests/conftest.py`), so every
+   test exercises the production schema and a forgotten migration fails the suite.
+2. **CI runs `alembic check`**, which fails if the models have drifted from the migrations.
+
+## 9. Validation status
 
 `db/schema.sql` was executed against a real PostgreSQL 16.13 instance on 2026-09-17, not merely
 eyeballed. Result:

@@ -18,7 +18,7 @@ conversation in English and Hinglish, interrupt it, get answers grounded in cour
 inspectable citations, and see per-stage latency; and at least the `retrieval` and `voice` suites
 produce recorded numbers with one honest experiment write-up.
 
-**Valuable, after the above works** — Tamil, the full six suites, memory extraction, quizzes and
+**Valuable, after the above works** — Tamil (decided 2026-09-17: deferred past the MVP, M-01), the full six suites, memory extraction, quizzes and
 study plans, the admin dashboard, experiment tracking UI.
 
 **Deferred with trigger conditions, not promised** — fine-tuning (only if EXP-010's baseline shows
@@ -32,13 +32,27 @@ run.
 
 ## Phases
 
-### Phase 0 — Architecture & planning ✅ *(this deliverable)*
+### Owner decisions (2026-09-17)
+
+Recorded here because they closed two Gate 0 findings:
+
+| Question | Decision |
+|---|---|
+| MVP cut line | Agreed as written below. Phase 1 started immediately. |
+| Tamil in the MVP? (M-01) | **No** — deferred past the cut line. Architecture stays language-agnostic; the README claims three languages until Tamil is measured. |
+| Monthly spend ceiling (M-11) | Deferred. Phase 2 implements the cap mechanism and daily voice-minute limit with the value set in `.env` (`VAANIOS_MONTHLY_SPEND_CAP_USD`), unset meaning "no cap enforced" and logged loudly as such. |
+
+### Phase 0 — Architecture & planning ✅
 ARCHITECTURE, DATA_MODEL + reference DDL, API contract, EVALUATION, DATASET, SECURITY, RISKS,
 ROADMAP, 16 ADRs, and the Gate 0 audit. No implementation.
 **Gate 0:** [`PHASE_0_AUDIT.md`](PHASE_0_AUDIT.md) — blocking findings must be resolved or explicitly
 accepted before Phase 1.
 
-### Phase 1 — Backend foundation
+### Phase 1 — Backend foundation ✅
+Delivered 2026-09-17: 61 tests, 93% coverage, lint and types clean. Gate 1 passed —
+[`PHASE_1_AUDIT.md`](PHASE_1_AUDIT.md). Account erasure was pulled forward from the API design
+because the security checklist already required the cascade test.
+
 FastAPI app factory, settings via Pydantic Settings, Postgres + Alembic migrations matching
 `db/schema.sql`, SQLAlchemy models and repositories, auth (Argon2id + JWT + refresh rotation),
 Redis-backed rate limiting, structured logging with `request_id`, health endpoints, Docker Compose

@@ -1,8 +1,8 @@
 # VaaniOS
 
-A multilingual conversational AI voice mentor for Indian students — English, Hindi, Hinglish
-(code-switched), and Tamil — built as a **measurable** voice pipeline rather than a thin wrapper
-around an LLM API.
+A multilingual conversational AI voice mentor for Indian students — **English, Hindi, and Hinglish
+(code-switched)** in the MVP, with **Tamil deferred to a later phase** — built as a **measurable**
+voice pipeline rather than a thin wrapper around an LLM API.
 
 ---
 
@@ -10,8 +10,8 @@ around an LLM API.
 
 | | |
 |---|---|
-| **Current phase** | Phase 0 — Architecture & Planning |
-| **Implementation** | None. This repository currently contains design documents only. |
+| **Current phase** | Phase 1 — Backend Foundation (in progress) |
+| **Implementation** | Phase 1 complete — 61 tests passing, 93% backend coverage. No voice loop, agent, or RAG yet. |
 | **Benchmarks** | None. Every metric table in this repository is empty by design. |
 | **Last updated** | 2026-09-17 |
 
@@ -92,9 +92,46 @@ not a rewrite — see [ADR-0016](docs/adr/0016-provider-abstraction-boundaries.m
 
 ## Setup
 
-Not available yet — there is no application code. Phase 1 delivers `docker compose up` with a
-reproducible local stack. The intended developer experience is documented in
-[`docs/ROADMAP.md`](docs/ROADMAP.md#phase-1--backend-foundation).
+```bash
+cp .env.example .env
+# set VAANIOS_JWT_SECRET — e.g. openssl rand -base64 48
+docker compose -f infra/compose.yaml up --build
+```
+
+Postgres, Redis, migrations, and the API come up together; the API is on `http://localhost:8000`
+with interactive docs at `/docs` (disabled in production builds).
+
+```bash
+curl localhost:8000/v1/health   # {"status":"ok",...}
+curl localhost:8000/v1/ready    # per-dependency readiness
+```
+
+**Running the tests** needs a PostgreSQL to point at — the suite runs the real migrations against a
+real database rather than a stand-in, because the schema relies on enums, JSONB, citext, partial
+indexes and check constraints:
+
+```bash
+cd backend
+pip install -e ".[dev]"
+export VAANIOS_TEST_DATABASE_URL=postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
+pytest -q                       # 61 tests
+ruff check . && mypy app
+```
+
+Without a Docker daemon, `scripts/dev_db.sh start` brings up a local cluster instead (no pgvector,
+so it is only sufficient through Phase 4).
+
+## What works today
+
+Phase 1 is the backend foundation — deliberately no voice, agent, or RAG yet:
+
+- Registration, login, `/auth/me`, profile update, and **account erasure** (hard delete, cascading)
+- Access tokens (15 min) with **single-use refresh tokens**; replaying a rotated token revokes the
+  whole rotation family
+- Conversation sessions and transcript reads, scoped so one student cannot reach another's data
+- Three-class Redis token-bucket rate limiting (anonymous / authenticated / AI operations)
+- Structured JSON logs with request correlation, secret redaction, and transcript hashing
+- Reversible Alembic migrations, verified in CI against the same pgvector image Compose uses
 
 ## Evaluation approach
 
@@ -138,6 +175,9 @@ These are architectural facts, not TODOs that will quietly disappear:
   experiment with a documented baseline. See [ADR-0011](docs/adr/0011-language-detection-strategy.md).
 - **No acoustic echo cancellation.** Without headphones the system can hear its own TTS and
   self-interrupt. See [R-07 in the risk register](docs/RISKS.md).
+- **Tamil is not in the MVP.** Nothing in the architecture is Tamil-specific except datasets and
+  voice selection, but the language claim stays at three until Tamil is measured
+  ([M-01](docs/PHASE_0_AUDIT.md)).
 
 ## License & data
 
