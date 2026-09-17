@@ -1,0 +1,227 @@
+# Evaluation Framework
+
+**Status:** Phase 0 — methodology design. **No suite has been run. Every metric table in this
+document is empty, and will stay empty until a recorded run fills it.**
+
+The evaluation subsystem is a first-class component, not a test folder. Its job is to make the
+statement "this change improved the system" falsifiable.
+
+---
+
+## 1. Principles
+
+1. **Per-stage attribution.** Six suites, each exercising one boundary, so a regression points at a
+   component. An end-to-end score alone tells you something broke, not what.
+2. **Everything is versioned.** A result is `(suite, dataset_version, config, git_sha)`. A metric
+   without those four is not a result.
+3. **Metrics are defined before they are measured**, including their known invalidities (§3.1).
+4. **Judges are audited.** An LLM judge is a model under evaluation, not an oracle (§5.3).
+5. **CI must be cheap and deterministic.** Paid model calls are not in the default CI path (§6).
+
+## 2. Suite inventory
+
+| Suite | Question it answers | Fixture type | Cost tier |
+|---|---|---|---|
+| `stt` | Do we hear the student correctly, per language? | audio + reference transcript | local model / paid ASR |
+| `retrieval` | Do we find the right course material? | query + labelled relevant chunk IDs | free (local embeddings) |
+| `agent` | Does the mentor choose the right tool with the right arguments? | scenario + expected tool trace | paid LLM, mockable |
+| `response` | Is the answer grounded, relevant, and in the right language? | question + context + rubric | paid LLM + judge |
+| `voice` | Does the conversation feel responsive? | scripted audio sessions | full stack |
+| `e2e` | Do complete multi-turn conversations work, including interruption? | scripted sessions + assertions | full stack (mocked in CI) |
+
+Each writes one `evaluation_runs` row plus per-case `evaluation_results`, and logs to MLflow.
+Invocation: `python -m eval.runner --suite retrieval --dataset v1 --config configs/baseline.yaml`.
+
+## 3. STT evaluation
+
+### 3.1 Metrics, and where they lie
+
+| Metric | Definition | Known invalidity |
+|---|---|---|
+| WER | word errors / reference words, after normalisation | Meaningless for Tamil (agglutinative — one wrong morpheme fails a whole word) and unstable for romanized Hinglish (`kyun`/`kyon`/`kyu` are the same word) |
+| CER | character errors / reference characters | Primary metric for Tamil and Devanagari; less interpretable for English |
+| Entity WER | WER restricted to Indian names, technical terms, and numerals | The metric that actually matters for a mentor; a 5% WER that eats every formula is useless |
+| Numeral accuracy | exact match after numeric normalisation ("3.5" ≡ "three point five") | Requires a normaliser that is itself language-specific |
+| LID accuracy | per-utterance language label vs. reference | `mixed` is a judgement call; the reference set defines a ≥20%-of-tokens threshold |
+| Latency | `turn_end → final transcript`, p50/p95 | Provider-dependent and network-dependent; reported with the run config |
+
+**Normalisation is part of the metric.** The pipeline (lowercase, punctuation strip, Unicode NFC,
+numeral expansion, a documented romanized-Hindi spelling-variant map) is versioned alongside the
+dataset, because changing the normaliser silently changes every historical WER. Results are reported
+as `WER@norm-v1`.
+
+### 3.2 Reporting
+
+Always broken down by language; the aggregate is reported last because it hides the interesting case.
+
+| Language | Cases | WER@norm-v1 | CER | Entity WER | LID acc | p95 latency |
+|---|---|---|---|---|---|---|
+| English | — | — | — | — | — | — |
+| Hindi (Devanagari) | — | — | — | — | — | — |
+| Hinglish (romanized, code-switched) | — | — | — | — | — | — |
+| Tamil | — | — | — | — | — | — |
+| Noisy (any language, SNR ≤ 10 dB) | — | — | — | — | — | — |
+
+## 4. Retrieval evaluation
+
+| Metric | Definition |
+|---|---|
+| Recall@k | share of labelled-relevant chunks in the top *k* (k ∈ {5, 10, 20}) |
+| Precision@5 | labelled-relevant share of the top 5 |
+| nDCG@10 | rank-sensitive quality with graded relevance (0/1/2) |
+| MRR | reciprocal rank of the first relevant chunk |
+| Context relevance | judge-scored 0–1 usefulness of the assembled context |
+| Filter fidelity | share of results satisfying the requested metadata filter (a hard bug if < 1.0) |
+
+Labelling: for each query, annotators mark chunks as `irrelevant / partially relevant / fully
+relevant` from a pooled candidate list (top-20 from vector, lexical, and reranked runs) to limit pool
+bias. The pooling method and its bias are recorded in [DATASET.md](DATASET.md).
+
+**Ablations run as a standard grid**, because the claim "hybrid retrieval helps" is exactly the kind
+of thing that is usually asserted and rarely tested:
+
+| Config | Recall@10 | nDCG@10 | p95 latency |
+|---|---|---|---|
+| vector only | — | — | — |
+| lexical only | — | — | — |
+| hybrid (RRF) | — | — | — |
+| hybrid + reranker | — | — | — |
+| hybrid + reranker + heading-path prefix | — | — | — |
+
+Reported per language as well as overall, specifically to expose the weak Indic lexical arm
+(ARCHITECTURE §11).
+
+## 5. Agent, response, and voice evaluation
+
+### 5.1 Agent (tool use)
+
+Scenarios are written as expected traces, and a case passes only on the whole trace:
+
+| Field | Example |
+|---|---|
+| utterance | "How am I doing in electromagnetic theory?" |
+| expected tools | `get_student_progress`, then optionally `retrieve_previous_conversation` |
+| forbidden tools | `search_knowledge` (it would answer from the textbook, not the student's record) |
+| argument assertions | `subject == "Electromagnetic Theory"`; **no** `student_id` present |
+| expected outcome | response references mastery figures actually present in the tool result |
+
+Metrics: tool-selection accuracy, argument exact/semantic match, **unnecessary-call rate** (a call
+that did not change the answer), task-completion rate, and failure-recovery rate (behaviour when a
+tool returns an error — the mentor must say so, not invent the data). Gated vs. ungated tool
+exposure is reported side by side so the `IntentGate` has to earn its place.
+
+### 5.2 Response quality
+
+Dimensions scored per response: relevance, coherence, **groundedness** (every factual claim
+attributable to retrieved context), citation correctness, helpfulness, language consistency
+(answered in the language asked), conciseness (voice answers that run long are a defect), and
+hallucination rate on adversarial "hallucination trap" cases.
+
+### 5.3 Judge methodology, stated up front
+
+- **Judge model:** a Claude model from a *different* tier than the one under test, pinned by exact ID
+  in the run config. Same-model judging inflates scores through self-preference.
+- **Prompt:** versioned in `eval/judges/`, with a rubric, few-shot anchors, and forced structured
+  output (`output_config.format`) so scores are parseable rather than regex-scraped.
+- **Calibration:** a ≥100-case human-labelled subset per language; agreement reported as Cohen's κ
+  and Spearman ρ. **A judge with κ < 0.6 is reported as unreliable and its scores are not used to
+  make decisions.** This is the check that keeps LLM-judge numbers from being decoration.
+- **Determinism:** judge runs pin the model ID and use the Batch API (50% cost) for offline suites.
+  Judge scores are still not deterministic; every reported score carries the run ID.
+- **Limitations, written into the report:** position bias (mitigated by randomised presentation
+  order), verbosity bias, weaker judging in Tamil and romanized Hinglish than in English, and the
+  fact that a judge cannot assess pronunciation at all — that needs human raters.
+
+| Dimension | EN | HI | Hinglish | TA | Human κ |
+|---|---|---|---|---|---|
+| Groundedness | — | — | — | — | — |
+| Language consistency | — | — | — | — | — |
+| Hallucination rate | — | — | — | — | — |
+
+### 5.4 Voice / latency
+
+Measured from real runs against scripted audio sessions, never estimated:
+
+| Metric | Definition | p50 | p95 |
+|---|---|---|---|
+| TTFA | user speech end → first audio sample played | — | — |
+| TTFA (filler enabled) | same, with cached opener audio | — | — |
+| STT final latency | turn end → final transcript | — | — |
+| LLM TTFT | request sent → first token | — | — |
+| TTS TTFB | first sentence → first audio byte | — | — |
+| Barge-in stop | voice onset → last sample played | — | — |
+| End-to-end turn | user speech end → response fully played | — | — |
+
+TTFA is reported with and without the filler-audio optimisation, and a filler-enabled number is
+never presented as the bare TTFA — that would be measuring a trick.
+
+TTS quality (intelligibility, pronunciation of Indian names and technical terms, code-switch
+handling) is assessed by **human MOS-style rating** on a fixed script; there is no automatic metric
+for this and none will be invented.
+
+## 6. Test and CI tiers
+
+| Tier | Runs on | Contents | External calls |
+|---|---|---|---|
+| T0 | every push | unit + integration + e2e with all providers faked | none |
+| T1 | every push | `retrieval` suite on a small fixture corpus | none (local embeddings) |
+| T2 | nightly + pre-release | `stt` (local model), full `retrieval` | none |
+| T3 | manual / release gate | `agent`, `response`, `voice`, `e2e` live | paid |
+
+T0 mocks at the **provider interface** (`LLMProvider`, `STTProvider`, …), never by patching HTTP, so
+tests exercise real orchestration logic. Determinism comes from: recorded provider fixtures, a fake
+clock for latency assertions, and a seeded fake embedding provider.
+
+Tests that must exist and must be behavioural, not `assert x is not None` (spec §36):
+
+- Barge-in: every state transition, including the illegal ones; stale-`turn_id` frames are dropped;
+  the stored assistant message equals the spoken prefix for a given ACK sequence.
+- Tool gating: a progress question selects `get_student_progress` and **not** `search_knowledge`.
+- Authority: a tool-argument `student_id` injected by a prompt-injection fixture cannot reach the
+  database.
+- Citations: a model-invented citation ID is dropped rather than surfaced.
+- Chunking: a 3.5 kΩ / Devanagari danda / Tamil punctuation fixture set is never split mid-token.
+- Rate limiting: the 61st authenticated request in a minute returns 429 with `Retry-After`.
+- Prompt cache: turn two of a session reports `cache_read_input_tokens > 0`.
+
+## 7. Experiment workflow
+
+Every AI-affecting change follows spec §31 and lands as a row in `experiments`:
+
+```
+Observation (from a metric or a failure case)
+   → Hypothesis (falsifiable)
+   → Design (ONE variable, which suites, what difference would matter)
+   → Baseline run (recorded)
+   → Candidate run (recorded)
+   → Compare + inspect failure cases
+   → Decision: adopt / reject / inconclusive, with rationale
+```
+
+Registered experiments (all **pending** — none has been designed in detail, let alone run):
+
+| ID | Hypothesis | Variable | Suites | Status |
+|---|---|---|---|---|
+| EXP-001 | A managed Indic ASR beats local faster-whisper on Hinglish entity WER | STT provider | stt | pending |
+| EXP-002 | Contextual vocabulary biasing reduces technical-term errors | ASR prompt/vocab | stt | pending |
+| EXP-003 | Semantic endpointing cuts turn-end latency without more premature cutoffs | turn detector | voice, e2e | pending |
+| EXP-004 | Response latency/quality trade across LLM tiers | LLM model | response, voice | pending |
+| EXP-005 | Short first TTS chunk improves TTFA without hurting prosody ratings | chunker policy | voice + human | pending |
+| EXP-006 | Transliterating romanized Hindi before Indic TTS improves intelligibility | TTS preprocessing | human MOS | pending |
+| EXP-007 | Hybrid retrieval beats vector-only on Hindi/Tamil queries | retriever | retrieval | pending |
+| EXP-008 | Heading-path prefixing improves recall on lecture material | chunk enrichment | retrieval | pending |
+| EXP-009 | Intent-gated tool exposure improves selection without hurting completion | tool gate | agent | pending |
+| EXP-010 | A fine-tuned intent classifier beats the prompted baseline | classifier | agent | pending |
+
+An experiment that changes two variables is recorded as `inconclusive`. This is enforced socially,
+by review, and structurally, by `experiments.variable_changed` being a single column.
+
+## 8. Dashboard
+
+The admin dashboard (spec §33) reads only from `evaluation_runs`, `evaluation_results`,
+`experiments`, `tool_calls`, and `messages.latency_ms` — real system data, with no hardcoded numbers
+and no placeholder charts. Panels: system health (active sessions, error rate, stage-failure counts),
+model quality (latest run per suite, per language), experiment comparison (baseline vs. candidate),
+and a failure-case browser backed by `evaluation_results WHERE passed = false`.
+
+If a suite has never run, the dashboard shows "not measured" — not a zero, and not a sample value.

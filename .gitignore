@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Secrets & local config
+.env
+.env.*
+!.env.example
+
+# Models, audio, artifacts (never commit binaries or raw voice data)
+models/
+*.onnx
+*.bin
+*.pt
+*.safetensors
+*.wav
+*.mp3
+*.webm
+*.ogg
+!datasets/**/fixtures/*.wav
+
+# Experiment tracking / eval output
+mlruns/
+mlartifacts/
+eval_output/
+.trace/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
