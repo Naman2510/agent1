@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo demo
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo demo test_scheduler_v2_heldout_correctness collect_scheduler_v2_heldout_dataset train_scheduler_v2
 
 help:
 	@echo "Available targets:"
@@ -64,6 +64,12 @@ help:
 	@echo "                 scale + write results/mixed_workloads_report.md"
 	@echo "  demo         - Phase 17: run the entire verified pipeline end-to-end"
 	@echo "                 (scripts/run_full_demo.sh; pass ARGS=--with-synthesis for Phase 12 too)"
+	@echo "  test_scheduler_v2_heldout_correctness - post-v1: verify the 4 round-2"
+	@echo "                 held-out workloads (vecadd/dot N=6,12)"
+	@echo "  collect_scheduler_v2_heldout_dataset - post-v1: write"
+	@echo "                 scheduler/training/heldout_dataset_v2.csv from real measured cycles"
+	@echo "  train_scheduler_v2 - post-v1: retrain on all 20 known workloads (fixes the"
+	@echo "                 vecadd N=2 misprediction) + validate on the round-2 held-out set"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -145,3 +151,12 @@ run_mixed_workload_demo:
 
 demo:
 	@./scripts/run_full_demo.sh $(ARGS)
+
+test_scheduler_v2_heldout_correctness:
+	@./scripts/run_scheduler_v2_heldout_correctness.sh
+
+collect_scheduler_v2_heldout_dataset:
+	@python3 scheduler/benchmarks/collect_scheduler_v2_heldout_dataset.py
+
+train_scheduler_v2:
+	@.venv/bin/python3 scheduler/training/train_scheduler_v2.py

@@ -70,6 +70,20 @@ MATMUL_EXTRA_SIZES = [2, 8]           # smallest useful, and MAX_DIM (largest)
 HELDOUT_VECADD_DOT_SIZES = [2, 3, 8, 32]
 HELDOUT_MATMUL_SIZES = [1]
 
+# Round-2 held-out sizes, added after Phase 17: once
+# scheduler/training/train_scheduler_v2.py merges Phase 13's dataset
+# AND Phase 14's held-out set into one 20-workload training set (to
+# fix the "only 11 samples" limitation), NONE of the original 20
+# workloads are held-out anymore -- these two brand-new vecadd/dot
+# sizes (N=6, between the old N=4/N=8 gap; N=12, between the old
+# N=8/N=16 gap) exist so the retrained model can still be scored
+# against genuinely unseen data. matmul gets no new round-2 size:
+# every valid size (1, 2, 4, 8) is bounded by MAX_DIM=8 (an RTL
+# parameter, not something this maintenance pass changes) and all
+# four are already training data after the merge -- see
+# docs/scheduler_v2.md for the honest accounting of this.
+HELDOUT_V2_VECADD_DOT_SIZES = [6, 12]
+
 
 def gen_cpu_vecadd(n):
     return f"""\
@@ -461,6 +475,14 @@ def main():
 
     for n in HELDOUT_MATMUL_SIZES:
         for name, gen in [("cpu_matmul", gen_cpu_matmul), ("accel_matmul", gen_accel_matmul)]:
+            path = os.path.join(OUT_DIR, f"{name}_n{n}.s")
+            with open(path, "w") as f:
+                f.write(gen(n))
+            written.append(path)
+
+    for n in HELDOUT_V2_VECADD_DOT_SIZES:
+        for name, gen in [("cpu_vecadd", gen_cpu_vecadd), ("cpu_dot", gen_cpu_dot),
+                           ("accel_vecadd", gen_accel_vecadd), ("accel_dot", gen_accel_dot)]:
             path = os.path.join(OUT_DIR, f"{name}_n{n}.s")
             with open(path, "w") as f:
                 f.write(gen(n))

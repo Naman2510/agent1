@@ -1,6 +1,6 @@
 # Performance Report (Phase 7)
 
-Generated 2026-09-14 23:36 UTC by `scripts/run_benchmarks.py` from actual Icarus Verilog simulation of `rtl/cpu/riscv_cpu_pipeline.sv`. Every number below comes directly from that simulation's performance counters (`rtl/cpu/perf_counters.sv`) -- none are estimated or hand-computed. Each program's correctness (the actual computed result, not just its timing) is separately verified by `sim/testbenches/tb_perf_counters.sv` (`make test_perf`), which this report does not re-derive.
+Generated 2026-09-17 16:39 UTC by `scripts/run_benchmarks.py` from actual Icarus Verilog simulation of `rtl/cpu/riscv_cpu_pipeline.sv`. Every number below comes directly from that simulation's performance counters (`rtl/cpu/perf_counters.sv`) -- none are estimated or hand-computed. Each program's correctness (the actual computed result, not just its timing) is separately verified by `sim/testbenches/tb_perf_counters.sv` (`make test_perf`), which this report does not re-derive.
 
 | Benchmark | Cycles | Instructions retired | CPI | Stalls | Branches | Taken | Load-use stalls | Forwarding events | Flushes |
 |---|---|---|---|---|---|---|---|---|---|

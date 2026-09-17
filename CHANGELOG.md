@@ -1074,3 +1074,58 @@ This is not a commit log — it records *why*, not just *what*.
   in substance (timestamps only) by the full `make demo` run.
 
 This is the final phase of the original 17-phase specification.
+
+## Post-v1 — AI Scheduler v2: Expanded Training Set (2026-09-17)
+
+- **Closed the loop Phase 14 deliberately left open.**
+  `docs/scheduler_pipeline.md` documented a real misprediction
+  (`vecadd N=2` predicted `cpu`, actually an accelerator win) and
+  explicitly named the fix -- "add the point and refit" -- while
+  leaving it undone so Phase 14's held-out evaluation stayed an
+  uncontaminated test of Phase 13's exact model. This round does that
+  fix properly: `scheduler/training/train_scheduler_v2.py` merges
+  Phase 13's `dataset.csv` (11 workloads) and Phase 14's
+  `heldout_dataset.csv` (9 workloads) into one real 20-workload
+  training set and refits from scratch, saved as a SEPARATE artifact
+  (`scheduler/models/scheduler_tree_v2.pkl`) -- Phase 13's original
+  model and `scheduler/inference/decide.py`'s default behavior are
+  untouched.
+
+- **Generated a genuinely fresh held-out set, since the old one just
+  got spent.** Two new vecadd/dot sizes (N=6, N=12 -- chosen to sit in
+  the remaining gaps between N=4/N=8 and N=8/N=16) were added to
+  `scheduler/benchmarks/gen_scheduler_programs.py`'s
+  `HELDOUT_V2_VECADD_DOT_SIZES` (purely additive; all 34 previously
+  generated programs are unaffected), correctness-verified against
+  Python-computed expected values in
+  `sim/testbenches/tb_scheduler_v2_heldout_correctness.sv` (16 checks,
+  passing under both Icarus Verilog and Verilator on first run), and
+  measured for real cycle counts by
+  `scheduler/benchmarks/collect_scheduler_v2_heldout_dataset.py` ->
+  `scheduler/training/heldout_dataset_v2.csv`. `matmul` gets no new
+  round-2 size -- every valid size is already training data once
+  bounded by `MAX_DIM=8` (an RTL parameter this maintenance pass does
+  not touch) -- stated plainly rather than silently worked around.
+
+- **Real result: the misprediction is fixed, and the fix is
+  explainable from the fitted tree's own structure.** Leave-one-out CV
+  accuracy rose from 9/11 = 0.818 (Phase 13, n=11) to 19/20 = 0.950
+  (v2, n=20); the fitted split sharpened from `element_count <= 2 ->
+  cpu` (which incorrectly covered `vecadd N=2`) to `element_count <=
+  1 -> cpu` (which correctly isolates only the true crossover, `vecadd
+  N=1`). The one remaining LOO miss (`vecadd N=1` itself) is an
+  expected, explainable LOO-CV artifact at small n -- removing the
+  single point that makes N=1 special means a model refit without it
+  can't recover that fact. The new round-2 held-out set scored 4/4 =
+  1.000, reported honestly as an easy check (both new sizes sit well
+  inside the region every training point already agrees favors the
+  accelerator) rather than oversold as a hard one. Full detail:
+  `results/scheduler_v2_report.md`.
+
+- Docs: `docs/scheduler_v2.md` (full methodology + honest scope),
+  README.md/CHANGELOG.md updated, Makefile gained
+  `test_scheduler_v2_heldout_correctness`/
+  `collect_scheduler_v2_heldout_dataset`/`train_scheduler_v2` targets.
+  This is tracked as a dated improvement, not a renumbered phase --
+  the original specification's 17 phases remain exactly as completed
+  above.

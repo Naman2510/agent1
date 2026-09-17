@@ -95,6 +95,9 @@ make test_mixed_workload_correctness     # Phase 16: verify the 12-workload mixe
 make run_mixed_workload_demo             # Phase 16: measure the scheduler at larger scale
 make demo                                # Phase 17: run the ENTIRE pipeline end-to-end
                                           # (ARGS=--with-synthesis to include Phase 12 too)
+make test_scheduler_v2_heldout_correctness  # post-v1: verify the round-2 held-out workloads
+make collect_scheduler_v2_heldout_dataset   # post-v1: write heldout_dataset_v2.csv
+make train_scheduler_v2                     # post-v1: retrain on all 20 known workloads
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -128,6 +131,7 @@ container with no FPGA or other physical hardware attached.
 - [`docs/dynamic_scheduling.md`](docs/dynamic_scheduling.md) — a single RISC-V program that computes the scheduling decision itself, on the CPU, at runtime, and the honest real result that its own decision overhead can outweigh the benefit for small workload streams (Phase 15).
 - [`docs/mixed_workloads.md`](docs/mixed_workloads.md) — the same runtime scheduler at a larger, more varied 12-workload scale: overhead shrinks roughly 3x as predicted, but the real limiting factor turns out to be a small oracle-vs-baseline ceiling, not overhead (Phase 16).
 - [`docs/final_summary.md`](docs/final_summary.md) — the capstone: headline real findings across all 17 phases, this project's honest conclusion about where an AI scheduler actually helps here, and why the optional LLM layer was deliberately not built (Phase 17).
+- [`docs/scheduler_v2.md`](docs/scheduler_v2.md) — post-v1 improvement: merges Phase 13+14's data into one 20-workload training set, fixing the `vecadd N=2` misprediction, validated on a brand-new held-out set.
 - [`docs/benchmarking.md`](docs/benchmarking.md) — CPU-vs-accelerator benchmark methodology, real measured results, and a real bug it caught (Phase 11).
 - [`docs/synthesis.md`](docs/synthesis.md) — Yosys/iCE40 synthesis methodology, two real tooling problems it solved, and why place-and-route was tried but not adopted (Phase 12).
 - `CHANGELOG.md` — chronological log of architectural decisions.
@@ -161,6 +165,13 @@ Tracked phase-by-phase; each phase below is only checked once it compiles, simul
 - [x] Phase 15 — Dynamic runtime scheduling
 - [x] Phase 16 — Mixed/heterogeneous workloads
 - [x] Phase 17 — End-to-end demo + full documentation
+
+All 17 phases of the original specification are complete. Ongoing
+improvements after that point are tracked as their own dated
+`CHANGELOG.md` entries rather than renumbered phases -- e.g. the
+scheduler's expanded 20-workload training set
+([`docs/scheduler_v2.md`](docs/scheduler_v2.md)), which fixed the
+`vecadd N=2` misprediction Phase 14 had documented.
 
 See `CHANGELOG.md` for what changed in each completed phase and why.
 

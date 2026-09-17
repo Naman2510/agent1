@@ -642,3 +642,30 @@ environment to make a fabricated "AI decides" layer honest, and Phase
 however implemented, to add much value here).
 
 This is the final phase of the original 17-phase specification.
+
+## Post-v1 — AI Scheduler v2: Expanded Training Set
+
+**Status:** complete. Tracked as a dated improvement in `CHANGELOG.md`,
+not a renumbered phase -- the specification's 17 phases above are
+unchanged.
+
+**What exists:** `scheduler/training/train_scheduler_v2.py` merges
+Phase 13's 11-workload `dataset.csv` and Phase 14's 9-workload
+`heldout_dataset.csv` into one real 20-workload training set and
+refits, saved as a separate artifact
+(`scheduler/models/scheduler_tree_v2.pkl`) that does not change Phase
+13's original model or `scheduler/inference/decide.py`'s default
+behavior. A brand-new held-out set (`vecadd`/`dot` N=6, N=12,
+correctness-verified and measured fresh) scores the retrained model
+honestly, since Phase 14's old held-out set is now training data and
+can no longer be used to claim generalization. Full writeup:
+`docs/scheduler_v2.md`.
+
+**Real result:** this directly fixes the `vecadd N=2` misprediction
+Phase 14 found and explicitly left unfixed (to keep that phase's own
+evaluation uncontaminated). Leave-one-out CV accuracy rose from 9/11 =
+0.818 to 19/20 = 0.950; the fitted tree's split sharpened from
+`element_count <= 2` (which wrongly covered `vecadd N=2`) to
+`element_count <= 1` (which correctly isolates only the true
+crossover, `vecadd N=1`) -- an explainable, not just numeric,
+improvement.

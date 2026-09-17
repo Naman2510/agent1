@@ -1,0 +1,9 @@
+operation,size_n,element_count,engine,cycles,instructions_retired,stall_count,forwarding_events
+vecadd,6,6,cpu,157,127,6,6
+vecadd,6,6,accelerator,94,76,2,2
+vecadd,12,12,cpu,301,241,12,12
+vecadd,12,12,accelerator,166,133,3,3
+dot,6,6,cpu,359,257,0,0
+dot,6,6,accelerator,94,76,2,2
+dot,12,12,cpu,784,552,0,0
+dot,12,12,accelerator,166,133,3,3
