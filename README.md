@@ -10,8 +10,8 @@ voice pipeline rather than a thin wrapper around an LLM API.
 
 | | |
 |---|---|
-| **Current phase** | Phase 1 — Backend Foundation (in progress) |
-| **Implementation** | Phase 1 complete — 61 tests passing, 93% backend coverage. No voice loop, agent, or RAG yet. |
+| **Current phase** | Phase 2 complete — Provider layer & streaming LLM path |
+| **Implementation** | Phase 2 complete — 164 tests passing, 94% backend coverage. Text conversation works; no voice loop, tools, or RAG yet. |
 | **Benchmarks** | None. Every metric table in this repository is empty by design. |
 | **Last updated** | 2026-09-17 |
 
@@ -114,7 +114,8 @@ indexes and check constraints:
 cd backend
 pip install -e ".[dev]"
 export VAANIOS_TEST_DATABASE_URL=postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
-pytest -q                       # 61 tests
+pytest -q                       # 164 tests
+pytest -q tests/unit            # 89 of them need no database at all
 ruff check . && mypy app
 ```
 
@@ -123,8 +124,10 @@ so it is only sufficient through Phase 4).
 
 ## What works today
 
-Phase 1 is the backend foundation — deliberately no voice, agent, or RAG yet:
+You can hold a **typed** conversation with the mentor, with per-turn timing and cost. Voice, tools,
+and RAG are Phases 3, 6 and 5.
 
+**Phase 1 — foundation**
 - Registration, login, `/auth/me`, profile update, and **account erasure** (hard delete, cascading)
 - Access tokens (15 min) with **single-use refresh tokens**; replaying a rotated token revokes the
   whole rotation family
@@ -132,6 +135,30 @@ Phase 1 is the backend foundation — deliberately no voice, agent, or RAG yet:
 - Three-class Redis token-bucket rate limiting (anonymous / authenticated / AI operations)
 - Structured JSON logs with request correlation, secret redaction, and transcript hashing
 - Reversible Alembic migrations, verified in CI against the same pgvector image Compose uses
+
+**Phase 2 — providers and the LLM path**
+- Six provider interfaces (`LLMProvider`, `STTProvider`, `TTSProvider`, `EmbeddingProvider`,
+  `RerankerProvider`, `VectorStore`) with deterministic fakes, selected by config
+- A Claude adapter: token streaming, adaptive thinking, `effort`, strict tool schemas,
+  cache breakpoints on the stable prefix, refusal handled as a stop reason rather than a hang
+- `POST /v1/sessions/{id}/messages` streams a turn over SSE and persists both messages with
+  token usage, estimated cost, and time-to-first-token
+- A spend ceiling and a daily voice-minute meter, in integer micro-dollars
+- **The interrupted-turn invariant is already enforced and tested**: abandon the stream mid-answer
+  and what gets stored is what was delivered, not what was generated
+
+```bash
+# no API key needed — the deterministic fake provider answers
+VAANIOS_LLM_PROVIDER=fake docker compose -f infra/compose.yaml up --build
+curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"text":"Kirchhoff ka voltage law samjhao"}'
+```
+
+**Not verified:** the Claude adapter has never run against the live API — no credential was
+available where it was built. Every parameter it sends was checked against the installed SDK's
+signatures, and `backend/scripts/smoke_llm.py` is the live check (including whether prompt caching
+actually engages). See [M2-01](docs/PHASE_2_AUDIT.md).
 
 ## Evaluation approach
 

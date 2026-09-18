@@ -16,9 +16,13 @@ from app.core.errors import AuthenticationError, PermissionDeniedError, RateLimi
 from app.core.rate_limit import LimitClass, RateLimiter
 from app.core.security import PasswordHasherService, decode_access_token
 from app.db.models import UserRole
+from app.db.repositories.sessions import MessageRepository
 from app.db.repositories.users import StudentRepository, UserRepository
 from app.db.session import session_scope
+from app.providers.llm.base import LLMProvider
 from app.services.auth import AuthService
+from app.services.conversation import ConversationService
+from app.services.usage import UsageLedger
 
 # auto_error=False so a missing header raises our own uniform 401 body rather than Starlette's.
 _bearer = HTTPBearer(auto_error=False)
@@ -73,6 +77,33 @@ def get_auth_service(
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
+
+def get_llm(request: Request) -> LLMProvider:
+    provider: LLMProvider = request.app.state.llm
+    return provider
+
+
+def get_usage_ledger(request: Request) -> UsageLedger:
+    ledger: UsageLedger = request.app.state.usage_ledger
+    return ledger
+
+
+def get_conversation_service(
+    request: Request,
+    db: DbDep,
+    settings: SettingsDep,
+) -> ConversationService:
+    return ConversationService(
+        llm=get_llm(request),
+        messages=MessageRepository(db),
+        ledger=get_usage_ledger(request),
+        settings=settings,
+    )
+
+
+ConversationServiceDep = Annotated[ConversationService, Depends(get_conversation_service)]
+UsageLedgerDep = Annotated[UsageLedger, Depends(get_usage_ledger)]
 
 
 @dataclass(frozen=True)

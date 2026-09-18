@@ -21,6 +21,8 @@ from app.core.rate_limit import RateLimiter
 from app.core.redis import create_redis
 from app.core.security import PasswordHasherService
 from app.db.session import create_engine, create_session_factory
+from app.providers.registry import build_llm
+from app.services.usage import UsageLedger
 
 log = structlog.get_logger(__name__)
 
@@ -34,6 +36,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = create_redis(settings)
     app.state.hasher = PasswordHasherService(settings)
     app.state.rate_limiter = RateLimiter(app.state.redis, settings)
+    app.state.llm = build_llm(settings)
+    app.state.usage_ledger = UsageLedger(app.state.redis, settings)
 
     if settings.monthly_spend_cap_usd is None:
         # Gate 0 finding M-11: say plainly that nothing is capped rather than implying a limit.
@@ -48,10 +52,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "app.started",
         environment=settings.environment,
         rate_limiting=settings.rate_limit_enabled,
+        **{
+            f"provider_{k}": v
+            for k, v in app.state.llm.info.as_dict().items()
+            if k != "capabilities"
+        },
     )
     try:
         yield
     finally:
+        await app.state.llm.aclose()
         await app.state.redis.aclose()
         await app.state.engine.dispose()
         log.info("app.stopped")

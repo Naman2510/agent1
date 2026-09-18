@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "VaaniOS backend — multilingual conversational AI voice mentor"
 requires-python = ">=3.11"
 dependencies = [
+    "anthropic>=0.69",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",

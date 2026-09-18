@@ -61,7 +61,11 @@ Redis-backed rate limiting, structured logging with `request_id`, health endpoin
 **Gate 1:** migrations reversible; IDOR test per endpoint; rate limits asserted; no secrets in the
 repo; coverage on `core/` and `db/`.
 
-### Phase 2 — Provider layer & LLM path (text first)
+### Phase 2 — Provider layer & LLM path (text first) ✅
+Delivered 2026-09-18: 164 tests, 94% coverage. Gate 2 passed with the cache-hit criterion
+deferred — [`PHASE_2_AUDIT.md`](PHASE_2_AUDIT.md). The spend-cap mechanism (Gate 0 M-11) shipped
+here as agreed.
+
 `LLMProvider`, `STTProvider`, `TTSProvider`, `EmbeddingProvider`, `RerankerProvider`, `VectorStore`
 interfaces plus fakes for tests. Claude adapter with streaming, adaptive thinking, `strict` tools,
 prompt-cache breakpoints, refusal fallbacks, and token accounting. Text chat endpoint end to end.

@@ -51,6 +51,28 @@ class Settings(BaseSettings):
     rate_limit_ai_per_min: int = 6
     rate_limit_voice_minutes_per_day: int = 60
 
+    # --- Model providers (ADR-0016) -----------------------------------------
+    # Selection is config, so a model comparison is an experiment rather than a rewrite.
+    llm_provider: Literal["anthropic", "fake"] = "anthropic"
+    llm_model: str = "claude-opus-5"
+    # A latency/quality dial, not a model downgrade. "medium" is the starting point for
+    # conversational turns pending EXP-004; the intent classifier will use "low".
+    llm_effort: Literal["low", "medium", "high"] = "medium"
+    # A spoken answer longer than this is a defect, not a feature (see the persona prompt).
+    llm_max_output_tokens: int = 1024
+    llm_timeout_seconds: float = 30.0
+    # Server-side rescue when a request is declined on policy grounds, so a decline degrades to a
+    # different model instead of hanging a conversation. Empty disables it.
+    llm_refusal_fallback_model: str = "claude-opus-4-8"
+    # History window resent per turn. The context window is far larger; every token resent costs
+    # money and latency regardless of what would fit.
+    llm_history_turns: int = 20
+
+    stt_provider: Literal["fake"] = "fake"  # real adapters: Phase 3
+    tts_provider: Literal["fake"] = "fake"  # real adapters: Phase 3
+    embedding_provider: Literal["fake"] = "fake"  # multilingual-e5-base: Phase 5
+    reranker_provider: Literal["noop"] = "noop"  # ADR-0007: off by default, must earn its latency
+
     # --- Cost guard (Gate 0 finding M-11) -----------------------------------
     # Unset means no cap is enforced. The application says so at startup rather than implying
     # a limit exists; it never invents one.
