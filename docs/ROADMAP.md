@@ -38,6 +38,7 @@ Recorded here because they closed two Gate 0 findings:
 
 | Question | Decision |
 |---|---|
+| Autonomy | Full automation authority granted 2026-09-18: proceed through phases without asking. The reconstructed roadmap is authoritative; Gate 0 C-05(b) is closed as accepted rather than resolved. |
 | MVP cut line | Agreed as written below. Phase 1 started immediately. |
 | Tamil in the MVP? (M-01) | **No** — deferred past the cut line. Architecture stays language-agnostic; the README claims three languages until Tamil is measured. |
 | Monthly spend ceiling (M-11) | Deferred. Phase 2 implements the cap mechanism and daily voice-minute limit with the value set in `.env` (`VAANIOS_MONTHLY_SPEND_CAP_USD`), unset meaning "no cap enforced" and logged loudly as such. |
@@ -73,7 +74,11 @@ prompt-cache breakpoints, refusal fallbacks, and token accounting. Text chat end
 **Gate 2:** provider swap requires no application change; cache-hit test passing; cost per turn
 recorded.
 
-### Phase 3 — Voice loop
+### Phase 3 — Voice loop ✅ (mechanisms; providers outstanding)
+Delivered 2026-09-18: 353 tests, lint and types clean. Gate 3 passed —
+[`PHASE_3_AUDIT.md`](PHASE_3_AUDIT.md). The loop is complete and provider-less: every mechanism is
+tested, and no word has yet been transcribed or synthesised by a real model (M3-03).
+
 AudioWorklet capture and playback in a minimal client, WebSocket protocol, VAD, turn detection,
 STT streaming with LocalAgreement, sentence chunking, TTS streaming, playback ACK ledger, and the
 turn state machine **including barge-in**.

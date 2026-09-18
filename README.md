@@ -10,8 +10,8 @@ voice pipeline rather than a thin wrapper around an LLM API.
 
 | | |
 |---|---|
-| **Current phase** | Phase 2 complete — Provider layer & streaming LLM path |
-| **Implementation** | Phase 2 complete — 164 tests passing, 94% backend coverage. Text conversation works; no voice loop, tools, or RAG yet. |
+| **Current phase** | Phase 3 complete — Voice loop (mechanisms; real ASR/TTS still outstanding) |
+| **Implementation** | Phase 3 complete — 353 tests passing. Voice loop with barge-in works end to end; no real ASR/TTS provider, no tools, no RAG yet. |
 | **Benchmarks** | None. Every metric table in this repository is empty by design. |
 | **Last updated** | 2026-09-17 |
 
@@ -114,8 +114,10 @@ indexes and check constraints:
 cd backend
 pip install -e ".[dev]"
 export VAANIOS_TEST_DATABASE_URL=postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
-pytest -q                       # 164 tests
-pytest -q tests/unit            # 89 of them need no database at all
+pytest -q                       # 353 tests
+pytest -q tests/unit            # 200+ of them need no database at all
+python scripts/fetch_models.sh  # Silero VAD weights (not committed)
+python scripts/bench_voice.py   # pipeline overhead, with real numbers
 ruff check . && mypy app
 ```
 
@@ -136,6 +138,18 @@ and RAG are Phases 3, 6 and 5.
 - Structured JSON logs with request correlation, secret redaction, and transcript hashing
 - Reversible Alembic migrations, verified in CI against the same pgvector image Compose uses
 
+**Phase 3 — the voice loop**
+- A WebSocket carrying 20 ms PCM frames up and synthesised audio down, with a `[turn_id][seq]`
+  fencing header so either end can drop audio from a turn that has ended
+- **Real barge-in**: the client is told to flush first (audible silence is what the student
+  experiences), then generation and synthesis are cancelled server-side, and the assistant turn is
+  stored as *the prefix that actually reached the speaker*
+- **Silero VAD v5** running for real at **0.12 ms per 32 ms window — 0.38% of one core**
+- A 500 ms audio pre-roll, so an interrupting "Wait, stop" doesn't reach the recogniser as "stop"
+- A turn state machine whose 19 legal transitions and all 49 illegal ones are tested
+- Multilingual sentence chunking (Devanagari danda, no splitting inside "3.5 kΩ" or "e.g.")
+- Nine stage marks persisted per turn, and a minimal browser client
+
 **Phase 2 — providers and the LLM path**
 - Six provider interfaces (`LLMProvider`, `STTProvider`, `TTSProvider`, `EmbeddingProvider`,
   `RerankerProvider`, `VectorStore`) with deterministic fakes, selected by config
@@ -155,10 +169,21 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
   -d '{"text":"Kirchhoff ka voltage law samjhao"}'
 ```
 
-**Not verified:** the Claude adapter has never run against the live API — no credential was
-available where it was built. Every parameter it sends was checked against the installed SDK's
-signatures, and `backend/scripts/smoke_llm.py` is the live check (including whether prompt caching
-actually engages). See [M2-01](docs/PHASE_2_AUDIT.md).
+**What is not verified.** Three things, and they are the honest boundary of this project today:
+
+1. **No real ASR or TTS.** The voice loop is complete and *provider-less* — every mechanism is
+   tested and no word has been transcribed or synthesised by a real model. `build_stt`/`build_tts`
+   raise for anything but the fake, deliberately, so nothing can silently serve a fake in
+   production. ([M3-03](docs/PHASE_3_AUDIT.md))
+2. **The Claude adapter has never run against the live API** — no credential where it was built.
+   Every parameter it sends was checked against the installed SDK's signatures;
+   `backend/scripts/smoke_llm.py` is the live check. ([M2-01](docs/PHASE_2_AUDIT.md))
+3. **There is no TTFA number.** What was measured is our pipeline's own overhead with fake
+   providers (~0.4% of one core). Real TTFA is set by the ASR round trip, LLM time-to-first-token
+   and TTS time-to-first-byte. ([M3-01](docs/PHASE_3_AUDIT.md))
+
+The browser client (`frontend/voice-client.html`) was also written without a browser to run it in,
+and says so at the top of the page.
 
 ## Evaluation approach
 

@@ -23,6 +23,7 @@ from app.core.security import PasswordHasherService
 from app.db.session import create_engine, create_session_factory
 from app.providers.registry import build_llm
 from app.services.usage import UsageLedger
+from app.ws.voice import router as voice_router
 
 log = structlog.get_logger(__name__)
 
@@ -98,4 +99,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/v1")
+    app.include_router(voice_router, prefix="/v1")
     return app

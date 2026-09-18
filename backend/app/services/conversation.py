@@ -16,8 +16,9 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import structlog
 
@@ -48,6 +49,19 @@ REFUSAL_REPLY = "I can't help with that one. Ask me something from your course a
 FAILURE_REPLY = "Sorry — I lost that. Could you say it again?"
 
 
+class DeliveryTracker(Protocol):
+    """Reports what the listener actually received.
+
+    The text path has no gap between "yielded" and "received", so it passes nothing. The voice
+    path passes its playback ledger: the model generates further ahead than the speaker plays, so
+    only the ledger knows what was heard (ARCHITECTURE §5.3).
+    """
+
+    def delivered(self) -> str: ...
+
+    def remainder(self) -> str: ...
+
+
 @dataclass
 class TurnResult:
     """What a completed turn produced. Returned after the stream is exhausted."""
@@ -59,6 +73,8 @@ class TurnResult:
     cost: TurnCost | None = None
     latency_ms: dict[str, int] = field(default_factory=dict)
     turn_index: int = 0
+    # Generated but never heard. Kept for failure analysis; never replayed into model context.
+    unspoken_remainder: str | None = None
     # True when a cache breakpoint was requested but produced no cache activity — normally a
     # prefix shorter than the model's minimum cacheable length, which fails silently.
     cache_breakpoint_ineffective: bool = False
@@ -97,7 +113,10 @@ class ConversationService:
         session_id: uuid.UUID,
         student_id: uuid.UUID,
         utterance: str,
-    ) -> AsyncIterator[tuple[str, TurnResult | None]]:
+        delivery: DeliveryTracker | None = None,
+        language: str | None = None,
+        marks: dict[str, int] | None = None,
+    ) -> AsyncGenerator[tuple[str, TurnResult | None], None]:
         """Run one turn, yielding `(text_fragment, None)` and finally `("", result)`.
 
         The caller is responsible for delivering fragments; this method is responsible for making
@@ -125,7 +144,7 @@ class ConversationService:
             seq=0,
             role=MessageRole.USER,
             content=utterance,
-            language=script_of(utterance),
+            language=language or script_of(utterance),
         )
 
         started = time.perf_counter()
@@ -176,12 +195,22 @@ class ConversationService:
         finally:
             # Runs on the normal path, on a provider failure, and on cancellation (via the
             # generator's aclose), so a turn is never left unrecorded.
-            result.text = "".join(chunks)
-            result.language = script_of(result.text) if result.text else None
+            generated = "".join(chunks)
+            if delivery is not None:
+                # What was heard, not what was generated. For a voice turn these differ by
+                # however far generation ran ahead of playback.
+                result.text = delivery.delivered()
+                result.unspoken_remainder = delivery.remainder() or None
+            else:
+                result.text = generated
+            result.language = language or (script_of(result.text) if result.text else None)
             result.cost = self._ledger.price_turn(model, usage)
             result.latency_ms["llm_total_ms"] = int((time.perf_counter() - started) * 1000)
             if first_token_at is not None:
                 result.latency_ms["llm_ttft_ms"] = int((first_token_at - started) * 1000)
+            if marks:
+                # Voice turns carry the full nine-stage picture; a text turn has only its own two.
+                result.latency_ms.update(marks)
 
             await self._persist_assistant_turn(
                 session_id=session_id, turn_index=turn_index, result=result
@@ -215,6 +244,7 @@ class ConversationService:
             was_interrupted=result.interrupted,
             # For a text turn the "spoken prefix" is what was actually sent to the client.
             spoken_prefix_chars=len(result.text) if result.interrupted else None,
+            unspoken_remainder=result.unspoken_remainder if result.interrupted else None,
             latency_ms=result.latency_ms,
             token_usage=token_usage,
         )

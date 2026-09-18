@@ -74,6 +74,11 @@ exclude = ["migrations/"]
 module = ["tests.*", "migrations.*"]
 disallow_untyped_defs = false
 
+[[tool.mypy.overrides]]
+# onnxruntime ships no type information.
+module = ["onnxruntime.*"]
+ignore_missing_imports = true
+
 [tool.coverage.run]
 source = ["app"]
 # SQLAlchemy's asyncio bridge executes code inside greenlets, which the default tracer cannot

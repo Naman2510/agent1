@@ -267,7 +267,19 @@ heard — and the mentor will refer back to them. So:
 This is testable without audio hardware: a fake clock plus a scripted ACK stream asserts the stored
 prefix for a given interruption point.
 
-### 5.4 False interruptions
+### 5.4 False interruptions and non-questions
+
+Two separate guards, because they catch different things:
+
+**Too short to be a question.** The VAD only announces speech after `min_speech_ms` (250 ms), so
+every announced utterance clears that bar by construction — it is not a useful filter. A second,
+higher threshold (`min_utterance_ms`, 400 ms) decides whether an utterance is a *question* rather
+than merely speech. Without it a 300 ms "hmm" becomes a turn, complete with an LLM call and a
+bill. (Found in Phase 3 by a test that expected a discard and got a turn.)
+
+**Backchannels.** "Hmm", "haan", "achha", "sari" are agreement, not interruption, and satisfy any
+duration threshold. They are matched against the *transcript*, not the audio, because "haan" and
+"haan, lekin…" are acoustically similar and semantically opposite. Whole-utterance match only.
 A cough or a lexical backchannel ("hmm", "haan") should not kill a good explanation. Mitigations:
 `min_speech = 250 ms` before cancelling, and a configurable backchannel stoplist checked against the
 first partial; if the utterance turns out to be a backchannel, the turn is *not* resumable (audio is
@@ -498,6 +510,27 @@ mystery in the bill.
 | | **Time to first audio (no tools)** | **≈ 1.8 s** | — | — |
 | | **TTFA (one tool round)** | **≈ 2.6 s** | — | — |
 | | **Barge-in → audible silence** | **150 ms** | — | — |
+
+### 9.1 Measured: our own pipeline overhead
+
+Measured 2026-09-18 on the CPU-only target (4 vCPU) with `scripts/bench_voice.py`. **Every model
+provider was a deterministic fake, so these are the cost of our code only** — they exclude the ASR
+round trip, LLM time-to-first-token and TTS time-to-first-byte, which dominate real TTFA. This is
+not a TTFA measurement and must never be quoted as one.
+
+| Component | p50 | p95 | Notes |
+|---|---|---|---|
+| Silero VAD, one 32 ms window | 0.12 ms | 0.19 ms | **0.38% of real time** — runs on every window of every session |
+| Audio frame encode + decode | 0.001 ms | 0.002 ms | per 20 ms frame |
+| Sentence chunking, full answer | 0.088 ms | 0.114 ms | fed in 6-character deltas |
+| Playback ledger, resolve spoken prefix | 0.0006 ms | 0.0007 ms | the barge-in hot path |
+| Turn state machine, five transitions | 0.002 ms | 0.003 ms | one complete turn |
+| VAD gate, 1.3 s of audio | 0.028 ms | 0.043 ms | compute only; the silence wait is a UX choice |
+
+**Conclusion, with the caveat above:** our pipeline is not a latency contributor. Everything above
+is three to four orders of magnitude below its stage budget, and the whole chain costs roughly
+0.4% of one core in real time. Whatever TTFA turns out to be, it will be set by the providers and
+by the turn-end wait — which is where the tuning effort belongs.
 
 Three honest observations about this budget, recorded now so they are not "discovered" later:
 

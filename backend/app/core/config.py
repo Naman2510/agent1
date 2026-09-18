@@ -73,6 +73,18 @@ class Settings(BaseSettings):
     embedding_provider: Literal["fake"] = "fake"  # multilingual-e5-base: Phase 5
     reranker_provider: Literal["noop"] = "noop"  # ADR-0007: off by default, must earn its latency
 
+    # --- Voice (ADR-0001, ADR-0004) -----------------------------------------
+    vad_provider: Literal["silero", "scripted"] = "silero"
+    silero_vad_path: str = "models/silero_vad.onnx"
+    # Library defaults. NOT tuned against real speech — no human-speech fixture existed where
+    # this was written, so tuning waits for the first real dataset (DATASET.md).
+    vad_enter_threshold: float = 0.5
+    vad_exit_threshold: float = 0.35
+    vad_min_speech_ms: int = 250
+    vad_min_silence_ms: int = 500
+    # Rolling audio kept so an interrupting utterance keeps its first word (ARCHITECTURE §5.5).
+    voice_pre_roll_ms: int = 500
+
     # --- Cost guard (Gate 0 finding M-11) -----------------------------------
     # Unset means no cap is enforced. The application says so at startup rather than implying
     # a limit exists; it never invents one.

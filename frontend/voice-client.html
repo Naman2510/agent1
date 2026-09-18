@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VaaniOS voice client (demo)</title>
+<style>
+  :root { color-scheme: light dark; --gap: 12px; }
+  body { font: 15px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 24px;
+         max-width: 760px; }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  .sub { opacity: .7; font-size: .85rem; margin-bottom: 20px; }
+  fieldset { border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+             border-radius: 8px; margin: 0 0 var(--gap); padding: 12px 14px; }
+  label { display: block; font-size: .8rem; opacity: .75; margin-bottom: 2px; }
+  input { width: 100%; padding: 6px 8px; font: inherit; margin-bottom: 8px;
+          border-radius: 6px; border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+          background: transparent; color: inherit; }
+  button { font: inherit; padding: 7px 14px; border-radius: 6px; cursor: pointer;
+           border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+           background: transparent; color: inherit; }
+  button[disabled] { opacity: .45; cursor: default; }
+  #state { font-variant-numeric: tabular-nums; font-weight: 600; }
+  #log { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; max-height: 320px;
+         overflow: auto; border-radius: 8px; padding: 10px;
+         background: color-mix(in srgb, currentColor 6%, transparent); }
+  table { border-collapse: collapse; font-size: .85rem; }
+  td { padding: 1px 12px 1px 0; }
+  .warn { font-size: .8rem; opacity: .8; border-left: 3px solid currentColor;
+          padding-left: 10px; margin: 0 0 20px; }
+</style>
+</head>
+<body>
+<h1>VaaniOS voice client</h1>
+<p class="sub">Minimal demo harness for the Phase 3 voice loop.</p>
+
+<p class="warn"><strong>Not verified in a browser.</strong> This page was written in an
+environment with no browser available, so the audio capture and playback paths are unexercised.
+The protocol it speaks is covered by the backend test suite; this file is not. Treat any failure
+here as a bug in this file first.</p>
+
+<fieldset>
+  <legend>Connection</legend>
+  <label for="base">Backend</label>
+  <input id="base" value="http://localhost:8000" />
+  <label for="token">Access token (from POST /v1/auth/login)</label>
+  <input id="token" placeholder="eyJhbGciOi..." />
+  <label for="session">Session id (from POST /v1/sessions)</label>
+  <input id="session" placeholder="uuid" />
+  <button id="connect">Connect</button>
+  <button id="disconnect" disabled>Disconnect</button>
+</fieldset>
+
+<fieldset>
+  <legend>Session</legend>
+  <p>state: <span id="state">idle</span> &nbsp; turn: <span id="turn">0</span></p>
+  <button id="mic" disabled>Start microphone</button>
+  <button id="stop" disabled>Stop speaking (explicit interrupt)</button>
+  <label for="text" style="margin-top:10px">Typed fallback</label>
+  <input id="text" placeholder="Kirchhoff ka voltage law samjhao" />
+  <button id="send" disabled>Send text</button>
+</fieldset>
+
+<fieldset>
+  <legend>Latency (reported by the server, per turn)</legend>
+  <table id="metrics"><tr><td>no turn yet</td></tr></table>
+</fieldset>
+
+<div id="log"></div>
+
+<script type="module">
+// --- constants that must match the server -------------------------------
+const SAMPLE_RATE = 16000;   // the server announces this in its `ready` frame
+const FRAME_MS = 20;
+const FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS / 1000;   // 320
+const JITTER_BUFFER_MS = 60;
+const ACK_INTERVAL_MS = 200;
+
+const $ = (id) => document.getElementById(id);
+const log = (msg) => {
+  const el = $("log");
+  el.textContent += msg + "\n";
+  el.scrollTop = el.scrollHeight;
+};
+
+let ws = null, audioCtx = null, micStream = null, worklet = null;
+let turnId = 0, playbackHead = 0, playedMs = 0, ackTimer = null;
+let ttsSampleRate = 24000;
+
+// --- capture -------------------------------------------------------------
+// AudioWorklet rather than ScriptProcessor: it runs on the audio thread, so a busy main thread
+// cannot drop frames. The browser gives us its own sample rate (usually 48 kHz), so we
+// downsample to 16 kHz here and frame to exactly 20 ms.
+const WORKLET_SOURCE = `
+class Capture extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this.ratio = sampleRate / ${SAMPLE_RATE};
+    this.buffer = [];
+    this.phase = 0;
+  }
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || !input[0]) return true;
+    const channel = input[0];
+    // Decimate by a fractional ratio. Crude (no anti-alias filter) — adequate for speech into
+    // a VAD and an ASR, and noted as such in the README.
+    for (let i = 0; i < channel.length; i++) {
+      this.phase += 1;
+      if (this.phase >= this.ratio) {
+        this.phase -= this.ratio;
+        this.buffer.push(channel[i]);
+      }
+    }
+    while (this.buffer.length >= ${FRAME_SAMPLES}) {
+      const frame = this.buffer.splice(0, ${FRAME_SAMPLES});
+      const pcm = new Int16Array(${FRAME_SAMPLES});
+      for (let i = 0; i < frame.length; i++) {
+        const s = Math.max(-1, Math.min(1, frame[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      this.port.postMessage(pcm.buffer, [pcm.buffer]);
+    }
+    return true;
+  }
+}
+registerProcessor('capture', Capture);
+`;
+
+function encodeFrame(turn, seq, pcmBuffer) {
+  // [turn_id:u32 big-endian][seq:u32 big-endian][pcm...]
+  const out = new ArrayBuffer(8 + pcmBuffer.byteLength);
+  const view = new DataView(out);
+  view.setUint32(0, turn, false);
+  view.setUint32(4, seq, false);
+  new Uint8Array(out, 8).set(new Uint8Array(pcmBuffer));
+  return out;
+}
+
+async function startMic() {
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      // Helps, but is unreliable when playback goes through Web Audio. Headphones are the real
+      // fix for self-interruption (see R-07 in docs/RISKS.md).
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: 1,
+    },
+  });
+  const blob = new Blob([WORKLET_SOURCE], { type: "application/javascript" });
+  await audioCtx.audioWorklet.addModule(URL.createObjectURL(blob));
+  const source = audioCtx.createMediaStreamSource(micStream);
+  worklet = new AudioWorkletNode(audioCtx, "capture");
+  let seq = 0;
+  worklet.port.onmessage = (event) => {
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(encodeFrame(turnId, seq++, event.data));
+    }
+  };
+  source.connect(worklet);
+  log("microphone started");
+}
+
+// --- playback ------------------------------------------------------------
+// Scheduled against AudioContext.currentTime so chunks play gap-free, and so the played
+// position we report back to the server is derived from the clock rather than guessed.
+const scheduled = [];
+
+function playChunk(pcmBytes) {
+  const samples = new Int16Array(pcmBytes);
+  const buffer = audioCtx.createBuffer(1, samples.length, ttsSampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 0x8000;
+
+  const startAt = Math.max(audioCtx.currentTime + JITTER_BUFFER_MS / 1000, playbackHead);
+  const node = audioCtx.createBufferSource();
+  node.buffer = buffer;
+  node.connect(audioCtx.destination);
+  node.start(startAt);
+  playbackHead = startAt + buffer.duration;
+  scheduled.push(node);
+}
+
+function flushPlayback() {
+  // Audible silence, immediately. This is the only part of barge-in the student perceives.
+  for (const node of scheduled) { try { node.stop(); } catch { /* already ended */ } }
+  scheduled.length = 0;
+  playbackHead = 0;
+  playedMs = 0;
+}
+
+function startAckLoop() {
+  stopAckLoop();
+  ackTimer = setInterval(() => {
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    // How much audio has actually reached the speaker, from the audio clock.
+    const remaining = Math.max(0, playbackHead - audioCtx.currentTime);
+    const total = playbackHead > 0 ? playbackHead : 0;
+    const played = Math.max(0, total - remaining - (audioCtx.currentTime === 0 ? 0 : 0));
+    playedMs = Math.round(played * 1000);
+    ws.send(JSON.stringify({ type: "playback.ack", turn_id: turnId, played_ms: playedMs }));
+  }, ACK_INTERVAL_MS);
+}
+function stopAckLoop() { if (ackTimer) { clearInterval(ackTimer); ackTimer = null; } }
+
+// --- protocol ------------------------------------------------------------
+$("connect").onclick = async () => {
+  const base = $("base").value.replace(/\/$/, "");
+  const wsUrl = base.replace(/^http/, "ws") + `/v1/voice/ws?session_id=${$("session").value}`;
+  // The browser cannot set Authorization on a WebSocket, and a token in the query string lands
+  // in access logs — so the credential rides the subprotocol list.
+  ws = new WebSocket(wsUrl, ["bearer", $("token").value]);
+  ws.binaryType = "arraybuffer";
+
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  ws.onopen = () => {
+    log("connected");
+    $("connect").disabled = true;
+    $("disconnect").disabled = false;
+    $("mic").disabled = false;
+    $("send").disabled = false;
+    $("stop").disabled = false;
+    startAckLoop();
+  };
+
+  ws.onmessage = (event) => {
+    if (event.data instanceof ArrayBuffer) {
+      const view = new DataView(event.data);
+      const frameTurn = view.getUint32(0, false);
+      if (frameTurn < turnId) return;   // fencing: audio from a turn that is over
+      playChunk(event.data.slice(8));
+      return;
+    }
+    const msg = JSON.parse(event.data);
+    switch (msg.type) {
+      case "ready":
+        ttsSampleRate = msg.tts_sample_rate ?? ttsSampleRate;
+        log(`ready: ${msg.sample_rate} Hz in, ${ttsSampleRate} Hz out, ${msg.frame_ms} ms frames`);
+        break;
+      case "state":
+        turnId = msg.turn_id;
+        $("state").textContent = msg.state;
+        $("turn").textContent = msg.turn_id;
+        break;
+      case "tts.cancel":
+        flushPlayback();
+        log("<- tts.cancel (flushed playback)");
+        break;
+      case "stt.partial":
+        log(`~ ${msg.text}`);
+        break;
+      case "stt.final":
+        log(`you: ${msg.text}  [${msg.language ?? "?"}]`);
+        break;
+      case "llm.delta":
+        break;  // the transcript is assembled server-side; audio is the product here
+      case "metrics": {
+        const rows = Object.entries(msg.latency_ms)
+          .map(([k, v]) => `<tr><td>${k}</td><td>${v} ms</td></tr>`).join("");
+        $("metrics").innerHTML = rows || "<tr><td>no marks</td></tr>";
+        break;
+      }
+      case "error":
+        log(`! ${msg.code}: ${msg.message}`);
+        break;
+      default:
+        log(`<- ${msg.type}`);
+    }
+  };
+
+  ws.onclose = (event) => {
+    log(`closed (${event.code}) ${event.reason ?? ""}`);
+    stopAckLoop();
+    flushPlayback();
+    micStream?.getTracks().forEach((t) => t.stop());
+    $("connect").disabled = false;
+    ["disconnect", "mic", "send", "stop"].forEach((id) => { $(id).disabled = true; });
+  };
+
+  ws.onerror = () => log("! websocket error");
+};
+
+$("disconnect").onclick = () => ws?.send(JSON.stringify({ type: "session.end" }));
+$("mic").onclick = async () => { $("mic").disabled = true; await startMic(); };
+$("stop").onclick = () => {
+  flushPlayback();
+  ws?.send(JSON.stringify({ type: "user.interrupt", turn_id: turnId }));
+};
+$("send").onclick = () => {
+  const text = $("text").value.trim();
+  if (!text) return;
+  ws?.send(JSON.stringify({ type: "user.text", text }));
+  log(`you (typed): ${text}`);
+  $("text").value = "";
+};
+</script>
+</body>
+</html>
