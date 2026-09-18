@@ -645,3 +645,144 @@ async def test_a_language_without_a_voice_falls_back_rather_than_failing(
     await voice.handle_text(text="ഇത് മലയാളമാണ്")  # Malayalam: no voice configured
     await voice.wait_for_turn()
     assert tts_double.requests, "synthesis must still happen"
+
+
+# --- language routing across a conversation ---------------------------------
+
+
+async def test_mid_conversation_language_switching_preserves_context(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """Gate 4: the student switches language mid-conversation and the history survives.
+
+    Spec §11 requires that context is preserved across a switch. History is stored
+    language-tagged but never language-partitioned, so this is a property of the design — and
+    this test is what stops a future "reset on switch" optimisation from quietly breaking it.
+    """
+    student_id, session_id = student_and_session
+    llm = FakeLLMProvider([ScriptedTurn(text="Reply.")] * 6)
+    transport = RecordingTransport()
+    voice = VoiceSession(
+        student_id=student_id,
+        session_id=session_id,
+        transport=transport,
+        vad=VadGate(ScriptedVoiceDetector([0.01] * 500), VadSettings()),
+        stt=FakeSTTProvider(),
+        tts=FakeTTSProvider(),
+        conversation=ConversationService(
+            llm=llm,
+            messages=MessageRepository(db_session),
+            ledger=UsageLedger(redis_client, settings),
+            settings=settings,
+        ),
+        settings=settings,
+        config=VoiceSessionConfig(ack_grace_ms=0),
+        clock=FakeClock(),
+    )
+    await voice.start()
+
+    turns = [
+        "Explain Kirchhoff's voltage law",
+        "Bhai ye samajh nahi aa raha phir se batao",
+        "Aur KCL ka matlab kya hai",
+        "किरचॉफ का नियम समझाओ",
+    ]
+    for text in turns:
+        await voice.handle_text(text=text)
+        await voice.wait_for_turn()
+    await db_session.commit()
+
+    rows = await _messages(db_session, session_id)
+    user_rows = [r for r in rows if r.role is MessageRole.USER]
+    assert len(user_rows) == 4
+
+    # Each turn is tagged with the language it was routed as, and the tags show the switch.
+    assert [r.language for r in user_rows] == ["en", "hi-Latn", "hi-Latn", "hi"]
+
+    # The crucial part: the final prompt still contains the *first*, English turn. Context is
+    # tagged by language, never partitioned by it.
+    final_request = llm.requests[-1]
+    replayed = [m.text for m in final_request.messages]
+    assert any("Kirchhoff's voltage law" in text for text in replayed), (
+        "the English opening turn must survive a switch into Hindi"
+    )
+    assert replayed[-1] == "किरचॉफ का नियम समझाओ"
+
+
+async def test_the_response_directive_changes_per_turn_without_touching_the_cached_prefix(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """The directive is volatile, so it must sit after the cache breakpoints (ARCHITECTURE §8.5)."""
+    student_id, session_id = student_and_session
+    llm = FakeLLMProvider([ScriptedTurn(text="Reply.")] * 4)
+    voice = VoiceSession(
+        student_id=student_id,
+        session_id=session_id,
+        transport=RecordingTransport(),
+        vad=VadGate(ScriptedVoiceDetector([0.01] * 200), VadSettings()),
+        stt=FakeSTTProvider(),
+        tts=FakeTTSProvider(),
+        conversation=ConversationService(
+            llm=llm,
+            messages=MessageRepository(db_session),
+            ledger=UsageLedger(redis_client, settings),
+            settings=settings,
+        ),
+        settings=settings,
+        config=VoiceSessionConfig(ack_grace_ms=0),
+        clock=FakeClock(),
+    )
+    await voice.start()
+
+    await voice.handle_text(text="Explain mesh analysis in detail please")
+    await voice.wait_for_turn()
+    await voice.handle_text(text="Yaar ye samajh nahi aaya phir se batao")
+    await voice.wait_for_turn()
+    await db_session.commit()
+
+    english_turn, hinglish_turn = llm.requests[0], llm.requests[1]
+
+    # The cacheable prefix is byte-identical across the switch.
+    assert [b.text for b in english_turn.system if b.cacheable] == [
+        b.text for b in hinglish_turn.system if b.cacheable
+    ]
+
+    # And the directive differs, in a non-cacheable block.
+    english_volatile = " ".join(b.text for b in english_turn.system if not b.cacheable)
+    hinglish_volatile = " ".join(b.text for b in hinglish_turn.system if not b.cacheable)
+    assert "English" in english_volatile
+    assert "Hinglish" in hinglish_volatile
+    assert english_volatile != hinglish_volatile
+
+
+async def test_the_selected_voice_follows_the_routed_language(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    student_id, session_id = student_and_session
+    tts = FakeTTSProvider()
+    voice = VoiceSession(
+        student_id=student_id,
+        session_id=session_id,
+        transport=RecordingTransport(),
+        vad=VadGate(ScriptedVoiceDetector([0.01] * 200), VadSettings()),
+        stt=FakeSTTProvider(),
+        tts=tts,
+        conversation=ConversationService(
+            llm=FakeLLMProvider([ScriptedTurn(text="Reply.")] * 4),
+            messages=MessageRepository(db_session),
+            ledger=UsageLedger(redis_client, settings),
+            settings=settings,
+        ),
+        settings=settings,
+        config=VoiceSessionConfig(ack_grace_ms=0),
+        clock=FakeClock(),
+    )
+    await voice.start()
+
+    await voice.handle_text(text="Explain mesh analysis in detail please")
+    await voice.wait_for_turn()
+    assert tts.requests[-1].voice.language == "en"
+
+    await voice.handle_text(text="किरचॉफ का नियम समझाओ")
+    await voice.wait_for_turn()
+    assert tts.requests[-1].voice.language == "hi", "a Hindi answer must not use the English voice"

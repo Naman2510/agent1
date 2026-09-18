@@ -1,7 +1,8 @@
 # Evaluation Framework
 
-**Status:** Phase 0 — methodology design. **No suite has been run. Every metric table in this
-document is empty, and will stay empty until a recorded run fills it.**
+**Status:** Phase 4. **One suite has run.** The language-identification numbers below are real,
+recorded, and reproducible from a committed dataset. Every other table in this document is still
+empty, and stays empty until a recorded run fills it.
 
 The evaluation subsystem is a first-class component, not a test folder. Its job is to make the
 statement "this change improved the system" falsifiable.
@@ -22,6 +23,7 @@ statement "this change improved the system" falsifiable.
 
 | Suite | Question it answers | Fixture type | Cost tier |
 |---|---|---|---|
+| `lid` ✅ | Do we identify the utterance's language? | text + label | free (no model) |
 | `stt` | Do we hear the student correctly, per language? | audio + reference transcript | local model / paid ASR |
 | `retrieval` | Do we find the right course material? | query + labelled relevant chunk IDs | free (local embeddings) |
 | `agent` | Does the mentor choose the right tool with the right arguments? | scenario + expected tool trace | paid LLM, mockable |
@@ -31,6 +33,61 @@ statement "this change improved the system" falsifiable.
 
 Each writes one `evaluation_runs` row plus per-case `evaluation_results`, and logs to MLflow.
 Invocation: `python -m eval.runner --suite retrieval --dataset v1 --config configs/baseline.yaml`.
+
+## 2a. Language identification — measured
+
+```
+python -m eval.runner --suite lid --dataset v1 [--failures]
+```
+
+**Run:** suite `lid`, dataset `v1` (88 cases), git `0adf300`, 2026-09-18. No model: the router is
+Unicode script detection plus a hand-curated lexicon (ADR-0011).
+
+Two reports, because there are two questions. **Signal** asks whether the utterance itself carried
+enough evidence to identify its language — an utterance with no evidence counts as `unknown` even
+where the router then answered correctly from its sticky prior. **Routed** asks what the router
+actually chose, which is closer to what a student experiences. Reporting only the first understates
+the system; reporting only the second hides that the signal is weak.
+
+| | Signal | Routed |
+|---|---|---|
+| Accuracy | **0.9205** | 0.8750 |
+| Macro F1 | **0.8988** | 0.7568 |
+
+Per language (signal), recall:
+
+| Language | Support | Recall | Precision | F1 |
+|---|---|---|---|---|
+| `hi` (Devanagari) | 17 | **1.000** | 1.000 | 1.000 |
+| `ta` (Tamil script) | 9 | **1.000** | 1.000 | 1.000 |
+| `hi-Latn` (romanized) | 25 | 0.960 | 0.923 | 0.941 |
+| `en` | 22 | 0.864 | 0.950 | 0.905 |
+| `mixed` (code-switched) | 8 | **0.625** | 1.000 | 0.769 |
+| `unknown` | 7 | 1.000 | 0.636 | 0.778 |
+
+By difficulty (signal): easy 0.980 (n=50) · medium 0.842 (n=19) · hard 0.842 (n=19).
+
+**What these numbers say.** Script-based languages are settled by codepoints, so 1.000 there is
+arithmetic, not achievement. The two informative rows are `hi-Latn` at 0.960 — optimistic, see the
+bias note — and `mixed` at 0.625, which is the genuine weak spot and is written up as
+[FC-002](failure_cases/002-mixed-language-under-detected.md).
+
+**What they do not say.** The 88 cases were authored by the same person who wrote the lexicon they
+test. That is the strongest available bias, it is recorded in `datasets/v1/MANIFEST.yaml`, and it
+means these figures measure internal consistency and guard against regressions. **They are not
+evidence of accuracy on real student speech.** Thresholds were deliberately left untuned against
+this set: adjusting two constants until a self-authored suite scores 100% produces a better number
+and a worse system.
+
+The `unknown` row in the *routed* report scores zero by construction — the router always picks a
+concrete language, because a voice product must answer in *some* language. That is a metric
+artifact, not a defect; the router's uncertainty is exposed as a confidence value, not as a
+refusal to answer.
+
+Failures, all seven, are traceable to the tokens that caused them (`--failures` prints the
+reasoning per case) and are written up as
+[FC-001](failure_cases/001-insufficient-lexical-evidence.md) and
+[FC-002](failure_cases/002-mixed-language-under-detected.md).
 
 ## 3. STT evaluation
 
@@ -212,6 +269,7 @@ Registered experiments (all **pending** — none has been designed in detail, le
 | EXP-008 | Heading-path prefixing improves recall on lecture material | chunk enrichment | retrieval | pending |
 | EXP-009 | Intent-gated tool exposure improves selection without hurting completion | tool gate | agent | pending |
 | EXP-010 | A fine-tuned intent classifier beats the prompted baseline | classifier | agent | pending |
+| EXP-011 | Lowering the `mixed` gate raises its recall without costing `en`/`hi-Latn` precision | classifier thresholds | lid | registered, blocked on a dataset that is not self-authored |
 
 An experiment that changes two variables is recorded as `inconclusive`. This is enforced socially,
 by review, and structurally, by `experiments.variable_changed` being a single column.

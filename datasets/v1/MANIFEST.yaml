@@ -1,0 +1,84 @@
+version: v1
+created: 2026-09-18
+status: partial
+description: >
+  First evaluation dataset. Contains the language-identification slice only; the STT, retrieval,
+  agent, response and e2e slices listed in docs/DATASET.md do not exist yet.
+
+slices:
+  lid:
+    path: lid/cases.jsonl
+    cases: 88
+    task: >
+      Given one student utterance with no conversation history, identify its language:
+      en | hi | hi-Latn | mixed | ta | unknown.
+    by_language:
+      en: 22
+      hi: 17
+      hi-Latn: 25
+      mixed: 8
+      ta: 9
+      unknown: 7
+    by_difficulty:
+      easy: 50
+      medium: 19
+      hard: 19
+
+# ---------------------------------------------------------------------------
+# Provenance and bias. Read this before quoting any number derived from this
+# dataset.
+# ---------------------------------------------------------------------------
+provenance:
+  source: authored
+  author: project developer (single annotator)
+  annotators: 1
+  inter_annotator_agreement: not measured (single annotator)
+  synthetic: false        # text, not generated audio
+  llm_generated: false
+
+bias:
+  severity: high
+  statement: >
+    The LID cases were authored by the same person who wrote the lexicon they test. This is the
+    strongest form of bias available: the cases were written with knowledge of which words the
+    classifier knows. Results measure INTERNAL CONSISTENCY and serve as a regression guard. They
+    are NOT evidence of accuracy on real student speech and must never be presented as such.
+  consequences:
+    - The romanized-Hindi recall figure is optimistic by an unknown margin.
+    - Thresholds were deliberately NOT tuned against this set; doing so would be fitting a model
+      to its own author. See the Phase 4 audit.
+    - A second annotator, and utterances collected from real students, are prerequisites for any
+      claim about accuracy.
+
+known_gaps:
+  - No audio. VAD and STT cannot be evaluated from this dataset (see the espeak-ng finding in
+    docs/PHASE_3_AUDIT.md — synthetic speech is not a valid substitute).
+  - No dialectal variation in Hindi or Tamil.
+  - Romanized Tamil has 2 cases and no meaningful coverage; Tamil is deferred past the MVP.
+  - `mixed` has only 8 cases, and it is the hardest class — the least reliable row in the report.
+  - Sample sizes support direction, not confidence intervals. A few points of difference between
+    two configurations is noise at n=88.
+
+pii:
+  contains_personal_data: false
+  statement: >
+    Names appearing in cases ("Priya") are invented, not collected. No student data, no audio,
+    and nothing traceable to a person is present in this repository.
+
+licensing:
+  content: authored for this project
+  third_party_assets: none
+
+immutability: >
+  This version is frozen once any evaluation run references it. Corrections create v1.1 with a
+  changelog entry rather than editing v1, because editing it would retroactively change published
+  metrics.
+
+runs:
+  - suite: lid
+    git_sha: 0adf300
+    date: 2026-09-18
+    signal_accuracy: 0.9205
+    signal_macro_f1: 0.8988
+    routed_accuracy: 0.8750
+    routed_macro_f1: 0.7568

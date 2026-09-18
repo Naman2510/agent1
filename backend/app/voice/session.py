@@ -27,7 +27,8 @@ from typing import Any, Protocol
 
 import structlog
 
-from app.agent.language import script_of
+from app.agent.lang.policy import SpeechPlan, response_directive, select_voice
+from app.agent.lang.router import LanguageDecision, LanguageState, route
 from app.core.config import Settings
 from app.providers.stt.base import (
     FinalTranscript,
@@ -35,7 +36,7 @@ from app.providers.stt.base import (
     STTProvider,
     TranscriptionContext,
 )
-from app.providers.tts.base import SynthesisRequest, TTSProvider, Voice
+from app.providers.tts.base import SynthesisRequest, TTSProvider
 from app.services.conversation import ConversationService
 from app.voice import marks as stage
 from app.voice.audio import (
@@ -162,7 +163,9 @@ class VoiceSession:
         self._committed_at: float | None = None
         self._speech_ms = 0
         self._pending_merge_text: str = ""
-        self._voice = self._select_voice("en")
+        self.language_state = LanguageState()
+        self._speech_plan: SpeechPlan = select_voice("en", self.tts.voices())
+        self._language_directive: str | None = None
         self.dropped_frames = 0
 
     # --- lifecycle ---------------------------------------------------------
@@ -284,7 +287,8 @@ class VoiceSession:
             self._pending_merge_text = ""
             log.info("voice.utterance_merged", session_id=str(self.session_id))
 
-        language = transcript.language_hint or script_of(utterance)
+        decision = self._route_language(utterance)
+        language = decision.language
         self._marks.mark(stage.LANGUAGE_DECIDED)
 
         self.machine.fire(Trigger.TURN_END)
@@ -303,6 +307,37 @@ class VoiceSession:
         """
         cleaned = text.strip().strip(".,!?।॥").casefold()
         return cleaned in BACKCHANNELS
+
+    def _route_language(self, utterance: str) -> LanguageDecision:
+        """Decide the answer's language and carry the sticky prior forward (ADR-0011).
+
+        The ASR's own language hint is deliberately *not* the decision: providers routinely label
+        romanized Hindi as English, which is the exact case this system exists to handle.
+        """
+        decision = route(utterance, self.language_state)
+        self.language_state = decision.state
+        self._language_directive = response_directive(decision.language)
+        self._speech_plan = select_voice(decision.language, self.tts.voices())
+
+        if not self._speech_plan.voice_matched_language:
+            log.warning(
+                "voice.no_voice_for_language",
+                language=decision.language,
+                using=self._speech_plan.voice.id,
+            )
+        if self._speech_plan.transliterate_to_devanagari:
+            # Romanized Hindi through an Indic voice is read with English phonetics. The
+            # transliterator is EXP-006 and does not exist yet, so the gap is logged rather than
+            # silently ignored (R-05).
+            log.info("voice.transliteration_wanted", language=decision.language)
+
+        log.info(
+            "voice.language_routed",
+            session_id=str(self.session_id),
+            decision=decision.explain(),
+            switched=decision.switched,
+        )
+        return decision
 
     async def _transcribe(self, audio: bytes) -> FinalTranscript:
         async def frames() -> AsyncIterator[bytes]:
@@ -329,7 +364,6 @@ class VoiceSession:
         self._ledger = PlaybackLedger()
         self._chunker.reset()
         self._audio_seq = 0
-        self._voice = self._select_voice(language)
         delivery = _LedgerDelivery(ledger=self._ledger, pending_text=lambda: self._chunker.pending)
 
         stream = self.conversation.stream_turn(
@@ -339,6 +373,7 @@ class VoiceSession:
             delivery=delivery,
             language=language,
             marks=self._marks.durations_ms(),
+            language_directive=self._language_directive,
         )
         try:
             async for fragment, result in stream:
@@ -368,7 +403,9 @@ class VoiceSession:
             self._marks.mark(stage.FIRST_SENTENCE)
 
         request = SynthesisRequest(
-            text=text, voice=self._voice, sample_rate=self.config.tts_sample_rate
+            text=text,
+            voice=self._speech_plan.voice,
+            sample_rate=self.config.tts_sample_rate,
         )
         # Registered before synthesis starts: if the student interrupts mid-chunk, this text must
         # still appear in the record — as heard, partly heard, or unheard.
@@ -498,9 +535,10 @@ class VoiceSession:
         self._marks.mark(stage.LANGUAGE_DECIDED)
         self.machine.fire(Trigger.TURN_END)
         await self._announce_state()
+        decision = self._route_language(text)
         self._committed_at = self.clock()
         self._turn_task = asyncio.create_task(
-            self._run_turn(utterance=text, language=script_of(text), reason="typed")
+            self._run_turn(utterance=text, language=decision.language, reason="typed")
         )
 
     async def wait_for_turn(self) -> None:
@@ -511,17 +549,6 @@ class VoiceSession:
                 await task
 
     # --- helpers -----------------------------------------------------------
-
-    def _select_voice(self, language: str) -> Voice:
-        voices = self.tts.voices()
-        for voice in voices:
-            if voice.language == language:
-                return voice
-        # Fall back to the first voice rather than failing: a wrong-accent answer beats silence,
-        # and the mismatch is visible in telemetry.
-        if language not in {"en", "unknown"}:
-            log.warning("voice.no_voice_for_language", language=language)
-        return voices[0]
 
     async def _announce_state(self) -> None:
         await self.transport.send_control(

@@ -39,7 +39,7 @@ jobs:
         run: |
           ruff check .
           ruff format --check .
-          mypy app
+          mypy app eval
       - name: Unit tests
         working-directory: backend
         # A database URL is deliberately NOT provided: if a unit test starts needing one, this
@@ -88,6 +88,12 @@ jobs:
         env:
           VAANIOS_TEST_DATABASE_URL: postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
         run: pytest -q --cov --cov-report=term-missing --cov-fail-under=80
+
+      - name: Evaluation suites (tier T1 — no external calls)
+        working-directory: backend
+        # The LID suite runs on a committed dataset with no model providers, so it belongs in the
+        # fast tier. Its recorded baseline is asserted by tests/unit/test_eval_lid_suite.py.
+        run: python -m eval.runner --suite lid --dataset v1
 
       - name: Migrations are reversible and match the models
         working-directory: backend

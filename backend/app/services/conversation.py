@@ -116,6 +116,7 @@ class ConversationService:
         delivery: DeliveryTracker | None = None,
         language: str | None = None,
         marks: dict[str, int] | None = None,
+        language_directive: str | None = None,
     ) -> AsyncGenerator[tuple[str, TurnResult | None], None]:
         """Run one turn, yielding `(text_fragment, None)` and finally `("", result)`.
 
@@ -129,7 +130,11 @@ class ConversationService:
         result = TurnResult(turn_index=turn_index)
 
         history = await self.history(session_id, limit=self._settings.llm_history_turns)
-        prompt = assemble(history=history, utterance=utterance)
+        # The directive goes in a non-cacheable block, so it can change per turn without
+        # invalidating the cached prefix (ARCHITECTURE §8.5).
+        prompt = assemble(
+            history=history, utterance=utterance, language_directive=language_directive
+        )
 
         request = LLMRequest(
             system=prompt.system,

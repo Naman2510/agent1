@@ -87,7 +87,12 @@ turn state machine **including barge-in**.
 equals the spoken prefix; nine stage marks persisted; first real TTFA numbers recorded (whatever they
 are).
 
-### Phase 4 — Language routing
+### Phase 4 — Language routing ✅
+Delivered 2026-09-18: 423 tests, 96% coverage. Gate 4 passed —
+[`PHASE_4_AUDIT.md`](PHASE_4_AUDIT.md). First working eval suite and first versioned dataset:
+LID signal accuracy 0.9205 (macro F1 0.8988) on `datasets/v1`, with the self-authorship bias
+documented at severity `high`.
+
 Script detection, romanized-Hinglish classification, sticky session state with hysteresis, response
 language policy, TTS voice/transliteration selection.
 **Gate 4:** per-language LID accuracy recorded as a baseline; mid-conversation switching preserves

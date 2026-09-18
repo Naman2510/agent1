@@ -1,9 +1,10 @@
-"""Minimal language signal for the Phase 2 text path.
+"""Coarse script signal, retained for the text path and for telemetry.
 
-This is **not** the language router from ADR-0011. That needs script detection with hysteresis, a
-romanized-Hinglish classifier and session-sticky state, and it lands in Phase 4 with the metrics
-to judge it by. What exists here is the one signal that is genuinely free — Unicode script — used
-only to tag stored messages, so Phase 4 has real data to compare against.
+Superseded as a *decision* by `app.agent.lang.router`, which adds the romanized-Hinglish
+classifier and sticky session state (ADR-0011). This function remains because a cheap script tag
+is still useful where no session state exists, and because its documented limitation — romanized
+Hindi is indistinguishable from English here — is asserted by a test that would otherwise have
+nowhere to live.
 """
 
 from __future__ import annotations

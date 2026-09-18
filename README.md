@@ -10,9 +10,9 @@ voice pipeline rather than a thin wrapper around an LLM API.
 
 | | |
 |---|---|
-| **Current phase** | Phase 3 complete — Voice loop (mechanisms; real ASR/TTS still outstanding) |
-| **Implementation** | Phase 3 complete — 353 tests passing. Voice loop with barge-in works end to end; no real ASR/TTS provider, no tools, no RAG yet. |
-| **Benchmarks** | None. Every metric table in this repository is empty by design. |
+| **Current phase** | Phase 4 complete — Language routing, and the first measured eval suite |
+| **Implementation** | Phase 4 complete — 423 tests, 96% coverage. Voice loop with barge-in and language routing; no real ASR/TTS provider, no tools, no RAG yet. |
+| **Benchmarks** | One suite has run: language identification, 0.9205 signal accuracy on `datasets/v1` — with a documented high self-authorship bias. Everything else is still unmeasured. |
 | **Last updated** | 2026-09-17 |
 
 > **Nothing here is measured yet.** Latency figures in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
@@ -138,6 +138,17 @@ and RAG are Phases 3, 6 and 5.
 - Structured JSON logs with request correlation, secret redaction, and transcript hashing
 - Reversible Alembic migrations, verified in CI against the same pgvector image Compose uses
 
+**Phase 4 — language routing**
+- Unicode script detection (Devanagari, Tamil) — settled by codepoints, **1.000 recall**
+- A romanized-Hinglish classifier built on Hindi *grammatical scaffolding*, because the content
+  words in code-switched speech are routinely English on purpose
+- Sticky session language with hysteresis: the mentor mirrors the student's language immediately,
+  but the conversation's default moves only after two consecutive turns — so "ok" cannot redefine
+  it
+- Per-turn response directives placed *after* the cache breakpoints, so routing never invalidates
+  the prompt cache
+- **The first working eval suite**: `python -m eval.runner --suite lid --dataset v1`
+
 **Phase 3 — the voice loop**
 - A WebSocket carrying 20 ms PCM frames up and synthesised audio down, with a `[turn_id][seq]`
   fencing header so either end can drop audio from a turn that has ended
@@ -178,7 +189,12 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
 2. **The Claude adapter has never run against the live API** — no credential where it was built.
    Every parameter it sends was checked against the installed SDK's signatures;
    `backend/scripts/smoke_llm.py` is the live check. ([M2-01](docs/PHASE_2_AUDIT.md))
-3. **There is no TTFA number.** What was measured is our pipeline's own overhead with fake
+3. **The LID baseline measures internal consistency, not accuracy.** The 88 cases were authored
+   by the same person who wrote the lexicon they test — the strongest available bias, recorded at
+   severity `high` in `datasets/v1/MANIFEST.yaml`. The `mixed` class sits at 0.625 recall and was
+   **deliberately not tuned**, because adjusting two constants until a self-authored suite scores
+   100% is a better number and a worse system. ([M4-01](docs/PHASE_4_AUDIT.md))
+4. **There is no TTFA number.** What was measured is our pipeline's own overhead with fake
    providers (~0.4% of one core). Real TTFA is set by the ASR round trip, LLM time-to-first-token
    and TTS time-to-first-byte. ([M3-01](docs/PHASE_3_AUDIT.md))
 
