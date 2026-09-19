@@ -1,8 +1,8 @@
 # Evaluation Framework
 
-**Status:** Phase 4. **One suite has run.** The language-identification numbers below are real,
-recorded, and reproducible from a committed dataset. Every other table in this document is still
-empty, and stays empty until a recorded run fills it.
+**Status:** Phase 5. **Two suites have run.** The language-identification and retrieval numbers
+below are real, recorded, and reproducible from a committed dataset. Every other table in this
+document is still empty, and stays empty until a recorded run fills it.
 
 The evaluation subsystem is a first-class component, not a test folder. Its job is to make the
 statement "this change improved the system" falsifiable.
@@ -25,7 +25,7 @@ statement "this change improved the system" falsifiable.
 |---|---|---|---|
 | `lid` ✅ | Do we identify the utterance's language? | text + label | free (no model) |
 | `stt` | Do we hear the student correctly, per language? | audio + reference transcript | local model / paid ASR |
-| `retrieval` | Do we find the right course material? | query + labelled relevant chunk IDs | free (local embeddings) |
+| `retrieval` ✅ | Do we find the right course material? | query + labelled relevant chunk IDs | free (local embeddings) |
 | `agent` | Does the mentor choose the right tool with the right arguments? | scenario + expected tool trace | paid LLM, mockable |
 | `response` | Is the answer grounded, relevant, and in the right language? | question + context + rubric | paid LLM + judge |
 | `voice` | Does the conversation feel responsive? | scripted audio sessions | full stack |
@@ -119,34 +119,83 @@ Always broken down by language; the aggregate is reported last because it hides 
 | Tamil | — | — | — | — | — | — |
 | Noisy (any language, SNR ≤ 10 dB) | — | — | — | — | — | — |
 
-## 4. Retrieval evaluation
+## 4. Retrieval evaluation — measured
+
+```
+python -m eval.runner --suite retrieval --dataset v1 [--failures]
+```
+
+**Run:** suite `retrieval`, dataset `v1` (22 cases), git `de38217`, 2026-09-19. Corpus:
+`datasets/v1/corpus`, 5 self-authored documents, 19 chunks (§ below and DATASET.md). Embedder:
+`tfidf-svd-256d(fit_rank=18)@19docs` — TF-IDF + truncated SVD, substituting for the originally
+planned `multilingual-e5-base` (see [ADR-0006's amendment](adr/0006-embedding-model.md)).
 
 | Metric | Definition |
 |---|---|
-| Recall@k | share of labelled-relevant chunks in the top *k* (k ∈ {5, 10, 20}) |
+| Recall@k | share of labelled-relevant chunks in the top *k* (k ∈ {5, 10}) |
 | Precision@5 | labelled-relevant share of the top 5 |
-| nDCG@10 | rank-sensitive quality with graded relevance (0/1/2) |
+| nDCG@10 | rank-sensitive quality with graded relevance |
 | MRR | reciprocal rank of the first relevant chunk |
-| Context relevance | judge-scored 0–1 usefulness of the assembled context |
-| Filter fidelity | share of results satisfying the requested metadata filter (a hard bug if < 1.0) |
+| Hit rate | share of queries with at least one relevant chunk anywhere in the top 20 |
+| Context relevance | judge-scored 0–1 usefulness of the assembled context — not yet measured, needs a judge (§5.3) |
+| Filter fidelity | share of results satisfying the requested metadata filter — exercised by `ret-022`; both arms respect `subject`/`topic` (Phase 5 audit D5-05) |
 
-Labelling: for each query, annotators mark chunks as `irrelevant / partially relevant / fully
-relevant` from a pooled candidate list (top-20 from vector, lexical, and reranked runs) to limit pool
-bias. The pooling method and its bias are recorded in [DATASET.md](DATASET.md).
+**Labelling, honestly.** Relevant chunks were labelled by the same person who wrote the corpus
+documents and the retrieval pipeline, from memory rather than from a pooled candidate list across
+configurations — the pooling method described below (kept as the target for a larger set) was
+skipped as disproportionate for 19 chunks. This is the same shape of bias as the LID dataset (§2a):
+these numbers show the pipeline retrieves what its own author expects, and are a regression guard,
+not evidence of retrieval quality on material its builder did not write. Full statement in
+`datasets/v1/MANIFEST.yaml`'s `retrieval_bias`.
 
 **Ablations run as a standard grid**, because the claim "hybrid retrieval helps" is exactly the kind
-of thing that is usually asserted and rarely tested:
+of thing that is usually asserted and rarely tested. Disabling an arm means fusing it with an empty
+ranking through the *same* production RRF code path, not a separate reimplementation, so what is
+measured is the real retriever with an arm turned off:
 
-| Config | Recall@10 | nDCG@10 | p95 latency |
-|---|---|---|---|
-| vector only | — | — | — |
-| lexical only | — | — | — |
-| hybrid (RRF) | — | — | — |
-| hybrid + reranker | — | — | — |
-| hybrid + reranker + heading-path prefix | — | — | — |
+| Config | Recall@5 | Recall@10 | Precision@5 | MRR | nDCG@10 | Hit rate |
+|---|---|---|---|---|---|---|
+| vector only | 0.932 | 0.955 | 0.209 | 0.856 | 0.885 | 0.955 |
+| lexical only | 0.909 | 0.955 | 0.218 | 0.710 | 0.771 | 0.955 |
+| **hybrid (RRF)** | 0.932 | 0.955 | 0.209 | **0.871** | **0.893** | 0.955 |
+| hybrid + reranker | — | — | — | — | — | — (`NoopReranker` only; a real reranker is unbuilt) |
+| lexical, real BM25 (reference only) | 0.932 | 0.955 | 0.216 | 0.886 | 0.897 | 0.955 |
 
-Reported per language as well as overall, specifically to expose the weak Indic lexical arm
-(ARCHITECTURE §11).
+The last row is not a retrieval configuration this system runs — it rescores the same queries
+offline with `rank_bm25.BM25Okapi` purely to quantify the gap ADR-0005 predicted for the shipped
+`ts_rank_cd` lexical arm (no IDF weighting). See "what these numbers say" below.
+
+Reported per language, specifically to expose the embedder's cross-lingual gap
+(ADR-0006's amendment):
+
+| Language | n | Recall@5 | Recall@10 | MRR | nDCG@10 |
+|---|---|---|---|---|---|
+| `en` | 20 | 0.975 | 1.000 | 0.908 | 0.932 |
+| `hi` (Devanagari/code-switched) | 2 | 0.500 | 0.500 | 0.500 | 0.500 |
+
+**What these numbers say.** On this corpus, hybrid RRF ties vector-only on recall (both find a
+relevant chunk in the top 5/10 for the same queries) but has the best ranking quality of the three
+shipped configurations (MRR 0.871, nDCG@10 0.893) — ranking evidence, on 22 cases, that fusion helps
+even where it does not change *what* is found. Lexical-only is the clear laggard on ranking quality
+(MRR 0.710) despite matching the others on hit rate, which is the IDF gap made visible: a common
+word can outrank a rare, diagnostic one under `ts_rank_cd`'s cover-density ranking. The concrete
+case — a query where an off-topic chunk ties the actual definition it was looking for — is written
+up as [FC-003](failure_cases/003-lexical-arm-lacks-idf-weighting.md).
+
+**What they do not say.** The real-BM25 reference row's MRR (0.886) is the *highest* of all four —
+higher than the shipped hybrid configuration. IDF weighting helps even on a 19-chunk corpus, and
+this project does not ship it in the lexical arm; that gap is accepted, not hidden (ADR-0005). The
+`hi` row's 0.500 across every column is exactly 1 of 2 cases succeeding: the one case that retains
+literal English technical vocabulary in an otherwise Hindi sentence, and the one that is pure
+Devanagari failing outright, honestly, with zero results rather than a wrong answer — see
+[FC-004](failure_cases/004-cross-lingual-retrieval-degrades-to-zero-signal.md). n=2 is nowhere near
+enough to size the cross-lingual gap, only to demonstrate that it exists. As with the LID dataset,
+the corpus, queries, and relevance labels were all authored by the same person who built the
+pipeline — see `retrieval_bias` in `datasets/v1/MANIFEST.yaml` before quoting any number above.
+
+Labelling for a future, larger set: annotators mark chunks as `irrelevant / partially relevant /
+fully relevant` from a pooled candidate list (top-20 from vector, lexical, and reranked runs) to
+limit pool bias. Not yet needed at 19 chunks, where the author can enumerate every chunk directly.
 
 ## 5. Agent, response, and voice evaluation
 

@@ -137,7 +137,7 @@ so it can be reviewed rather than assumed.
 | ID | Risk | Mitigation |
 |---|---|---|
 | R-17 | WebSocket head-of-line blocking causes audio jitter on poor networks | Client jitter buffer; WebRTC is the documented upgrade path (ADR-0001) |
-| R-18 | e5 embedding prefixes (`query:` / `passage:`) omitted, silently degrading retrieval | Enforced inside the provider, asserted by a unit test (ADR-0006) |
+| R-18 | e5 embedding prefixes (`query:` / `passage:`) omitted, silently degrading retrieval | Enforced inside the provider, asserted by a unit test (ADR-0006). Not currently active: Phase 5 shipped a TF-IDF/SVD substitute because the sandbox has no route to HuggingFace Hub, which has no such prefix contract — see ADR-0006's amendment |
 | R-19 | Prompt-cache invalidation from unstable serialisation | Deterministic tool ordering; a test asserting `cache_read_input_tokens > 0` on turn two |
 | R-20 | MLflow / Postgres metric divergence | One-way mirror written once at run completion (ADR-0013) |
 | R-21 | Provider API drift breaking the client | Pinned SDK versions; provider adapters isolated; contract tests against recorded fixtures |

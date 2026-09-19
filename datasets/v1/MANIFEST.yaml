@@ -1,8 +1,9 @@
 version: v1
 created: 2026-09-18
+updated: 2026-09-19
 status: partial
 description: >
-  First evaluation dataset. Contains the language-identification slice only; the STT, retrieval,
+  First evaluation dataset. Contains the language-identification and retrieval slices; the STT,
   agent, response and e2e slices listed in docs/DATASET.md do not exist yet.
 
 slices:
@@ -24,9 +25,30 @@ slices:
       medium: 19
       hard: 19
 
+  retrieval:
+    path: retrieval/cases.jsonl
+    cases: 22
+    corpus: datasets/v1/corpus (5 self-authored EMT/Circuit Theory documents, 19 chunks)
+    task: >
+      Given a student question, retrieve the labelled-relevant chunk(s) from the ingested corpus.
+      Relevance is referenced as (document title, heading-path substring) rather than by chunk
+      UUID, so it survives a corpus re-ingest.
+    by_language:
+      en: 20
+      hi: 2
+    by_difficulty:
+      easy: 7
+      medium: 9
+      hard: 6
+    notes:
+      - "2 cases (ret-020, ret-021) are deliberately cross-lingual: a Hindi-script query against the English-only corpus, to measure the embedder's cross-lingual gap honestly rather than only testing same-language retrieval. See FC-004."
+      - "1 case (ret-022) exercises the subject metadata filter end to end."
+
 # ---------------------------------------------------------------------------
 # Provenance and bias. Read this before quoting any number derived from this
-# dataset.
+# dataset. `provenance`/`bias` below are the `lid` slice's; `retrieval_*` are the
+# retrieval slice's — the two were authored under different conditions and the
+# biases are not the same shape.
 # ---------------------------------------------------------------------------
 provenance:
   source: authored
@@ -50,14 +72,35 @@ bias:
     - A second annotator, and utterances collected from real students, are prerequisites for any
       claim about accuracy.
 
+retrieval_provenance:
+  source: authored
+  author: "project developer (single annotator) — same person who wrote both the corpus documents and the retrieval pipeline under test"
+  annotators: 1
+  inter_annotator_agreement: not measured (single annotator)
+  pooling: "none — relevant chunks were labelled by the corpus author from direct knowledge of the 5 source documents, not from a pooled candidate list across configurations (EVALUATION.md section 4's pooling method is the target for a larger set; skipped here as disproportionate for 19 chunks)"
+  synthetic: false
+  llm_generated: false
+
+retrieval_bias:
+  severity: high
+  statement: >
+    The same person wrote the corpus, the retrieval pipeline, and the queries, and labelled
+    relevance from memory of writing the documents rather than from independent judgement. This is
+    the same shape of bias as the LID slice, for the same reason: results measure whether the
+    pipeline retrieves what its own author expects, not real retrieval quality against material
+    the system's builder did not write.
+  consequences:
+    - "Queries tend to reuse vocabulary from the source document's own heading or opening sentence (e.g. ret-001 asks 'What does KVL state?' against a chunk titled 'Kirchhoff's Voltage Law') — easier than a real student's phrasing, which would not echo the textbook."
+    - "The corpus is 5 documents and 19 chunks. Recall@10 of 0.955 on this corpus says the pipeline mechanism works; it says nothing about recall at hundreds of documents, where near-duplicate and topically-adjacent chunks make discrimination genuinely harder."
+    - "A corpus and query set from a real course, judged by someone other than the pipeline's author, are prerequisites for any claim about real-world retrieval quality."
+
 known_gaps:
-  - No audio. VAD and STT cannot be evaluated from this dataset (see the espeak-ng finding in
-    docs/PHASE_3_AUDIT.md — synthetic speech is not a valid substitute).
-  - No dialectal variation in Hindi or Tamil.
-  - Romanized Tamil has 2 cases and no meaningful coverage; Tamil is deferred past the MVP.
-  - `mixed` has only 8 cases, and it is the hardest class — the least reliable row in the report.
-  - Sample sizes support direction, not confidence intervals. A few points of difference between
-    two configurations is noise at n=88.
+  - "No audio. VAD and STT cannot be evaluated from this dataset (see the espeak-ng finding in docs/PHASE_3_AUDIT.md — synthetic speech is not a valid substitute)."
+  - "No dialectal variation in Hindi or Tamil."
+  - "Romanized Tamil has 2 cases and no meaningful coverage; Tamil is deferred past the MVP."
+  - "`mixed` has only 8 cases, and it is the hardest class — the least reliable row in the LID report."
+  - "Sample sizes support direction, not confidence intervals. A few points of difference between two configurations is noise at n=88 (lid) or n=22 (retrieval)."
+  - "The retrieval slice's cross-lingual cases (n=2) are far too few to characterise the embedder's cross-lingual gap quantitatively — they demonstrate that the gap exists, not its magnitude."
 
 pii:
   contains_personal_data: false
@@ -82,3 +125,38 @@ runs:
     signal_macro_f1: 0.8988
     routed_accuracy: 0.8750
     routed_macro_f1: 0.7568
+  - suite: retrieval
+    config: hybrid_rrf
+    git_sha: de38217
+    date: 2026-09-19
+    recall_at_5: 0.9318
+    recall_at_10: 0.9545
+    precision_at_5: 0.2091
+    mrr: 0.8712
+    ndcg_at_10: 0.8926
+    hit_rate: 0.9545
+  - suite: retrieval
+    config: vector_only
+    git_sha: de38217
+    date: 2026-09-19
+    recall_at_5: 0.9318
+    recall_at_10: 0.9545
+    mrr: 0.8561
+    ndcg_at_10: 0.8854
+  - suite: retrieval
+    config: lexical_only
+    git_sha: de38217
+    date: 2026-09-19
+    recall_at_5: 0.9091
+    recall_at_10: 0.9545
+    mrr: 0.7102
+    ndcg_at_10: 0.7715
+  - suite: retrieval
+    config: lexical_bm25_offline
+    note: reference only — not a shipped configuration
+    git_sha: de38217
+    date: 2026-09-19
+    recall_at_5: 0.9318
+    recall_at_10: 0.9545
+    mrr: 0.8864
+    ndcg_at_10: 0.8968

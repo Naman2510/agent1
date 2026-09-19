@@ -1,7 +1,8 @@
 # Datasets
 
-**Status:** Phase 0 — policy and pipeline design. **No data has been collected. `datasets/` contains
-no cases yet.**
+**Status:** Phase 5. Two of the six slices in `datasets/v1/` are real: `lid` (88 cases, Phase 4) and
+`retrieval` (22 cases, Phase 5). The rest — `stt`, `agent`, `response`, `e2e` — do not exist yet;
+the layout in §1 is the target, not a claim that every directory is populated.
 
 ---
 

@@ -10,10 +10,10 @@ voice pipeline rather than a thin wrapper around an LLM API.
 
 | | |
 |---|---|
-| **Current phase** | Phase 4 complete — Language routing, and the first measured eval suite |
-| **Implementation** | Phase 4 complete — 423 tests, 96% coverage. Voice loop with barge-in and language routing; no real ASR/TTS provider, no tools, no RAG yet. |
-| **Benchmarks** | One suite has run: language identification, 0.9205 signal accuracy on `datasets/v1` — with a documented high self-authorship bias. Everything else is still unmeasured. |
-| **Last updated** | 2026-09-17 |
+| **Current phase** | Phase 5 complete — RAG: ingestion, hybrid retrieval, citations |
+| **Implementation** | Phase 5 complete — 541 tests. Voice loop with barge-in, language routing, and a working retrieval pipeline; no real ASR/TTS provider, no agent tools yet. |
+| **Benchmarks** | Two suites have run: language identification (0.9205 signal accuracy) and retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893 on `datasets/v1`, 22 cases) — both with documented biases and known gaps. Everything else is still unmeasured. |
+| **Last updated** | 2026-09-19 |
 
 > **Nothing here is measured yet.** Latency figures in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 > are *budgets* (design targets), not results. Quality metrics in
@@ -112,9 +112,9 @@ indexes and check constraints:
 
 ```bash
 cd backend
-pip install -e ".[dev]"
+pip install -e ".[dev,rag]"
 export VAANIOS_TEST_DATABASE_URL=postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
-pytest -q                       # 353 tests
+pytest -q                       # 541 tests
 pytest -q tests/unit            # 200+ of them need no database at all
 python scripts/fetch_models.sh  # Silero VAD weights (not committed)
 python scripts/bench_voice.py   # pipeline overhead, with real numbers
@@ -126,8 +126,27 @@ so it is only sufficient through Phase 4).
 
 ## What works today
 
-You can hold a **typed** conversation with the mentor, with per-turn timing and cost. Voice, tools,
-and RAG are Phases 3, 6 and 5.
+You can hold a **typed** conversation with the mentor, grounded in real course material with
+inspectable citations. Agent tools and memory are Phase 6.
+
+**Phase 5 — RAG**
+- Structure-aware Markdown/PDF ingestion: headings define chunk boundaries, and each chunk's full
+  heading path (`Unit 5 > Chapter 12 > 12.2 Displacement current`) is prefixed onto the text before
+  embedding — a cheap retrieval win, and what makes citations human-readable
+- Hybrid retrieval — real pgvector HNSW cosine search fused with PostgreSQL full-text search via
+  **Reciprocal Rank Fusion**, both arms independently testable for ablation
+- **A real, working embedder** (TF-IDF + truncated SVD) substituting for the originally-planned
+  `multilingual-e5-base`, because the sandbox has no route to HuggingFace Hub — documented as a
+  substitution, not a supersession, in [ADR-0006's amendment](docs/adr/0006-embedding-model.md)
+- Citation IDs are scoped to one turn's retrieved context: a reference number the model invents
+  resolves to nothing, proven end-to-end from a real ingested corpus through real retrieval
+- **The retrieval eval suite, with a real ablation grid**: `python -m eval.runner --suite retrieval
+  --dataset v1` — vector-only, lexical-only, and hybrid RRF, plus an offline real-BM25 reference run
+  that quantifies exactly how much the shipped lexical arm loses by not having IDF weighting
+- Two honest findings written up as failure cases: [FC-003](docs/failure_cases/003-lexical-arm-lacks-idf-weighting.md)
+  (the lexical arm's IDF gap, with a concrete case) and
+  [FC-004](docs/failure_cases/004-cross-lingual-retrieval-degrades-to-zero-signal.md) (the
+  TF-IDF/SVD substitute has no cross-lingual capability by construction)
 
 **Phase 1 — foundation**
 - Registration, login, `/auth/me`, profile update, and **account erasure** (hard delete, cascading)
@@ -197,6 +216,13 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
 4. **There is no TTFA number.** What was measured is our pipeline's own overhead with fake
    providers (~0.4% of one core). Real TTFA is set by the ASR round trip, LLM time-to-first-token
    and TTS time-to-first-byte. ([M3-01](docs/PHASE_3_AUDIT.md))
+5. **The retrieval numbers are measured on a 5-document, 19-chunk, self-authored corpus.** Hybrid
+   RRF's recall@10 is 0.955 on 22 labelled queries — real, reproducible, and far too small a corpus
+   to say anything about recall at production scale. The embedder itself is a TF-IDF/SVD substitute
+   for the planned `multilingual-e5-base` (no route to HuggingFace Hub in this sandbox), which has
+   **no cross-lingual retrieval capability by construction** — a pure-script Hindi query against
+   this English-only corpus returns nothing, honestly, rather than a wrong answer.
+   ([FC-004](docs/failure_cases/004-cross-lingual-retrieval-degrades-to-zero-signal.md))
 
 The browser client (`frontend/voice-client.html`) was also written without a browser to run it in,
 and says so at the top of the page.
@@ -239,6 +265,15 @@ These are architectural facts, not TODOs that will quietly disappear:
   policy (LocalAgreement) and are unstable by construction. See [ADR-0002](docs/adr/0002-stt-provider-strategy.md).
 - **Lexical retrieval is weak for Devanagari and Tamil script** because PostgreSQL ships no stemmer
   for either. See [ADR-0005](docs/adr/0005-vector-store-pgvector.md), [M-02 in the audit](docs/PHASE_0_AUDIT.md).
+- **The lexical retrieval arm has no IDF weighting.** PostgreSQL's `ts_rank_cd` is cover-density
+  ranking, not BM25 — a common word can outrank a rare, diagnostic one. Measured directly (a query
+  for "What does KVL state?" ties an off-topic chunk against the actual KVL definition) and
+  quantified against a real offline BM25 reference in the eval suite. See
+  [FC-003](docs/failure_cases/003-lexical-arm-lacks-idf-weighting.md).
+- **The embedder has no cross-lingual capability.** The shipped TF-IDF/SVD substitute is corpus-fit,
+  not pretrained on parallel text, so a query in a different script than the corpus gets no vector
+  signal at all. See [ADR-0006's amendment](docs/adr/0006-embedding-model.md) and
+  [FC-004](docs/failure_cases/004-cross-lingual-retrieval-degrades-to-zero-signal.md).
 - **Romanized Hinglish language ID is an open problem**, not a solved sub-task. It is scoped as an
   experiment with a documented baseline. See [ADR-0011](docs/adr/0011-language-detection-strategy.md).
 - **No acoustic echo cancellation.** Without headphones the system can hear its own TTS and

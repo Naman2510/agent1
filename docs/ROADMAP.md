@@ -1,6 +1,7 @@
 # Roadmap, Phases, and Audit Gates
 
-**Status:** Phase 0 complete pending audit sign-off. Nothing after Phase 0 has started.
+**Status:** Phase 5 complete. Phases 0–5 have passed their audit gates; Phase 6 (agent tools &
+memory) has not started.
 
 The specification (§43) mandates phased delivery with an audit gate between phases. Phases 1+ below
 are reconstructed from spec §1–42; **the original specification was truncated part-way through the
@@ -98,11 +99,22 @@ language policy, TTS voice/transliteration selection.
 **Gate 4:** per-language LID accuracy recorded as a baseline; mid-conversation switching preserves
 context in an e2e test.
 
-### Phase 5 — RAG
-Ingestion (parse, clean, structure-aware chunking, metadata, heading paths), hybrid retrieval with
-RRF, flag-gated reranking, context builder, citation resolution, `search_knowledge`.
-**Gate 5:** labelled retrieval set exists; the ablation grid in EVALUATION §4 is filled from real
-runs; invented citation IDs proven to be dropped.
+### Phase 5 — RAG ✅
+Delivered 2026-09-19: 541 tests. Gate 5 passed — [`PHASE_5_AUDIT.md`](PHASE_5_AUDIT.md). Second
+working eval suite: retrieval hybrid RRF recall@10 0.955, MRR 0.871, nDCG@10 0.893 on 22 labelled
+queries against a 5-document self-authored corpus, with the self-authorship bias documented at
+severity `high` (same shape as the LID dataset's).
+
+Ingestion (parse, clean, structure-aware chunking with heading-path prefixing, metadata, idempotent
+by content hash), hybrid retrieval (real pgvector HNSW cosine search + PostgreSQL full-text search)
+fused by RRF, flag-gated reranking (interface wired, `NoopReranker` shipped — no real reranker
+built), context builder, citation resolution, `search_knowledge` tool schema. The planned
+`multilingual-e5-base` embedder is substituted with a real, working TF-IDF/SVD implementation
+because the sandbox has no route to HuggingFace Hub (verified, not assumed) — documented as a
+substitution pending network access, not a supersession ([ADR-0006's amendment](adr/0006-embedding-model.md)).
+**Gate 5:** labelled retrieval set exists (`datasets/v1/retrieval`, 22 cases); the ablation grid in
+[EVALUATION.md §4](EVALUATION.md) is filled from real runs; invented citation IDs proven to be
+dropped, both in isolation and end-to-end from a real ingested corpus through real retrieval.
 
 ### Phase 6 — Agent tools & memory
 The eight tools with typed inputs, authorization, budgets, and tests; `IntentGate`; short-term Redis
