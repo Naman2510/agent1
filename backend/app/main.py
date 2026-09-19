@@ -12,6 +12,8 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.intent import IntentGate
+from app.agent.tools.registry import DEFAULT_REGISTRY
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
@@ -21,7 +23,9 @@ from app.core.rate_limit import RateLimiter
 from app.core.redis import create_redis
 from app.core.security import PasswordHasherService
 from app.db.session import create_engine, create_session_factory
-from app.providers.registry import build_llm
+from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
+from app.providers.registry import build_llm, build_reranker
+from app.rag.service import RagService
 from app.services.usage import UsageLedger
 from app.ws.voice import router as voice_router
 
@@ -39,6 +43,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.rate_limiter = RateLimiter(app.state.redis, settings)
     app.state.llm = build_llm(settings)
     app.state.usage_ledger = UsageLedger(app.state.redis, settings)
+
+    # Shared for the process lifetime, unlike a per-request RagService: TF-IDF/SVD's fit is a
+    # corpus-wide computation (Phase 5), so every request reuses one fitted embedder rather than
+    # refitting on every turn. A fresh process has no fit even if the database already holds real
+    # embeddings from a previous ingestion — refit_from_persisted reproduces it without
+    # re-embedding anything. Left unfit (not an error) if nothing has been ingested yet.
+    app.state.embeddings = TfidfSvdEmbeddingProvider()
+    async with app.state.session_factory() as startup_session:
+        refitted = await RagService(
+            startup_session, embeddings=app.state.embeddings, reranker=build_reranker(settings)
+        ).refit_from_persisted()
+    if refitted:
+        log.info("rag.embedder_refit", chunks=refitted, model=app.state.embeddings.info.model)
+    else:
+        log.warning(
+            "rag.embedder_unfit",
+            detail="no corpus ingested yet; search_knowledge will report nothing found",
+        )
+
+    app.state.tool_registry = DEFAULT_REGISTRY
+    app.state.intent_gate = IntentGate(app.state.llm)
 
     if settings.monthly_spend_cap_usd is None:
         # Gate 0 finding M-11: say plainly that nothing is capped rather than implying a limit.

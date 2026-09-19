@@ -185,11 +185,17 @@ async def test_retrieve_previous_conversation_finds_a_matching_past_turn(
 ) -> None:
     messages = MessageRepository(db_session)
     await messages.append(
-        session_id=actor.session_id, turn_index=0, seq=0, role=MessageRole.USER,
+        session_id=actor.session_id,
+        turn_index=0,
+        seq=0,
+        role=MessageRole.USER,
         content="Can you explain Thevenin's theorem?",
     )
     await messages.append(
-        session_id=actor.session_id, turn_index=0, seq=1, role=MessageRole.ASSISTANT,
+        session_id=actor.session_id,
+        turn_index=0,
+        seq=1,
+        role=MessageRole.ASSISTANT,
         content="Sure — Thevenin's theorem replaces a network with one source and one resistor.",
     )
     await db_session.commit()
@@ -206,7 +212,10 @@ async def test_retrieve_previous_conversation_never_finds_another_students_turns
 ) -> None:
     other = await _make_actor(db_session, label="other2")
     await MessageRepository(db_session).append(
-        session_id=other.session_id, turn_index=0, seq=0, role=MessageRole.USER,
+        session_id=other.session_id,
+        turn_index=0,
+        seq=0,
+        role=MessageRole.USER,
         content="This is another student's private question about waveguides.",
     )
     await db_session.commit()
@@ -348,9 +357,7 @@ async def test_generate_quiz_counts_grounded_questions_from_a_real_source_chunk(
     await db_session.commit()
     await ctx.rag.fit_and_embed_all()
     await db_session.commit()
-    chunks = (
-        await search_knowledge(SearchKnowledgeInput(query="KVL"), ctx)
-    )
+    chunks = await search_knowledge(SearchKnowledgeInput(query="KVL"), ctx)
     assert chunks["found"] is True
     real_chunk_id = str(ctx.citation_sources["[1]"].id)
 

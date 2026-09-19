@@ -92,7 +92,7 @@ def build_context(
 
         ref = f"[{start_index + len(sources)}]"
         heading = f" ({chunk.heading_path})" if chunk.heading_path else ""
-        entry = f"{ref} From \"{chunk.document_title}\"{heading}:\n{chunk.content}"
+        entry = f'{ref} From "{chunk.document_title}"{heading}:\n{chunk.content}'
 
         if used_chars + len(entry) > max_chars and sources:
             # At least one source is always included even if it alone exceeds the budget — an

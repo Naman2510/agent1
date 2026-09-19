@@ -185,10 +185,13 @@ async def run_agent_turn(
         # messages measurably degrades the model's willingness to make parallel calls again.
         messages.append(TurnMessage(role="user", tool_results=tuple(results)))
 
-    yield "", AgentTurnOutcome(
-        text="".join(accumulated_text),
-        stop_reason=stop_reason,
-        usage=usage_total,
-        model=model,
-        budget_exceeded=budget_exceeded,
+    yield (
+        "",
+        AgentTurnOutcome(
+            text="".join(accumulated_text),
+            stop_reason=stop_reason,
+            usage=usage_total,
+            model=model,
+            budget_exceeded=budget_exceeded,
+        ),
     )

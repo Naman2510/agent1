@@ -55,9 +55,7 @@ class StudyPlanRepository:
         await self._session.flush()
         return plan
 
-    async def get_for_student(
-        self, plan_id: uuid.UUID, student_id: uuid.UUID
-    ) -> StudyPlan | None:
+    async def get_for_student(self, plan_id: uuid.UUID, student_id: uuid.UUID) -> StudyPlan | None:
         result = await self._session.execute(
             select(StudyPlan)
             .options(selectinload(StudyPlan.items))

@@ -23,9 +23,11 @@ from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.rate_limit import LimitClass, RateLimiter
 from app.core.security import decode_access_token
+from app.db.repositories.memory import StudentProfileRepository
 from app.db.repositories.sessions import MessageRepository, SessionRepository
 from app.db.repositories.users import StudentRepository, UserRepository
-from app.providers.registry import build_stt, build_tts
+from app.providers.registry import build_reranker, build_stt, build_tts
+from app.rag.service import RagService
 from app.services.conversation import ConversationService
 from app.services.usage import UsageLedger
 from app.voice.audio import FRAME_BYTES, AudioFrame
@@ -151,11 +153,25 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
             ),
             stt=build_stt(settings),
             tts=build_tts(settings),
+            # Same tool/memory capability as the text-chat path (app/api/deps.py) — a voice
+            # turn can call search_knowledge, get_student_progress, etc. exactly like a typed
+            # one. Not yet wired to this phase: surfacing agent.activity / rag.citations over
+            # the WebSocket protocol (ARCHITECTURE §10) is presentation-layer work for Phase 7;
+            # the tool calls themselves already run and are logged either way.
             conversation=ConversationService(
                 llm=app.state.llm,
                 messages=MessageRepository(db),
                 ledger=ledger,
                 settings=settings,
+                db=db,
+                tool_registry=app.state.tool_registry,
+                intent_gate=app.state.intent_gate,
+                rag=RagService(
+                    db,
+                    embeddings=app.state.embeddings,
+                    reranker=build_reranker(settings),
+                ),
+                student_profiles=StudentProfileRepository(db),
             ),
             settings=settings,
             config=VoiceSessionConfig(pre_roll_ms=settings.voice_pre_roll_ms),

@@ -67,9 +67,7 @@ class StudentTopicRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get(
-        self, student_id: uuid.UUID, subject: str, topic: str
-    ) -> StudentTopic | None:
+    async def get(self, student_id: uuid.UUID, subject: str, topic: str) -> StudentTopic | None:
         result = await self._session.execute(
             select(StudentTopic).where(
                 StudentTopic.student_id == student_id,
@@ -89,9 +87,7 @@ class StudentTopicRepository:
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
-    async def list_weak(
-        self, student_id: uuid.UUID, *, limit: int = 5
-    ) -> Sequence[StudentTopic]:
+    async def list_weak(self, student_id: uuid.UUID, *, limit: int = 5) -> Sequence[StudentTopic]:
         result = await self._session.execute(
             select(StudentTopic)
             .where(StudentTopic.student_id == student_id, StudentTopic.mastery < 0.5)

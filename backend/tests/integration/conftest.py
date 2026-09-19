@@ -16,10 +16,13 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.agent.intent import IntentGate
+from app.agent.tools.registry import DEFAULT_REGISTRY
 from app.core.config import Settings
 from app.core.rate_limit import RateLimiter
 from app.core.security import PasswordHasherService
 from app.main import create_app
+from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.llm.fake import FakeLLMProvider
 from app.services.usage import UsageLedger
 from tests.conftest import unique_email
@@ -101,6 +104,14 @@ async def app(engine, settings: Settings, redis_client, llm: FakeLLMProvider):  
     application.state.rate_limiter = RateLimiter(redis_client, settings)
     application.state.llm = llm
     application.state.usage_ledger = UsageLedger(redis_client, settings)
+    # Phase 6: production wires these in app/main.py's lifespan, which this fixture bypasses
+    # entirely (it builds the app object and injects test doubles directly) — so they need
+    # setting here too, the same reason llm/redis/hasher above are set here rather than left for
+    # a lifespan that never runs in a test. Left unfit, matching a fresh process with nothing
+    # ingested yet; RagService.search treats that as "nothing found", not an error.
+    application.state.embeddings = TfidfSvdEmbeddingProvider()
+    application.state.tool_registry = DEFAULT_REGISTRY
+    application.state.intent_gate = IntentGate(llm)
     return application
 
 

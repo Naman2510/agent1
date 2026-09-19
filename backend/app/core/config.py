@@ -70,7 +70,10 @@ class Settings(BaseSettings):
 
     stt_provider: Literal["fake"] = "fake"  # real adapters: Phase 3
     tts_provider: Literal["fake"] = "fake"  # real adapters: Phase 3
-    embedding_provider: Literal["fake"] = "fake"  # multilingual-e5-base: Phase 5
+    # tfidf_svd is what actually ships (ADR-0006's amendment — multilingual-e5-base needs
+    # HuggingFace Hub, unreachable from this sandbox); it is the default so search_knowledge
+    # works out of the box rather than needing an env var set to leave the fake behind.
+    embedding_provider: Literal["fake", "tfidf_svd"] = "tfidf_svd"
     reranker_provider: Literal["noop"] = "noop"  # ADR-0007: off by default, must earn its latency
 
     # --- Voice (ADR-0001, ADR-0004) -----------------------------------------

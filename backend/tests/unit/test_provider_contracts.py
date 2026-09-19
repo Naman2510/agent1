@@ -100,7 +100,11 @@ def test_the_registry_selects_by_configuration_alone() -> None:
     assert build_llm(_settings(llm_provider="fake")).info.name == "fake"
     assert build_stt(_settings()).info.name == "fake"
     assert build_tts(_settings()).info.name == "fake"
-    assert build_embedding(_settings()).info.name == "fake"
+    # tfidf_svd, not fake: it is the shipped, working substitute for multilingual-e5-base
+    # (ADR-0006's amendment), so search_knowledge does real retrieval by default rather than
+    # needing an env var set to leave a meaningless fake behind (Phase 6).
+    assert build_embedding(_settings()).info.name == "tfidf-svd"
+    assert build_embedding(_settings(embedding_provider="fake")).info.name == "fake"
     assert build_reranker(_settings()).info.name == "noop"
 
 

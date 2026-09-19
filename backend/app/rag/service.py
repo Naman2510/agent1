@@ -108,9 +108,7 @@ class RagService:
         document.ingested_at = datetime.now(UTC)
         await self._session.flush()
 
-        return IngestResult(
-            document_id=document.id, chunk_count=len(rows), already_ingested=False
-        )
+        return IngestResult(document_id=document.id, chunk_count=len(rows), already_ingested=False)
 
     async def fit_and_embed_all(self) -> int:
         """Fit the embedder on every chunk in the corpus and write embeddings back.
@@ -140,6 +138,25 @@ class RagService:
             document.ingest_status = IngestStatus.READY
 
         await self._session.flush()
+        return len(chunks)
+
+    async def refit_from_persisted(self) -> int:
+        """Reproduce a fit from chunks a *previous* process already embedded, without
+        re-embedding or re-writing anything.
+
+        A fresh process (this application's own startup, or an eval run) has an unfit embedder
+        object but a database that may already hold real embeddings from an earlier ingestion —
+        querying needs a fitted embedder to turn a query into a comparable vector, even though the
+        corpus itself does not need re-embedding. Returns 0 (embedder left unfit) if fewer than 2
+        chunks exist yet; `search()` already treats an unfit embedder as "nothing to find yet",
+        not an error.
+        """
+        result = await self._session.execute(select(DocumentChunk))
+        chunks = list(result.scalars().all())
+        if len(chunks) < 2:
+            return 0
+        texts = [embed_text_from_row(chunk) for chunk in chunks]
+        self._embeddings.fit_corpus(texts)
         return len(chunks)
 
     # --- retrieval -------------------------------------------------------

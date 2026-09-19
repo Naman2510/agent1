@@ -11,15 +11,21 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.intent import IntentGate
+from app.agent.tools.registry import ToolRegistry
 from app.core.config import Settings
 from app.core.errors import AuthenticationError, PermissionDeniedError, RateLimitedError
 from app.core.rate_limit import LimitClass, RateLimiter
 from app.core.security import PasswordHasherService, decode_access_token
 from app.db.models import UserRole
+from app.db.repositories.memory import StudentProfileRepository
 from app.db.repositories.sessions import MessageRepository
 from app.db.repositories.users import StudentRepository, UserRepository
 from app.db.session import session_scope
+from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.llm.base import LLMProvider
+from app.providers.registry import build_reranker
+from app.rag.service import RagService
 from app.services.auth import AuthService
 from app.services.conversation import ConversationService
 from app.services.usage import UsageLedger
@@ -94,11 +100,24 @@ def get_conversation_service(
     db: DbDep,
     settings: SettingsDep,
 ) -> ConversationService:
+    llm = get_llm(request)
+    # The embedder is a shared, process-lifetime fit (app.state.embeddings, set at startup —
+    # app/main.py); RagService itself is cheap per-request state around that shared fit and the
+    # request's own db session, same as every other per-request repository here.
+    embeddings: TfidfSvdEmbeddingProvider = request.app.state.embeddings
+    rag = RagService(db, embeddings=embeddings, reranker=build_reranker(settings))
+    tool_registry: ToolRegistry = request.app.state.tool_registry
+    intent_gate: IntentGate = request.app.state.intent_gate
     return ConversationService(
-        llm=get_llm(request),
+        llm=llm,
         messages=MessageRepository(db),
         ledger=get_usage_ledger(request),
         settings=settings,
+        db=db,
+        tool_registry=tool_registry,
+        intent_gate=intent_gate,
+        rag=rag,
+        student_profiles=StudentProfileRepository(db),
     )
 
 

@@ -63,9 +63,7 @@ Maxwell added displacement current so Ampere's law holds for a charging capacito
 
 
 def _service(session: AsyncSession) -> RagService:
-    return RagService(
-        session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker()
-    )
+    return RagService(session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker())
 
 
 async def test_ingesting_a_real_file_creates_a_document_and_its_chunks(
@@ -87,10 +85,14 @@ async def test_ingesting_a_real_file_creates_a_document_and_its_chunks(
     assert document.ingest_status is IngestStatus.EMBEDDING  # not READY until fit_and_embed_all
 
     chunks = (
-        await db_session.execute(
-            select(DocumentChunk).where(DocumentChunk.document_id == result.document_id)
+        (
+            await db_session.execute(
+                select(DocumentChunk).where(DocumentChunk.document_id == result.document_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(chunks) == 3
     assert all(c.difficulty == "easy" for c in chunks)
 
@@ -111,9 +113,7 @@ async def test_re_ingesting_the_same_file_is_idempotent(
     assert second.already_ingested is True
     assert second.document_id == first.document_id
 
-    count = (
-        await db_session.execute(select(func.count()).select_from(Document))
-    ).scalar_one()
+    count = (await db_session.execute(select(func.count()).select_from(Document))).scalar_one()
     assert count == 1, "re-ingesting must not create a duplicate document"
 
 
@@ -148,6 +148,44 @@ async def test_fit_and_embed_all_marks_documents_ready(
     chunks = (await db_session.execute(select(DocumentChunk))).scalars().all()
     assert all(c.embedding is not None for c in chunks)
     assert all(c.embedding_model == service.embeddings.info.model for c in chunks)
+
+
+async def test_refit_from_persisted_lets_a_fresh_process_search_already_embedded_chunks(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """The scenario this exists for: the app restarts (a fresh, unfit embedder object) but the
+    database already holds real embeddings from a previous ingestion run."""
+    ingesting_service = _service(db_session)
+    await ingesting_service.ingest_file(
+        _write_doc(tmp_path, "a.md", SAMPLE_A), DocumentMetadata(title="A", subject="EMT")
+    )
+    await ingesting_service.ingest_file(
+        _write_doc(tmp_path, "b.md", SAMPLE_B), DocumentMetadata(title="B", subject="EMT")
+    )
+    await db_session.commit()
+    await ingesting_service.fit_and_embed_all()
+    await db_session.commit()
+
+    fresh_service = _service(db_session)
+    assert fresh_service.embeddings.is_fit is False
+
+    refitted = await fresh_service.refit_from_persisted()
+    await db_session.commit()
+
+    assert refitted == 5
+    assert fresh_service.embeddings.is_fit is True
+    chunks, context = await fresh_service.search("Kirchhoff voltage law")
+    assert chunks
+    assert not context.is_empty
+
+
+async def test_refit_from_persisted_on_an_empty_corpus_leaves_the_embedder_unfit(
+    db_session: AsyncSession,
+) -> None:
+    service = _service(db_session)
+    refitted = await service.refit_from_persisted()
+    assert refitted == 0
+    assert service.embeddings.is_fit is False
 
 
 async def test_searching_before_any_fit_returns_empty_not_an_error(

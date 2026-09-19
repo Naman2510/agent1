@@ -12,6 +12,7 @@ import enum
 
 import structlog
 
+from app.providers.base import ProviderError
 from app.providers.llm.base import (
     Effort,
     LLMProvider,
@@ -50,9 +51,7 @@ INTENT_TOOLS: dict[Intent, frozenset[str]] = {
     Intent.REVISION_REQUEST: frozenset(
         {"get_student_progress", "create_study_plan", "search_knowledge"}
     ),
-    Intent.STUDY_PLAN: frozenset(
-        {"create_study_plan", "get_study_plan", "get_student_progress"}
-    ),
+    Intent.STUDY_PLAN: frozenset({"create_study_plan", "get_study_plan", "get_student_progress"}),
     Intent.CLARIFICATION: frozenset(),
     Intent.CASUAL: frozenset(),
 }
@@ -89,12 +88,18 @@ class IntentGate:
             effort=Effort.LOW,
         )
         text = ""
-        async for event in self._llm.stream(request):
-            if isinstance(event, TextDelta):
-                text += event.text
-            elif isinstance(event, StreamCompleted) and event.stop_reason == "refusal":
-                log.warning("intent_gate.refusal")
-                return DEFAULT_INTENT
+        try:
+            async for event in self._llm.stream(request):
+                if isinstance(event, TextDelta):
+                    text += event.text
+                elif isinstance(event, StreamCompleted) and event.stop_reason == "refusal":
+                    log.warning("intent_gate.refusal")
+                    return DEFAULT_INTENT
+        except ProviderError as exc:
+            # This call must never be the reason a turn fails outright — a provider hiccup here
+            # degrades to the same safe default an unparseable response gets, not a crashed turn.
+            log.warning("intent_gate.provider_failed", provider=exc.provider, exc_info=True)
+            return DEFAULT_INTENT
         return _parse(text)
 
     def tools_for(self, intent: Intent) -> frozenset[str]:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from app.agent.intent import DEFAULT_INTENT, INTENT_TOOLS, Intent, IntentGate
+from app.providers.base import ProviderUnavailableError
 from app.providers.llm.base import Effort, StopReason
 from app.providers.llm.fake import FakeLLMProvider, ScriptedTurn
 
@@ -57,6 +58,15 @@ async def test_an_unparseable_response_degrades_to_the_default_intent() -> None:
 
 async def test_a_refusal_degrades_to_the_default_intent_rather_than_raising() -> None:
     gate, _ = _gate("", stop_reason="refusal")
+    assert await gate.classify("anything") is DEFAULT_INTENT
+
+
+async def test_a_provider_failure_degrades_to_the_default_intent_not_a_crash() -> None:
+    """This call must never be the reason a whole turn fails — see the module docstring."""
+    llm = FakeLLMProvider(
+        [ScriptedTurn(raise_error=ProviderUnavailableError("down", provider="fake"))]
+    )
+    gate = IntentGate(llm)
     assert await gate.classify("anything") is DEFAULT_INTENT
 
 

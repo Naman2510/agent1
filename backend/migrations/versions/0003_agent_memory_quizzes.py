@@ -64,18 +64,20 @@ def upgrade() -> None:
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
         sa.ForeignKeyConstraint(
-            ["session_id"], ["sessions.id"], name="fk_retrieval_logs_session_id_sessions",
+            ["session_id"],
+            ["sessions.id"],
+            name="fk_retrieval_logs_session_id_sessions",
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
-            ["message_id"], ["messages.id"], name="fk_retrieval_logs_message_id_messages",
+            ["message_id"],
+            ["messages.id"],
+            name="fk_retrieval_logs_message_id_messages",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_retrieval_logs"),
     )
-    op.create_index(
-        "ix_retrieval_logs_session", "retrieval_logs", ["session_id", "created_at"]
-    )
+    op.create_index("ix_retrieval_logs_session", "retrieval_logs", ["session_id", "created_at"])
 
     op.create_table(
         "student_profiles",
@@ -99,7 +101,9 @@ def upgrade() -> None:
             "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
         sa.ForeignKeyConstraint(
-            ["student_id"], ["students.id"], name="fk_student_profiles_student_id_students",
+            ["student_id"],
+            ["students.id"],
+            name="fk_student_profiles_student_id_students",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_student_profiles"),
@@ -129,7 +133,9 @@ def upgrade() -> None:
         sa.CheckConstraint("mastery BETWEEN 0 AND 1", name="ck_student_topics_mastery_range"),
         sa.CheckConstraint("confidence BETWEEN 0 AND 1", name="ck_student_topics_confidence_range"),
         sa.ForeignKeyConstraint(
-            ["student_id"], ["students.id"], name="fk_student_topics_student_id_students",
+            ["student_id"],
+            ["students.id"],
+            name="fk_student_topics_student_id_students",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_student_topics"),
@@ -163,15 +169,21 @@ def upgrade() -> None:
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
         sa.ForeignKeyConstraint(
-            ["student_id"], ["students.id"], name="fk_memory_events_student_id_students",
+            ["student_id"],
+            ["students.id"],
+            name="fk_memory_events_student_id_students",
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
-            ["session_id"], ["sessions.id"], name="fk_memory_events_session_id_sessions",
+            ["session_id"],
+            ["sessions.id"],
+            name="fk_memory_events_session_id_sessions",
             ondelete="SET NULL",
         ),
         sa.ForeignKeyConstraint(
-            ["message_id"], ["messages.id"], name="fk_memory_events_message_id_messages",
+            ["message_id"],
+            ["messages.id"],
+            name="fk_memory_events_message_id_messages",
             ondelete="SET NULL",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_memory_events"),
@@ -197,7 +209,9 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("end_date >= start_date", name="ck_study_plans_date_order"),
         sa.ForeignKeyConstraint(
-            ["student_id"], ["students.id"], name="fk_study_plans_student_id_students",
+            ["student_id"],
+            ["students.id"],
+            name="fk_study_plans_student_id_students",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_study_plans"),
@@ -219,12 +233,17 @@ def upgrade() -> None:
         sa.Column("est_minutes", sa.SmallInteger(), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
-            ["plan_id"], ["study_plans.id"], name="fk_study_plan_items_plan_id_study_plans",
+            ["plan_id"],
+            ["study_plans.id"],
+            name="fk_study_plan_items_plan_id_study_plans",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_study_plan_items"),
         sa.UniqueConstraint(
-            "plan_id", "day_index", "subject", "topic",
+            "plan_id",
+            "day_index",
+            "subject",
+            "topic",
             name="uq_study_plan_items_plan_day_topic",
         ),
     )
@@ -255,11 +274,15 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("difficulty IN ('easy','medium','hard')", name="ck_quizzes_difficulty"),
         sa.ForeignKeyConstraint(
-            ["student_id"], ["students.id"], name="fk_quizzes_student_id_students",
+            ["student_id"],
+            ["students.id"],
+            name="fk_quizzes_student_id_students",
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
-            ["session_id"], ["sessions.id"], name="fk_quizzes_session_id_sessions",
+            ["session_id"],
+            ["sessions.id"],
+            name="fk_quizzes_session_id_sessions",
             ondelete="SET NULL",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_quizzes"),
@@ -276,7 +299,12 @@ def upgrade() -> None:
         sa.Column("quiz_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("student_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("answers", postgresql.JSONB(), nullable=False),
-        sa.Column("per_question", postgresql.JSONB(), server_default=sa.text("'[]'::jsonb"), nullable=False),
+        sa.Column(
+            "per_question",
+            postgresql.JSONB(),
+            server_default=sa.text("'[]'::jsonb"),
+            nullable=False,
+        ),
         sa.Column("score", sa.Numeric(5, 2), nullable=True),
         sa.Column("max_score", sa.Numeric(5, 2), nullable=True),
         sa.Column(
@@ -284,11 +312,15 @@ def upgrade() -> None:
         ),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
-            ["quiz_id"], ["quizzes.id"], name="fk_quiz_attempts_quiz_id_quizzes",
+            ["quiz_id"],
+            ["quizzes.id"],
+            name="fk_quiz_attempts_quiz_id_quizzes",
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
-            ["student_id"], ["students.id"], name="fk_quiz_attempts_student_id_students",
+            ["student_id"],
+            ["students.id"],
+            name="fk_quiz_attempts_student_id_students",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_quiz_attempts"),

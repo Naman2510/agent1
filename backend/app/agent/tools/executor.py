@@ -83,9 +83,7 @@ async def execute_tool_call(
             status=ToolStatus.REJECTED,
             error=str(exc),
         )
-        return ToolResult(
-            tool_use_id=call.id, content=f"Invalid arguments: {exc}", is_error=True
-        )
+        return ToolResult(tool_use_id=call.id, content=f"Invalid arguments: {exc}", is_error=True)
 
     started = time.perf_counter()
     try:

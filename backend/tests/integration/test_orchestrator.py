@@ -143,9 +143,7 @@ async def test_a_tool_round_executes_and_feeds_the_result_back(
             ScriptedTurn(text="Here is your answer.", stop_reason="end_turn"),
         ]
     )
-    text, outcome = await _run(
-        llm, _ECHO_REGISTRY, frozenset({"lookup"}), _ctx(db_session, actor)
-    )
+    text, outcome = await _run(llm, _ECHO_REGISTRY, frozenset({"lookup"}), _ctx(db_session, actor))
 
     assert len(llm.requests) == 2
     assert text == "Here is your answer."
@@ -171,9 +169,7 @@ async def test_interim_text_before_a_tool_call_is_streamed_and_kept(
             ScriptedTurn(text=" Found it.", stop_reason="end_turn"),
         ]
     )
-    text, outcome = await _run(
-        llm, _ECHO_REGISTRY, frozenset({"lookup"}), _ctx(db_session, actor)
-    )
+    text, outcome = await _run(llm, _ECHO_REGISTRY, frozenset({"lookup"}), _ctx(db_session, actor))
     assert text == "Let me check that. Found it."
     assert outcome.text == "Let me check that. Found it."
 
@@ -212,9 +208,7 @@ async def test_exceeding_max_rounds_stops_and_reports_budget_exceeded(
     # One more tool_use turn than the round budget allows, so the last one is the one that trips it.
     llm = FakeLLMProvider([tool_use_turn] * (MAX_TOOL_ROUNDS + 1))
 
-    text, outcome = await _run(
-        llm, _ECHO_REGISTRY, frozenset({"lookup"}), _ctx(db_session, actor)
-    )
+    text, outcome = await _run(llm, _ECHO_REGISTRY, frozenset({"lookup"}), _ctx(db_session, actor))
 
     assert outcome.budget_exceeded is True
     assert BUDGET_EXCEEDED_MESSAGE in text

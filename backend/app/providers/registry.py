@@ -12,6 +12,7 @@ import structlog
 from app.core.config import Settings
 from app.providers.embedding.base import EmbeddingProvider
 from app.providers.embedding.fake import FakeEmbeddingProvider
+from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.llm.base import LLMProvider
 from app.providers.llm.fake import FakeLLMProvider
 from app.providers.reranker.base import NoopReranker, RerankerProvider
@@ -62,8 +63,14 @@ def build_tts(settings: Settings) -> TTSProvider:
 def build_embedding(settings: Settings) -> EmbeddingProvider:
     if settings.embedding_provider == "fake":
         return FakeEmbeddingProvider()
-    # multilingual-e5-base arrives with the ingestion pipeline in Phase 5.
-    raise UnknownProviderError("embedding", settings.embedding_provider, ["fake"])
+    if settings.embedding_provider == "tfidf_svd":
+        # The shipped substitute for multilingual-e5-base (ADR-0006's amendment): this sandbox
+        # cannot reach HuggingFace Hub to fetch e5's weights. Returns unfit — the caller (app
+        # startup) fits it from whatever is already persisted, or it stays unfit until an
+        # ingestion + fit_and_embed_all runs, at which point RagService.search reports "not
+        # found yet" rather than erroring (Phase 5).
+        return TfidfSvdEmbeddingProvider()
+    raise UnknownProviderError("embedding", settings.embedding_provider, ["fake", "tfidf_svd"])
 
 
 def build_reranker(settings: Settings) -> RerankerProvider:
