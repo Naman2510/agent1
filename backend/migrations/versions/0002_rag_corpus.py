@@ -60,7 +60,9 @@ def upgrade() -> None:
             "metadata_", postgresql.JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False
         ),
         sa.Column("ingested_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.PrimaryKeyConstraint("id", name="pk_documents"),
         sa.UniqueConstraint("source_hash", name="uq_documents_source_hash"),
     )
@@ -94,7 +96,9 @@ def upgrade() -> None:
         sa.Column(
             "metadata_", postgresql.JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.CheckConstraint(
             "difficulty IS NULL OR difficulty IN ('easy','medium','hard')",
             name="ck_document_chunks_difficulty",
@@ -119,8 +123,7 @@ def upgrade() -> None:
         "ix_document_chunks_tsv", "document_chunks", ["content_tsv"], postgresql_using="gin"
     )
     op.execute(
-        "CREATE INDEX ix_document_chunks_trgm ON document_chunks "
-        "USING gin (content gin_trgm_ops)"
+        "CREATE INDEX ix_document_chunks_trgm ON document_chunks USING gin (content gin_trgm_ops)"
     )
     op.create_index(
         "ix_document_chunks_meta",
@@ -129,9 +132,7 @@ def upgrade() -> None:
         postgresql_using="gin",
         postgresql_ops={"metadata_": "jsonb_path_ops"},
     )
-    op.create_index(
-        "ix_document_chunks_filter", "document_chunks", ["language", "difficulty"]
-    )
+    op.create_index("ix_document_chunks_filter", "document_chunks", ["language", "difficulty"])
 
 
 def downgrade() -> None:

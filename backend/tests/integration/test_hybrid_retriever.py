@@ -62,7 +62,9 @@ async def _seed_and_fit(db_session: AsyncSession) -> TfidfSvdEmbeddingProvider:
     for title, heading, content in CORPUS:
         if title not in docs:
             document = Document(
-                title=title, subject="Testing", source_path=f"/{title}",
+                title=title,
+                subject="Testing",
+                source_path=f"/{title}",
                 source_hash=f"hash-{uuid.uuid4().hex}",
             )
             db_session.add(document)

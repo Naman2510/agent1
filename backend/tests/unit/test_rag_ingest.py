@@ -42,9 +42,7 @@ def test_source_hash_is_deterministic_and_content_sensitive() -> None:
 
 def test_prepare_document_chunks_a_real_markdown_file(tmp_path) -> None:  # type: ignore[no-untyped-def]
     path = tmp_path / "sample.md"
-    path.write_text(
-        "# Unit 1\n\n## 1.1 Topic\n\nSome content about the topic here for testing.\n"
-    )
+    path.write_text("# Unit 1\n\n## 1.1 Topic\n\nSome content about the topic here for testing.\n")
     metadata = DocumentMetadata(title="Sample", subject="Testing", difficulty="easy")
     prepared = prepare_document(path, metadata)
 

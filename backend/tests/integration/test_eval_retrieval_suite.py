@@ -25,9 +25,7 @@ from app.rag.retrieve import HybridRetriever, RetrievalConfig
 from eval.suites import retrieval as retrieval_suite
 from eval.suites.retrieval import RelevanceRef
 
-CASES = (
-    Path(__file__).resolve().parents[2].parent / "datasets" / "v1" / "retrieval" / "cases.jsonl"
-)
+CASES = Path(__file__).resolve().parents[2].parent / "datasets" / "v1" / "retrieval" / "cases.jsonl"
 
 
 @pytest.fixture(autouse=True)

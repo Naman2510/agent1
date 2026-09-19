@@ -83,9 +83,7 @@ async def test_upsert_to_a_nonexistent_chunk_id_is_ignored_not_an_error(
     db_session: AsyncSession,
 ) -> None:
     store = PgVectorStore(db_session, embedding_model="test-model")
-    count = await store.upsert(
-        [VectorRecord(id=str(uuid.uuid4()), embedding=_unit_vector(0))]
-    )
+    count = await store.upsert([VectorRecord(id=str(uuid.uuid4()), embedding=_unit_vector(0))])
     assert count == 0
 
 

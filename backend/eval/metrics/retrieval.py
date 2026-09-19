@@ -41,9 +41,7 @@ def evaluate_query(
         recall_at_k[k] = len(top_k & relevant) / len(relevant)
 
     top_5 = returned[:5]
-    precision_at_5 = (
-        sum(1 for doc_id in top_5 if doc_id in relevant) / len(top_5) if top_5 else 0.0
-    )
+    precision_at_5 = sum(1 for doc_id in top_5 if doc_id in relevant) / len(top_5) if top_5 else 0.0
 
     mrr = 0.0
     for rank, doc_id in enumerate(returned, start=1):

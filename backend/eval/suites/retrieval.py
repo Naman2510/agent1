@@ -127,9 +127,7 @@ async def run_config(
     return report
 
 
-async def run_bm25_offline(
-    session: AsyncSession, cases: list[RetrievalCase]
-) -> RetrievalReport:
+async def run_bm25_offline(session: AsyncSession, cases: list[RetrievalCase]) -> RetrievalReport:
     """Real BM25 (Okapi, via `rank_bm25`), scored offline in Python against the same corpus.
 
     Not a candidate to replace the production lexical arm — it runs over an in-memory corpus with
@@ -164,9 +162,7 @@ async def fit_embedder_on_corpus(
     exactly as `RagService.fit_and_embed_all` does, without re-writing the embeddings."""
     result = await session.execute(select(DocumentChunk))
     chunks = list(result.scalars().all())
-    texts = [
-        embed_text_from_row(chunk) for chunk in chunks
-    ]
+    texts = [embed_text_from_row(chunk) for chunk in chunks]
     embeddings.fit_corpus(texts)
 
 
