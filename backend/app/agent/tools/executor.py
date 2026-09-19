@@ -25,12 +25,24 @@ from app.providers.llm.base import ToolCall, ToolResult
 log = structlog.get_logger(__name__)
 
 UNKNOWN_TOOL_MESSAGE = "That tool does not exist."
+NOT_ALLOWED_MESSAGE = "That tool is not available for this kind of request."
 TIMEOUT_MESSAGE = "That took too long, so I couldn't get an answer."
 
 
 async def execute_tool_call(
-    call: ToolCall, *, registry: ToolRegistry, ctx: ToolContext
+    call: ToolCall,
+    *,
+    registry: ToolRegistry,
+    ctx: ToolContext,
+    allowed_tool_names: frozenset[str] | None = None,
 ) -> ToolResult:
+    """`allowed_tool_names` is `IntentGate`'s allowlist for this turn. It is enforced *here*, not
+    only by which tools were offered in the request: a strict JSON schema makes the model asking
+    for an unoffered tool rare, but rare is not the same as impossible, and a mutating tool
+    reachable only because the request happened not to include its schema is not actually gated
+    (ARCHITECTURE §8.2/§8.4). Passing `None` skips the check — used by callers (tests, and any
+    future path with no intent gate at all) that mean to offer every tool in `registry`.
+    """
     tool_calls = ToolCallRepository(ctx.db)
     definition = registry.get(call.name)
 
@@ -46,6 +58,18 @@ async def execute_tool_call(
             error="unknown tool",
         )
         return ToolResult(tool_use_id=call.id, content=UNKNOWN_TOOL_MESSAGE, is_error=True)
+
+    if allowed_tool_names is not None and call.name not in allowed_tool_names:
+        log.warning("tool.not_allowed", tool=call.name)
+        await tool_calls.record(
+            session_id=ctx.session_id,
+            turn_index=ctx.turn_index,
+            tool_name=call.name,
+            arguments=call.arguments,
+            status=ToolStatus.REJECTED,
+            error="not in this turn's allowlist",
+        )
+        return ToolResult(tool_use_id=call.id, content=NOT_ALLOWED_MESSAGE, is_error=True)
 
     try:
         args = definition.input_model.model_validate(call.arguments)
