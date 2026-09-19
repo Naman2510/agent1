@@ -124,3 +124,32 @@ class MessageRepository:
             )
         )
         return int(result.scalar_one()) + 1
+
+    async def search_for_student(
+        self,
+        student_id: uuid.UUID,
+        *,
+        keyword: str | None = None,
+        limit: int = 5,
+    ) -> Sequence[Message]:
+        """Past turns for `retrieve_previous_conversation` (ADR-0012: structured filters — here,
+        "this student's own messages" — plus lexical search, not vector memory, for v1).
+
+        Scoped through `Session.student_id` in the query itself, the same pattern
+        `SessionRepository.get_for_student` uses: there is no version of this method that can
+        search across students, so a prompt-injected id in a tool argument has nothing to reach
+        for — this method does not even accept one.
+        """
+        stmt = (
+            select(Message)
+            .join(Session, Message.session_id == Session.id)
+            .where(
+                Session.student_id == student_id,
+                Message.role.in_((MessageRole.USER, MessageRole.ASSISTANT)),
+            )
+        )
+        if keyword:
+            stmt = stmt.where(Message.content.ilike(f"%{keyword}%"))
+        stmt = stmt.order_by(Message.created_at.desc()).limit(limit)
+        result = await self._session.execute(stmt)
+        return result.scalars().all()

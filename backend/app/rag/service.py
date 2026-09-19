@@ -145,7 +145,12 @@ class RagService:
     # --- retrieval -------------------------------------------------------
 
     async def search(
-        self, query: str, *, filters: dict[str, Any] | None = None, use_reranker: bool = False
+        self,
+        query: str,
+        *,
+        filters: dict[str, Any] | None = None,
+        use_reranker: bool = False,
+        citation_start_index: int = 1,
     ) -> tuple[list[RetrievedChunk], ContextBlock]:
         if not self._embeddings.is_fit:
             # A query against an empty or unembedded corpus is not an error — it is "nothing to
@@ -157,7 +162,7 @@ class RagService:
         )
         config = RetrievalConfig(filters=filters or {}, use_reranker=use_reranker)
         chunks = await retriever.retrieve(query, config)
-        return chunks, build_context(chunks)
+        return chunks, build_context(chunks, start_index=citation_start_index)
 
 
 def embed_text_from_row(chunk: DocumentChunk) -> str:

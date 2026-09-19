@@ -426,7 +426,7 @@ not a stack trace — and it is logged as a `tool_budget_exceeded` event for fai
 
 ### 8.2 Tool gating
 
-Exposing all eight tools on every turn degrades selection accuracy and wastes prompt tokens
+Exposing all seven tools on every turn degrades selection accuracy and wastes prompt tokens
 (spec §12: "should NOT simply expose all tools"). `IntentGate` maps a coarse intent to an allowlist:
 
 | Intent | Tools exposed |

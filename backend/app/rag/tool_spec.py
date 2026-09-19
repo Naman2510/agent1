@@ -12,8 +12,9 @@ is no student-shaped data behind this tool at all.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
+from app.agent.tools.base import ToolInput
 from app.providers.llm.base import ToolSpec
 
 SEARCH_KNOWLEDGE_SCHEMA: dict[str, object] = {
@@ -44,13 +45,13 @@ SEARCH_KNOWLEDGE_SCHEMA: dict[str, object] = {
 }
 
 
-class SearchKnowledgeInput(BaseModel):
-    """The validated shape of a `search_knowledge` call, for Phase 6's tool wrapper."""
+class SearchKnowledgeInput(ToolInput):
+    """The validated shape of a `search_knowledge` call, for Phase 6's tool wrapper.
 
-    # extra="forbid": Pydantic's default silently drops unknown fields, which would make a
-    # model-supplied student_id (or anything else) disappear quietly instead of failing loudly
-    # at the one validation boundary between model output and this tool's execution.
-    model_config = ConfigDict(extra="forbid")
+    Inherits `extra="forbid"` from `ToolInput`: Pydantic's default silently drops unknown fields,
+    which would make a model-supplied `student_id` (or anything else) disappear quietly instead of
+    failing loudly at the one validation boundary between model output and this tool's execution.
+    """
 
     query: str = Field(min_length=1, max_length=500)
     subject: str | None = None

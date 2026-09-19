@@ -63,13 +63,21 @@ class Citation:
 
 
 def build_context(
-    chunks: list[RetrievedChunk], *, max_chars: int = DEFAULT_MAX_CONTEXT_CHARS
+    chunks: list[RetrievedChunk],
+    *,
+    max_chars: int = DEFAULT_MAX_CONTEXT_CHARS,
+    start_index: int = 1,
 ) -> ContextBlock:
     """Assemble retrieved chunks into one labelled block, deduplicating and budget-capped.
 
     Deduplication is by document + heading path: hybrid retrieval's two arms can surface the same
     section, and citing it twice under two different numbers would look like two independent
     sources agreeing when they are one.
+
+    `start_index` continues numbering from a previous call's last ref, so a turn with two
+    `search_knowledge` calls gets `[1]`, `[2]`, `[3]`... rather than each call restarting at
+    `[1]` — which would leave "[1]" ambiguous between two different sources in the same turn
+    (Phase 6: the orchestrator threads one running counter across every call in a turn).
     """
     seen: set[tuple[str, str | None]] = set()
     sources: dict[str, RetrievedChunk] = {}
@@ -82,7 +90,7 @@ def build_context(
             continue
         seen.add(key)
 
-        ref = f"[{len(sources) + 1}]"
+        ref = f"[{start_index + len(sources)}]"
         heading = f" ({chunk.heading_path})" if chunk.heading_path else ""
         entry = f"{ref} From \"{chunk.document_title}\"{heading}:\n{chunk.content}"
 

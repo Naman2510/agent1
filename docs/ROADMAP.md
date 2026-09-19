@@ -117,7 +117,7 @@ substitution pending network access, not a supersession ([ADR-0006's amendment](
 dropped, both in isolation and end-to-end from a real ingested corpus through real retrieval.
 
 ### Phase 6 — Agent tools & memory
-The eight tools with typed inputs, authorization, budgets, and tests; `IntentGate`; short-term Redis
+The seven tools with typed inputs, authorization, budgets, and tests; `IntentGate`; short-term Redis
 window; long-term profile and topics; the async memory extractor with `memory_events` audit.
 **Gate 6:** agent suite passing with gated-vs-ungated numbers; injection suite shows zero mutating
 calls; a memory delta is traceable end to end.

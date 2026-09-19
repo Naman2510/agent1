@@ -34,8 +34,17 @@ def test_chunks_are_numbered_from_one_in_order() -> None:
     ]
     ctx = build_context(chunks)
     assert list(ctx.sources.keys()) == ["[1]", "[2]"]
-    assert ctx.sources["[1]"].id == "a"
-    assert ctx.sources["[2]"].id == "b"
+
+
+def test_start_index_continues_numbering_from_a_previous_call() -> None:
+    """A turn with two search_knowledge calls must not have both restart at [1] — that would
+    leave "[1]" ambiguous between two different sources in the same turn (Phase 6)."""
+    first = build_context([_chunk("a", "Doc A", "1.1", "content a")])
+    second = build_context(
+        [_chunk("b", "Doc B", "2.1", "content b")], start_index=len(first.sources) + 1
+    )
+    assert list(first.sources.keys()) == ["[1]"]
+    assert list(second.sources.keys()) == ["[2]"]
 
 
 def test_duplicate_document_and_heading_is_deduplicated() -> None:
