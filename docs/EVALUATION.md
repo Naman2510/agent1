@@ -216,6 +216,27 @@ that did not change the answer), task-completion rate, and failure-recovery rate
 tool returns an error — the mentor must say so, not invent the data). Gated vs. ungated tool
 exposure is reported side by side so the `IntentGate` has to earn its place.
 
+**Measured, Phase 6 (`datasets/v1/agent/scenarios.jsonl`, 14 cases, `eval/suites/agent.py`):**
+
+| Metric | Result | What it actually shows |
+|---|---|---|
+| Allowlist coverage | 14/14 | Every scenario's expected trace is supported, and its named-wrong tools excluded, by `IntentGate`'s real allowlist table — the check that would have caught `update_student_progress` never being reachable from any intent (a real bug this phase found and fixed, PHASE_6_AUDIT.md). |
+| Pipeline completion | 10/10 | A scripted model requesting each scenario's trace completes end to end against the real orchestrator, executor, and database, including a deliberately-unnecessary allowed call (correctly flagged) and a handler-raised error (correctly surfaced, turn still completes). |
+| Forbidden-tool leaks | 0/10 | No pipeline run executed a tool outside its scenario's forbidden list. |
+| Gate earns its place | 5/5 probes | For five scenarios, the same attempted extra call is blocked under the scenario's real gated allowlist and would execute if every tool were offered instead — gating demonstrably changes the outcome. |
+
+**What this is not.** No Anthropic API key exists in this sandbox (the same limitation already
+noted for STT/TTS in Phase 3), so every "model" call above is scripted, not a real model choosing.
+**Tool-selection accuracy and task-completion rate, as this section defines them — did a real model
+pick correctly — are not measured.** Argument exact/semantic match is not scored either: every
+argument was authored to be correct, so there is nothing for a real model to have gotten right or
+wrong. What the gated-vs-ungated result shows is that the gate *mechanically* changes which calls
+execute; it is not evidence for the actual question ARCHITECTURE §8.2 asks — whether narrowing
+tool exposure helps or hurts a *real* model's completion rate — which needs a real agent-suite run
+and is unmeasured. See `agent_scenarios_bias` in `datasets/v1/MANIFEST.yaml` for the full statement,
+including an authoring bug this dataset's own construction caught (not by inspection, but by
+running the allowlist check against the real table) as a concrete instance of the bias it describes.
+
 ### 5.2 Response quality
 
 Dimensions scored per response: relevance, coherence, **groundedness** (every factual claim

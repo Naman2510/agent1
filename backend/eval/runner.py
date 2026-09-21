@@ -18,6 +18,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from eval.suites import agent as agent_suite
 from eval.suites import injection as injection_suite
 from eval.suites import lid
 from eval.suites import retrieval as retrieval_suite
@@ -102,7 +103,9 @@ def run_lid(dataset: str, *, show_failures: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a VaaniOS evaluation suite.")
-    parser.add_argument("--suite", required=True, choices=["lid", "retrieval", "injection"])
+    parser.add_argument(
+        "--suite", required=True, choices=["lid", "retrieval", "injection", "agent"]
+    )
     parser.add_argument("--dataset", default="v1")
     parser.add_argument(
         "--failures", action="store_true", help="print every failing case with its reasoning"
@@ -119,6 +122,10 @@ def main() -> int:
         import asyncio
 
         return asyncio.run(run_injection(args.dataset))
+    if args.suite == "agent":
+        import asyncio
+
+        return asyncio.run(run_agent(args.dataset))
     return 2  # pragma: no cover - argparse restricts the choices
 
 
@@ -192,6 +199,104 @@ async def run_injection(dataset: str) -> int:
     print()
     print("summary_metrics " + json.dumps(report.summary(), sort_keys=True))
     return 0 if not report.executed else 1
+
+
+async def run_agent(dataset: str) -> int:
+    """Runs against throwaway rows that are never committed — see run_injection's docstring for
+    why. See eval/suites/agent.py's own module docstring for what this suite does and does not
+    measure: allowlist coverage and pipeline mechanics are real; a real model's tool-selection
+    judgement is not, for lack of an Anthropic API key in this sandbox.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.agent.tools.base import ToolContext
+    from app.agent.tools.registry import DEFAULT_REGISTRY
+    from app.core.config import get_settings
+    from app.db.models import Session, Student, User, UserRole
+    from app.db.session import create_engine
+    from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
+    from app.providers.reranker.base import NoopReranker
+    from app.rag.service import RagService
+
+    path = DATASETS / dataset / "agent" / "scenarios.jsonl"
+    if not path.exists():
+        print(f"no agent scenarios at {path}", file=sys.stderr)
+        return 2
+
+    scenarios = agent_suite.load_cases(path)
+    engine = create_engine(get_settings())
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    print("=" * 70)
+    print("suite            agent")
+    print(f"dataset          {dataset} ({len(scenarios)} scenarios)")
+    print(f"git sha          {git_sha()}")
+    print(f"started          {datetime.now(UTC).isoformat(timespec='seconds')}")
+    print(
+        "measures         allowlist coverage and real pipeline execution under a scripted "
+        "model — NOT a real model's tool-selection accuracy (no LLM call is made; see "
+        "eval/suites/agent.py)"
+    )
+    print("=" * 70)
+
+    report = agent_suite.AgentReport()
+    for scenario in scenarios:
+        report.allowlist_checks.append(agent_suite.check_allowlist_coverage(scenario))
+
+    async with factory() as session:
+        user = User(
+            email="eval-agent@example.invalid",
+            password_hash="x",  # noqa: S106 - throwaway actor for a run that is never committed
+            role=UserRole.STUDENT,
+        )
+        session.add(user)
+        await session.flush()
+        student = Student(user_id=user.id, display_name="eval-agent")
+        session.add(student)
+        await session.flush()
+
+        for scenario in scenarios:
+            conversation_session = Session(student_id=student.id, transport="text")
+            session.add(conversation_session)
+            await session.flush()
+            rag = RagService(
+                session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker()
+            )
+            ctx = ToolContext(
+                student_id=student.id,
+                session_id=conversation_session.id,
+                turn_index=0,
+                db=session,
+                rag=rag,
+                citation_sources={},
+            )
+            if scenario.run_pipeline:
+                report.pipeline_outcomes.append(
+                    await agent_suite.run_pipeline_scenario(
+                        scenario, registry=DEFAULT_REGISTRY, ctx=ctx
+                    )
+                )
+            if scenario.gated_vs_ungated_probe:
+                report.probe_outcomes.append(
+                    await agent_suite.run_gated_vs_ungated_probe(
+                        scenario, registry=DEFAULT_REGISTRY, ctx=ctx
+                    )
+                )
+        # Deliberately not committed — see the docstring above.
+
+    await engine.dispose()
+
+    print(report.render())
+    print()
+    print("summary_metrics " + json.dumps(report.summary(), sort_keys=True))
+    s = report.summary()
+    ok = (
+        s["allowlist_coverage_ok"] == s["allowlist_coverage_total"]
+        and s["pipeline_completed"] == s["pipeline_total"]
+        and s["pipeline_forbidden_tool_leaked"] == 0
+        and s["probes_where_gate_earned_its_place"] == s["probes_total"]
+    )
+    return 0 if ok else 1
 
 
 async def run_retrieval(dataset: str, *, show_failures: bool) -> int:

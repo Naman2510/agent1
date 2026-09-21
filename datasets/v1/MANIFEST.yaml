@@ -3,9 +3,9 @@ created: 2026-09-18
 updated: 2026-09-21
 status: partial
 description: >
-  First evaluation dataset. Contains the language-identification and retrieval slices, plus the
-  agent slice's prompt-injection cases (Phase 6). The agent slice's own expected-tool-trace
-  scenarios, and the STT, response and e2e slices, listed in docs/DATASET.md do not exist yet.
+  First evaluation dataset. Contains the language-identification, retrieval, and agent slices
+  (both its expected-tool-trace scenarios and its prompt-injection cases, Phase 6). The STT,
+  response and e2e slices listed in docs/DATASET.md do not exist yet.
 
 slices:
   lid:
@@ -44,6 +44,35 @@ slices:
     notes:
       - "2 cases (ret-020, ret-021) are deliberately cross-lingual: a Hindi-script query against the English-only corpus, to measure the embedder's cross-lingual gap honestly rather than only testing same-language retrieval. See FC-004."
       - "1 case (ret-022) exercises the subject metadata filter end to end."
+
+  agent_scenarios:
+    path: agent/scenarios.jsonl
+    cases: 14
+    task: >
+      Given a student utterance, an intent context, and an expected tool trace, verify (a) the
+      IntentGate allowlist for that intent actually supports the trace and excludes the named
+      forbidden tools, and (b) for scenarios marked run_pipeline, that a scripted model requesting
+      that trace completes successfully end to end against the real orchestrator, executor, and
+      database — including correct handling of an unnecessary-but-allowed extra call and of a
+      handler-raised tool error. See eval/suites/agent.py's own docstring for what this measures
+      and, importantly, what it does not (a real model's tool-selection judgement).
+    by_intent:
+      progress_request: 3
+      question: 2
+      doubt: 1
+      quiz_request: 2
+      revision_request: 1
+      study_plan: 3
+      clarification: 1
+      casual: 1
+    coverage:
+      every_registered_tool_appears: true
+      run_pipeline_scenarios: 10
+      gated_vs_ungated_probes: 5
+      tool_error_scenarios: 1
+    notes:
+      - "docs/DATASET.md's coverage table targets 40 'Tool-requiring' cases; this slice has 14, chosen to cover every tool and every intent at least once rather than to approach the target by volume — the same target-vs-actual honesty as the retrieval slice (22 of 40 'RAG-answerable')."
+      - "Two authoring mistakes were caught and fixed while building this slice, not by inspection but by running check_allowlist_coverage against the real INTENT_TOOLS table: agent-009 and agent-014 originally listed create_study_plan as 'forbidden' under the study_plan intent, which is wrong — it is legitimately allowed there (see agent-008). Left as a reminder that even a small, deliberately-authored dataset needs to be run against the system, not just read."
 
   agent_injection:
     path: agent/injection_cases.jsonl
@@ -114,6 +143,30 @@ retrieval_bias:
     - "The corpus is 5 documents and 19 chunks. Recall@10 of 0.955 on this corpus says the pipeline mechanism works; it says nothing about recall at hundreds of documents, where near-duplicate and topically-adjacent chunks make discrimination genuinely harder."
     - "A corpus and query set from a real course, judged by someone other than the pipeline's author, are prerequisites for any claim about real-world retrieval quality."
 
+agent_scenarios_provenance:
+  source: authored
+  author: "project developer (single annotator) — same person who wrote the IntentGate allowlist table and the orchestrator/executor under test"
+  annotators: 1
+  inter_annotator_agreement: not measured (single annotator)
+  synthetic: false
+  llm_generated: false
+
+agent_scenarios_bias:
+  severity: high
+  statement: >
+    The same person wrote the allowlist table and the scenarios meant to check it, so a category
+    of scenario the author did not think to write — a legitimate task the table fails to support
+    in a way nobody has yet noticed — has no case here and would not be caught. The pipeline
+    checks are real execution, but every "expected" trace was authored knowing the correct answer
+    in advance, which is a different exercise from generating a scenario and independently judging
+    whether a model's actual behaviour matched it. There is no real model in this loop at all
+    (see eval/suites/agent.py's own docstring) — tool-selection accuracy as EVALUATION.md §5.1
+    defines it is not measured by this dataset.
+  consequences:
+    - "14 scenarios is enough to touch every tool and every intent once, not to support a statistical claim about selection accuracy, task completion, or argument-match rate — there is no model making independent choices here to have an accuracy at all."
+    - "A real agent-suite result (a real model given these or similar utterances, judged against the expected trace) is a prerequisite for the gated-vs-ungated comparison ARCHITECTURE §8.2 actually calls for — whether narrowing tool exposure helps or hurts real completion. What this dataset shows instead is that gating mechanically changes which calls execute, which is necessary but not sufficient evidence for that question."
+    - "The one authoring bug this slice's own construction caught (agent-009/agent-014's wrong 'forbidden' claim, see the agent_scenarios notes above) is itself evidence for the first consequence: bias in the author's model of the system is exactly what independent testing would need to catch, and this dataset cannot provide that independence."
+
 agent_injection_provenance:
   source: authored
   author: "project developer (single annotator) — same person who wrote the tool executor under test"
@@ -144,7 +197,8 @@ known_gaps:
   - "`mixed` has only 8 cases, and it is the hardest class — the least reliable row in the LID report."
   - "Sample sizes support direction, not confidence intervals. A few points of difference between two configurations is noise at n=88 (lid) or n=22 (retrieval)."
   - "The retrieval slice's cross-lingual cases (n=2) are far too few to characterise the embedder's cross-lingual gap quantitatively — they demonstrate that the gap exists, not its magnitude."
-  - "The agent_injection slice measures defense-in-depth against a scripted worst case, never a real model's actual behaviour under injection — see agent_injection_bias above. The agent slice's own expected-tool-trace scenarios (scenarios.jsonl) do not exist yet."
+  - "The agent_injection slice measures defense-in-depth against a scripted worst case, never a real model's actual behaviour under injection — see agent_injection_bias above."
+  - "The agent_scenarios slice has no real model in the loop at all — see agent_scenarios_bias above. It cannot answer ARCHITECTURE §8.2's actual question (does gating help or hurt real tool-selection accuracy); that needs a real agent-suite run against an Anthropic model, which is real future work, not done here."
 
 pii:
   contains_personal_data: false
@@ -214,3 +268,19 @@ runs:
       Every case is scripted as an already-successfully-injected model; this measures the
       executor's defenses, not a real model's resistance to injection. See
       agent_injection_bias above.
+  - suite: agent
+    git_sha: 1887fad
+    date: 2026-09-21
+    allowlist_coverage_ok: 14
+    allowlist_coverage_total: 14
+    pipeline_completed: 10
+    pipeline_total: 10
+    pipeline_forbidden_tool_leaked: 0
+    probes_where_gate_earned_its_place: 5
+    probes_total: 5
+    note: >
+      No real model is in this loop; see agent_scenarios_bias above. This confirms the allowlist
+      table supports every scenario's legitimate trace, the pipeline completes real multi-tool
+      turns (including an unnecessary-call flag and a handler-error recovery) against a real
+      database, and gating measurably changes which calls execute — not that gating helps or
+      hurts a real model's tool-selection accuracy, which is unmeasured.

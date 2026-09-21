@@ -1,11 +1,10 @@
 # Datasets
 
 **Status:** Phase 6. Three of the six slices in `datasets/v1/` are real: `lid` (88 cases, Phase 4),
-`retrieval` (22 cases, Phase 5), and `agent`, partially — 16 prompt-injection cases
-(`injection_cases.jsonl`) exist; the expected-tool-trace cases (`scenarios.jsonl`, §1's original
-plan for this directory) are separate and may not exist yet, see the `agent` slice entry below for
-current status. The rest — `stt`, `response`, `e2e` — do not exist yet; the layout in §1 is the
-target, not a claim that every directory is populated.
+`retrieval` (22 cases, Phase 5), and `agent` — both its expected-tool-trace cases (14,
+`scenarios.jsonl`) and its prompt-injection cases (16, `injection_cases.jsonl`). The rest — `stt`,
+`response`, `e2e` — do not exist yet; the layout in §1 is the target, not a claim that every
+directory is populated.
 
 ---
 

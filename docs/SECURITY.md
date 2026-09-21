@@ -41,8 +41,14 @@ Controls (ARCHITECTURE §8.4):
 5. **Ingestion is a privileged operation.** Only `admin` can ingest; documents carry a licence and a
    provenance record; ingestion strips instruction-like patterns into a flagged field for review
    rather than silently keeping them.
-6. **Tested, not assumed.** The dataset carries 15 prompt-injection cases (DATASET.md §2) and the
-   agent suite asserts that none results in a mutating call.
+6. **Tested, not assumed.** The dataset carries 16 prompt-injection cases, 19 attempted calls
+   (DATASET.md §2, target 15; `datasets/v1/agent/injection_cases.jsonl`), each scripted as a model
+   already fully persuaded by the injected text. Measured result, Phase 6: 19/19 blocked, 0
+   executed, verified against real Postgres row counts across every mutating table
+   (`eval/suites/injection.py`, `tests/integration/test_injection_suite.py`). This shows the
+   controls above hold against the worst case a compromised model can present — not that a real
+   model resists the injection itself, which needs an LLM call this sandbox cannot make (no
+   Anthropic API key) and is a distinct, unmeasured claim.
 
 Residual risk is real: no known defence makes an LLM immune to injection. The design's position is
 that injection must not be able to *do* anything, rather than that it can be prevented.
