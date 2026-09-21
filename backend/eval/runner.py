@@ -18,6 +18,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from eval.suites import injection as injection_suite
 from eval.suites import lid
 from eval.suites import retrieval as retrieval_suite
 
@@ -101,7 +102,7 @@ def run_lid(dataset: str, *, show_failures: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a VaaniOS evaluation suite.")
-    parser.add_argument("--suite", required=True, choices=["lid", "retrieval"])
+    parser.add_argument("--suite", required=True, choices=["lid", "retrieval", "injection"])
     parser.add_argument("--dataset", default="v1")
     parser.add_argument(
         "--failures", action="store_true", help="print every failing case with its reasoning"
@@ -114,7 +115,83 @@ def main() -> int:
         import asyncio
 
         return asyncio.run(run_retrieval(args.dataset, show_failures=args.failures))
+    if args.suite == "injection":
+        import asyncio
+
+        return asyncio.run(run_injection(args.dataset))
     return 2  # pragma: no cover - argparse restricts the choices
+
+
+async def run_injection(dataset: str) -> int:
+    """Runs against a throwaway student/session row that is never committed (like run_retrieval,
+    this suite mutates nothing on success — the whole point is that it does not — so there is
+    nothing here worth persisting, and rolling back on close leaves no trace in a shared database).
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.agent.tools.base import ToolContext
+    from app.agent.tools.registry import DEFAULT_REGISTRY
+    from app.core.config import get_settings
+    from app.db.models import Session, Student, User, UserRole
+    from app.db.session import create_engine
+    from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
+    from app.providers.reranker.base import NoopReranker
+    from app.rag.service import RagService
+
+    path = DATASETS / dataset / "agent" / "injection_cases.jsonl"
+    if not path.exists():
+        print(f"no injection cases at {path}", file=sys.stderr)
+        return 2
+
+    cases = injection_suite.load_cases(path)
+    engine = create_engine(get_settings())
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    print("=" * 70)
+    print("suite            injection")
+    print(f"dataset          {dataset} ({len(cases)} cases)")
+    print(f"git sha          {git_sha()}")
+    print(f"started          {datetime.now(UTC).isoformat(timespec='seconds')}")
+    print(
+        "measures         whether a model already persuaded by injected text is still blocked "
+        "before mutating anything — NOT whether a real model resists the injection itself "
+        "(no LLM call is made; see eval/suites/injection.py)"
+    )
+    print("=" * 70)
+
+    async with factory() as session:
+        user = User(
+            email="eval-injection@example.invalid",
+            password_hash="x",  # noqa: S106 - throwaway actor for a run that is never committed
+            role=UserRole.STUDENT,
+        )
+        session.add(user)
+        await session.flush()
+        student = Student(user_id=user.id, display_name="eval-injection")
+        session.add(student)
+        await session.flush()
+        conversation_session = Session(student_id=student.id, transport="text")
+        session.add(conversation_session)
+        await session.flush()
+
+        rag = RagService(session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker())
+        ctx = ToolContext(
+            student_id=student.id,
+            session_id=conversation_session.id,
+            turn_index=0,
+            db=session,
+            rag=rag,
+            citation_sources={},
+        )
+        report = await injection_suite.run(cases, registry=DEFAULT_REGISTRY, ctx=ctx)
+        # Deliberately not committed — see the docstring above.
+
+    await engine.dispose()
+
+    print(report.render())
+    print()
+    print("summary_metrics " + json.dumps(report.summary(), sort_keys=True))
+    return 0 if not report.executed else 1
 
 
 async def run_retrieval(dataset: str, *, show_failures: bool) -> int:

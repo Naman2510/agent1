@@ -1,10 +1,11 @@
 version: v1
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-21
 status: partial
 description: >
-  First evaluation dataset. Contains the language-identification and retrieval slices; the STT,
-  agent, response and e2e slices listed in docs/DATASET.md do not exist yet.
+  First evaluation dataset. Contains the language-identification and retrieval slices, plus the
+  agent slice's prompt-injection cases (Phase 6). The agent slice's own expected-tool-trace
+  scenarios, and the STT, response and e2e slices, listed in docs/DATASET.md do not exist yet.
 
 slices:
   lid:
@@ -43,6 +44,25 @@ slices:
     notes:
       - "2 cases (ret-020, ret-021) are deliberately cross-lingual: a Hindi-script query against the English-only corpus, to measure the embedder's cross-lingual gap honestly rather than only testing same-language retrieval. See FC-004."
       - "1 case (ret-022) exercises the subject metadata filter end to end."
+
+  agent_injection:
+    path: agent/injection_cases.jsonl
+    cases: 16
+    attempted_calls: 19
+    task: >
+      Given a case naming an intent context and one or more tool calls an already-successfully-
+      injected model would attempt, assert the executor blocks every one before a handler runs —
+      by allowlist (14), by schema-level identity rejection (4), or by unknown-tool rejection (1).
+      No LLM call is made; see eval/suites/injection.py's own docstring for exactly what this does
+      and does not measure.
+    by_category:
+      document_injection: 8
+      identity_injection: 4
+      user_utterance_injection: 3
+      hallucinated_tool: 1
+    notes:
+      - "This is not a dataset of natural language for a model to be tested against — injected_text and legitimate_utterance are documentation of the attack shape a case represents, not inputs any code in this suite parses. What the suite actually exercises is attempted_calls against the real executor."
+      - "docs/DATASET.md's coverage table targets 15 prompt-injection cases; this slice has 16 (19 attempted calls), meeting that target."
 
 # ---------------------------------------------------------------------------
 # Provenance and bias. Read this before quoting any number derived from this
@@ -94,6 +114,29 @@ retrieval_bias:
     - "The corpus is 5 documents and 19 chunks. Recall@10 of 0.955 on this corpus says the pipeline mechanism works; it says nothing about recall at hundreds of documents, where near-duplicate and topically-adjacent chunks make discrimination genuinely harder."
     - "A corpus and query set from a real course, judged by someone other than the pipeline's author, are prerequisites for any claim about real-world retrieval quality."
 
+agent_injection_provenance:
+  source: authored
+  author: "project developer (single annotator) — same person who wrote the tool executor under test"
+  annotators: 1
+  inter_annotator_agreement: not measured (single annotator)
+  synthetic: false
+  llm_generated: false
+
+agent_injection_bias:
+  severity: high
+  statement: >
+    The same person wrote the executor's defenses and the cases meant to test them, and every case
+    was authored knowing exactly which checks exist (allowlist, schema extra="forbid", unknown-tool
+    rejection) rather than by attempting genuinely novel attacks. Results show these specific,
+    named mechanisms hold against these specific, named attempts — not that the system is safe
+    against injection attacks in general, and not that a real model would even produce arguments
+    shaped like these if actually persuaded by the injected text (no LLM call is made; see
+    eval/suites/injection.py).
+  consequences:
+    - "A defense this dataset does not exercise (there is currently only one meaningful boundary at this layer — student_id/session_id are simply absent from every tool schema — so there is little surface left to miss) would have no case here to catch it."
+    - "Real adversarial red-teaming, ideally by someone other than the executor's author, and eventually against a real model's actual tool-call choices rather than a scripted worst case, is a prerequisite for any claim broader than 'these mechanisms work as written.'"
+    - "Sample size (16 cases, 19 attempted calls) is enough to exercise every allowlist row and every mutating tool's schema at least once, not to support a statistical claim — there is no meaningful confidence interval on a boolean-per-mechanism result."
+
 known_gaps:
   - "No audio. VAD and STT cannot be evaluated from this dataset (see the espeak-ng finding in docs/PHASE_3_AUDIT.md — synthetic speech is not a valid substitute)."
   - "No dialectal variation in Hindi or Tamil."
@@ -101,6 +144,7 @@ known_gaps:
   - "`mixed` has only 8 cases, and it is the hardest class — the least reliable row in the LID report."
   - "Sample sizes support direction, not confidence intervals. A few points of difference between two configurations is noise at n=88 (lid) or n=22 (retrieval)."
   - "The retrieval slice's cross-lingual cases (n=2) are far too few to characterise the embedder's cross-lingual gap quantitatively — they demonstrate that the gap exists, not its magnitude."
+  - "The agent_injection slice measures defense-in-depth against a scripted worst case, never a real model's actual behaviour under injection — see agent_injection_bias above. The agent slice's own expected-tool-trace scenarios (scenarios.jsonl) do not exist yet."
 
 pii:
   contains_personal_data: false
@@ -160,3 +204,13 @@ runs:
     recall_at_10: 0.9545
     mrr: 0.8864
     ndcg_at_10: 0.8968
+  - suite: injection
+    git_sha: 8745ffd
+    date: 2026-09-21
+    total_attempted_calls: 19
+    blocked: 19
+    executed: 0
+    note: >
+      Every case is scripted as an already-successfully-injected model; this measures the
+      executor's defenses, not a real model's resistance to injection. See
+      agent_injection_bias above.

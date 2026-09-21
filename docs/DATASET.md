@@ -1,8 +1,11 @@
 # Datasets
 
-**Status:** Phase 5. Two of the six slices in `datasets/v1/` are real: `lid` (88 cases, Phase 4) and
-`retrieval` (22 cases, Phase 5). The rest — `stt`, `agent`, `response`, `e2e` — do not exist yet;
-the layout in §1 is the target, not a claim that every directory is populated.
+**Status:** Phase 6. Three of the six slices in `datasets/v1/` are real: `lid` (88 cases, Phase 4),
+`retrieval` (22 cases, Phase 5), and `agent`, partially — 16 prompt-injection cases
+(`injection_cases.jsonl`) exist; the expected-tool-trace cases (`scenarios.jsonl`, §1's original
+plan for this directory) are separate and may not exist yet, see the `agent` slice entry below for
+current status. The rest — `stt`, `response`, `e2e` — do not exist yet; the layout in §1 is the
+target, not a claim that every directory is populated.
 
 ---
 
@@ -14,7 +17,8 @@ datasets/
 │   ├── MANIFEST.yaml          # version, created, counts, provenance, licence, changelog
 │   ├── stt/                   #   cases.jsonl + audio/ (fixtures only; see §5)
 │   ├── retrieval/             #   queries.jsonl + relevance.jsonl
-│   ├── agent/                 #   scenarios.jsonl (expected tool traces)
+│   ├── agent/                 #   scenarios.jsonl (expected tool traces);
+│   │                          #   injection_cases.jsonl (prompt-injection defense, Phase 6)
 │   ├── response/              #   cases.jsonl (question, context, rubric)
 │   ├── e2e/                   #   sessions.yaml (scripted multi-turn, incl. interruptions)
 │   └── normalisation/         #   norm-v1 rules used by STT metrics
