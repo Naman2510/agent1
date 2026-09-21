@@ -169,6 +169,38 @@ async def test_a_full_turn_runs_through_every_state(
     assert transport.of_type("metrics"), "stage marks must be reported"
 
 
+async def test_a_mid_turn_failure_reaches_the_client_as_an_error_frame_not_silence(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """`check_spend_cap()` raises before a single token is requested — nothing in
+    `ConversationService`'s own try/except is positioned to catch it, so this exercises exactly
+    the gap the voice path had: unlike the SSE text path (chat.py), nothing here used to turn an
+    unexpected failure into a client-visible outcome at all. The turn must not just vanish."""
+    student_id, session_id = student_and_session
+    capped_settings = settings.model_copy(update={"monthly_spend_cap_usd": 0.0})
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=capped_settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=speech_timeline(silence_ms=64, speech_ms=800, trailing_silence_ms=800),
+    )
+    await voice.start()
+    await _feed(voice, 90)
+    await voice.wait_for_turn()
+
+    errors = transport.of_type("error")
+    assert errors, "a mid-turn failure must still produce a client-visible error frame"
+    assert errors[0]["code"] == "spend_cap_exceeded"
+
+    states = transport.states()
+    assert "error" in states, "the state machine must reflect the failure, not stay silent"
+    assert states[-1] == "listening", "the session must recover, not stay stuck in error"
+    assert not transport.of_type("llm.delta"), "the LLM was never reached"
+    assert not transport.of_type("metrics"), "no turn metrics exist for a turn that never ran"
+
+
 async def test_a_completed_turn_persists_both_messages_with_stage_marks(
     db_session: AsyncSession, settings: Settings, redis_client, student_and_session
 ) -> None:  # type: ignore[no-untyped-def]

@@ -30,6 +30,7 @@ import structlog
 from app.agent.lang.policy import SpeechPlan, response_directive, select_voice
 from app.agent.lang.router import LanguageDecision, LanguageState, route
 from app.core.config import Settings
+from app.core.errors import AppError
 from app.providers.stt.base import (
     FinalTranscript,
     PartialTranscript,
@@ -392,6 +393,37 @@ class VoiceSession:
         except asyncio.CancelledError:
             # Barge-in. The ledger already holds what was heard; _barge_in does the accounting.
             raise
+        except Exception as exc:
+            # Everything ConversationService itself knows how to degrade gracefully already has
+            # (a ProviderError becomes a spoken FAILURE_REPLY, inside the stream). What lands here
+            # is what neither side saw coming — most concretely `check_spend_cap()` raising before
+            # a single token is even requested — and without this handler the turn simply stops:
+            # `_run_turn` runs as a detached task with nothing awaiting it, so an uncaught
+            # exception here becomes an unretrieved-exception log line server-side and the client
+            # sees no `llm.delta`, no `metrics`, no `error` — just silence with no way to tell a
+            # slow answer from a dead connection. The SSE text path already turns the equivalent
+            # failure into a terminal `error` event (app/api/routes/chat.py); this is that
+            # guarantee's voice-path counterpart.
+            code = exc.code if isinstance(exc, AppError) else "turn_failed"
+            message = (
+                exc.message
+                if isinstance(exc, AppError)
+                else "Sorry — I lost that. Could you say it again?"
+            )
+            log.error(
+                "voice.turn_failed",
+                session_id=str(self.session_id),
+                turn_id=self.machine.turn_id,
+                code=code,
+                exc_info=True,
+            )
+            if self.machine.can(Trigger.PROVIDER_FAILED):
+                self.machine.fire(Trigger.PROVIDER_FAILED)
+                await self._announce_state()
+            await self.transport.send_control(ServerMessage.ERROR, code=code, message=message)
+            if self.machine.can(Trigger.RECOVERED):
+                self.machine.fire(Trigger.RECOVERED)
+                await self._announce_state()
         finally:
             with contextlib.suppress(Exception):
                 await stream.aclose()
