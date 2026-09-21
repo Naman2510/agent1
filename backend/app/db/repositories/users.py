@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import RefreshToken, Student, User, UserRole
@@ -72,6 +72,10 @@ class StudentRepository:
 
     async def get_by_id(self, student_id: uuid.UUID) -> Student | None:
         return await self._session.get(Student, student_id)
+
+    async def count(self) -> int:
+        result = await self._session.execute(select(func.count()).select_from(Student))
+        return int(result.scalar_one())
 
 
 class RefreshTokenRepository:

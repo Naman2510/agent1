@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ToolCall, ToolStatus
@@ -41,3 +42,18 @@ class ToolCallRepository:
         self._session.add(row)
         await self._session.flush()
         return row
+
+    async def usage_summary(self) -> list[tuple[str, ToolStatus, int]]:
+        """Every (tool, outcome) combination ever recorded, with its count — the admin dashboard's
+        raw material. Deliberately not opinionated about what counts as a "failure": that
+        interpretation (ARCHITECTURE §8.2's tool budgets, or which outcomes are reliability
+        problems versus deliberate refusals) belongs to whoever reads this, not to the audit trail
+        itself. Uses `ix_tool_calls_name_status`, the same index `tool_calls` was already given for
+        this exact access pattern.
+        """
+        result = await self._session.execute(
+            select(ToolCall.tool_name, ToolCall.status, func.count())
+            .group_by(ToolCall.tool_name, ToolCall.status)
+            .order_by(ToolCall.tool_name)
+        )
+        return [(name, status, int(count)) for name, status, count in result.all()]

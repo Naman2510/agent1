@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MemoryEvent, MemoryKind, StudentProfile, StudentTopic
@@ -133,6 +133,16 @@ class StudentTopicRepository:
         await self._session.flush()
         return row
 
+    async def mastery_overview(self) -> tuple[int, float | None]:
+        """(topics tracked, average mastery) across every student, for the admin dashboard.
+
+        `average` is `None` — never `0.0` — when no topic has been tracked yet, so the caller can
+        report "not_measured" instead of a misleadingly confident zero.
+        """
+        result = await self._session.execute(select(func.count(), func.avg(StudentTopic.mastery)))
+        count, average = result.one()
+        return int(count), (float(average) if average is not None else None)
+
 
 class MemoryEventRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -176,3 +186,15 @@ class MemoryEventRepository:
             .limit(limit)
         )
         return result.scalars().all()
+
+    async def counts_by_applied(self) -> dict[bool, int]:
+        """How many proposed deltas, across every student, were applied versus logged and
+        rejected below the confidence threshold (ARCHITECTURE §12) — the admin dashboard's window
+        into whether the memory extractor's confidence gate is doing anything in practice. A
+        missing key means zero, not "not measured": every row in this table has an `applied`
+        value by construction, so there is nothing ambiguous about an outcome nobody has hit yet.
+        """
+        result = await self._session.execute(
+            select(MemoryEvent.applied, func.count()).group_by(MemoryEvent.applied)
+        )
+        return {applied: int(count) for applied, count in result.all()}

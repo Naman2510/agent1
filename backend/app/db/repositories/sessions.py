@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, select, update
+from sqlalchemy import CursorResult, Numeric, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Message, MessageRole, Session, SessionStatus
@@ -67,6 +67,10 @@ class SessionRepository:
         result = await self._session.execute(
             select(func.count()).select_from(Session).where(Session.status == SessionStatus.ACTIVE)
         )
+        return int(result.scalar_one())
+
+    async def count_total(self) -> int:
+        result = await self._session.execute(select(func.count()).select_from(Session))
         return int(result.scalar_one())
 
 
@@ -153,3 +157,29 @@ class MessageRepository:
         stmt = stmt.order_by(Message.created_at.desc()).limit(limit)
         result = await self._session.execute(stmt)
         return result.scalars().all()
+
+    async def count_total(self) -> int:
+        result = await self._session.execute(select(func.count()).select_from(Message))
+        return int(result.scalar_one())
+
+    async def average_llm_ttft_ms(self) -> tuple[float, int] | None:
+        """Mean time-to-first-token across every assistant reply that recorded one, for the admin
+        dashboard (EVALUATION.md's stage marks, persisted per-message since Phase 3).
+
+        `->>'llm_ttft_ms'` is NULL for a message that never recorded the mark (an interrupted
+        turn, a refusal with nothing to time); SQL aggregates skip NULLs on their own, so no
+        explicit filter is needed to exclude them from either the average or the sample count.
+        Returns `None` — never `0.0` — when there is nothing to average, so the caller can report
+        "not_measured" rather than a misleading zero (the same rule `admin/health` already applies
+        to `active_sessions`).
+        """
+        ttft = Message.latency_ms.op("->>")("llm_ttft_ms")
+        result = await self._session.execute(
+            select(func.avg(ttft.cast(Numeric)), func.count(ttft)).where(
+                Message.role == MessageRole.ASSISTANT
+            )
+        )
+        average, sample_size = result.one()
+        if average is None or sample_size == 0:
+            return None
+        return float(average), int(sample_size)
