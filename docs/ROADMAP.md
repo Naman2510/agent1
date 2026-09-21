@@ -1,7 +1,7 @@
 # Roadmap, Phases, and Audit Gates
 
-**Status:** Phase 5 complete. Phases 0–5 have passed their audit gates; Phase 6 (agent tools &
-memory) has not started.
+**Status:** Phase 6 complete. Phases 0–6 have passed their audit gates; Phase 7 (frontend &
+dashboard) has not started.
 
 The specification (§43) mandates phased delivery with an audit gate between phases. Phases 1+ below
 are reconstructed from spec §1–42; **the original specification was truncated part-way through the
@@ -117,10 +117,22 @@ substitution pending network access, not a supersession ([ADR-0006's amendment](
 dropped, both in isolation and end-to-end from a real ingested corpus through real retrieval.
 
 ### Phase 6 — Agent tools & memory
-The seven tools with typed inputs, authorization, budgets, and tests; `IntentGate`; short-term Redis
-window; long-term profile and topics; the async memory extractor with `memory_events` audit.
+The seven tools with typed inputs, authorization enforced at execution (not only at offer-time —
+[PHASE_6_AUDIT.md](PHASE_6_AUDIT.md)'s D6-02, this phase's most significant finding), budgets, and
+tests; `IntentGate` and its allowlist table (corrected mid-phase: `update_student_progress` was
+registered and tested but reachable from no intent, D6-04); the short-term Redis window with a
+rolling summary of turns older than it; long-term profile and topics; the async `MemoryExtractor`
+with EWMA at a conversational alpha and a `memory_events` audit trail for every delta, applied or
+rejected. **No real Anthropic API key exists in this sandbox** — same limitation as the STT/TTS
+providers since Phase 3 — so the agent and injection suites both measure real mechanisms (allowlist
+coverage, executor-level authorization, pipeline execution) against a scripted model, not a real
+model's judgement; PHASE_6_AUDIT.md's M6-02 and the suites' own module docstrings say so plainly.
 **Gate 6:** agent suite passing with gated-vs-ungated numbers; injection suite shows zero mutating
-calls; a memory delta is traceable end to end.
+calls; a memory delta is traceable end to end. All three passed against real infrastructure:
+14/14 scenarios' allowlists correctly supported (`eval/suites/agent.py`), 19/19 attempted injected
+calls blocked and cross-checked against real Postgres row counts (`eval/suites/injection.py`), and
+one real turn traced from utterance to a `student_topics` mastery update to its `memory_events` row
+(`test_a_memory_delta_is_traceable_end_to_end_from_a_real_turn`).
 
 ### Phase 7 — Frontend & dashboard
 Voice session UI (transcript, language indicator, tool activity, citations, latency HUD), history,
