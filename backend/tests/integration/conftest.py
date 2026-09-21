@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.agent.intent import IntentGate
+from app.agent.memory_extractor import MemoryExtractor
 from app.agent.tools.registry import DEFAULT_REGISTRY
 from app.core.config import Settings
 from app.core.rate_limit import RateLimiter
@@ -24,6 +25,7 @@ from app.core.security import PasswordHasherService
 from app.main import create_app
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.llm.fake import FakeLLMProvider
+from app.services.memory_window import SessionWindowCache
 from app.services.usage import UsageLedger
 from tests.conftest import unique_email
 
@@ -112,6 +114,10 @@ async def app(engine, settings: Settings, redis_client, llm: FakeLLMProvider):  
     application.state.embeddings = TfidfSvdEmbeddingProvider()
     application.state.tool_registry = DEFAULT_REGISTRY
     application.state.intent_gate = IntentGate(llm)
+    application.state.window_cache = SessionWindowCache(
+        redis_client, capacity=settings.llm_history_turns, llm=llm
+    )
+    application.state.memory_extractor = MemoryExtractor(llm, application.state.session_factory)
     return application
 
 

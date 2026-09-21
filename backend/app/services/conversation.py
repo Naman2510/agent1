@@ -27,10 +27,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.intent import IntentGate
 from app.agent.language import script_of
+from app.agent.memory_extractor import MemoryExtractor
 from app.agent.orchestrator import run_agent_turn
 from app.agent.prompts import PROMPT_VERSION, assemble
 from app.agent.tools.base import ToolContext
 from app.agent.tools.registry import ToolRegistry
+from app.core.background import spawn
 from app.core.config import Settings
 from app.db.models import MessageRole
 from app.db.repositories.memory import StudentProfileRepository
@@ -50,6 +52,7 @@ from app.providers.llm.base import (
 from app.rag.context import Citation, ContextBlock, extract_cited_refs, resolve_citations
 from app.rag.retrieve import RetrievedChunk
 from app.rag.service import RagService
+from app.services.memory_window import SessionWindowCache
 from app.services.usage import TurnCost, UsageLedger
 
 log = structlog.get_logger(__name__)
@@ -107,14 +110,19 @@ class ConversationService:
         intent_gate: IntentGate | None = None,
         rag: RagService | None = None,
         student_profiles: StudentProfileRepository | None = None,
+        window_cache: SessionWindowCache | None = None,
+        memory_extractor: MemoryExtractor | None = None,
     ) -> None:
-        """`db`/`tool_registry`/`intent_gate`/`rag`/`student_profiles` are all optional and all
-        Phase 6: a caller that omits them gets the exact Phase 2/3 single-shot turn, unchanged.
-        Tool execution additionally needs `db` and `rag` (a `ToolContext` cannot be built without
-        them), so the tool loop only actually runs when every one of `tool_registry`, `db`, and
-        `rag` is set. `intent_gate` decides the allowlist for that loop; if it is omitted while
-        the others are set, the allowlist is empty (fail closed — no tool reachable, never "every
-        tool reachable") rather than assumed to be everything in the registry.
+        """`db`/`tool_registry`/`intent_gate`/`rag`/`student_profiles`/`window_cache`/
+        `memory_extractor` are all optional and all Phase 6: a caller that omits them gets the
+        exact Phase 2/3 single-shot turn, unchanged. Tool execution additionally needs `db` and
+        `rag` (a `ToolContext` cannot be built without them), so the tool loop only actually runs
+        when every one of `tool_registry`, `db`, and `rag` is set. `intent_gate` decides the
+        allowlist for that loop; if it is omitted while the others are set, the allowlist is empty
+        (fail closed — no tool reachable, never "every tool reachable") rather than assumed to be
+        everything in the registry. `window_cache` and `memory_extractor` are independent of the
+        tool loop entirely — they run post-turn, off the critical path (`app.core.background`),
+        and need only `db`/`student_profiles` (extractor) or nothing (window cache).
         """
         self._llm = llm
         self._messages = messages
@@ -125,6 +133,8 @@ class ConversationService:
         self._intent_gate = intent_gate
         self._rag = rag
         self._student_profiles = student_profiles
+        self._window_cache = window_cache
+        self._memory_extractor = memory_extractor
 
     async def history(self, session_id: uuid.UUID, *, limit: int = 20) -> list[TurnMessage]:
         """Recent turns as provider-neutral messages.
@@ -138,6 +148,22 @@ class ConversationService:
             TurnMessage(role="user" if r.role is MessageRole.USER else "assistant", text=r.content)
             for r in recent
         ]
+
+    async def _recent_context(self, session_id: uuid.UUID) -> tuple[list[TurnMessage], str | None]:
+        """Verbatim history plus the rolling summary of whatever is older than it.
+
+        Cache-first (`sess:{id}:window`): a hit skips the Postgres query entirely and also
+        recovers the summary, which `history()` alone has no way to produce. A miss — no
+        `window_cache` configured, nothing cached yet, or a Redis outage — falls back to exactly
+        `history()`'s existing Postgres-only behaviour, with no summary (ARCHITECTURE §13: losing
+        this cache costs a rebuild, never correctness).
+        """
+        if self._window_cache is not None:
+            window = await self._window_cache.get(session_id)
+            if window is not None:
+                return list(window.turns), window.summary
+        history = await self.history(session_id, limit=self._settings.llm_history_turns)
+        return history, None
 
     async def stream_turn(
         self,
@@ -161,7 +187,7 @@ class ConversationService:
         turn_index = await self._messages.next_turn_index(session_id)
         result = TurnResult(turn_index=turn_index)
 
-        history = await self.history(session_id, limit=self._settings.llm_history_turns)
+        history, earlier_turns_summary = await self._recent_context(session_id)
 
         memory_digest: str | None = None
         if self._student_profiles is not None:
@@ -180,6 +206,7 @@ class ConversationService:
             history=history,
             utterance=utterance,
             memory_digest=memory_digest,
+            earlier_turns_summary=earlier_turns_summary,
             language_directive=language_directive,
         )
 
@@ -304,10 +331,44 @@ class ConversationService:
                     cited_refs, ContextBlock(text="", sources=citation_sources)
                 )
 
-            await self._persist_assistant_turn(
+            message_id = await self._persist_assistant_turn(
                 session_id=session_id, turn_index=turn_index, result=result
             )
+            if self._db is not None:
+                # Commit now rather than leaving it to the request's own outer transaction scope:
+                # a background task below connects on its own session and writes a memory_events
+                # row with a foreign key to this message. That insert races an outer commit that
+                # has not happened yet — a real foreign-key violation, not a theoretical one, is
+                # exactly what an uncommitted message row produces (caught by a real test against
+                # a real schema, not by inspection). expire_on_commit=False on every session this
+                # service is built with means nothing already loaded needs a re-fetch afterwards.
+                await self._db.commit()
             await self._ledger.record_turn(result.cost)
+
+            # Off the critical path (app.core.background): the response has already been streamed
+            # to the student by the time either of these runs. Independent of each other and of
+            # the tool loop above — a window-cache outage must not block memory extraction or vice
+            # versa, so each gets its own tracked task rather than one that fails as a unit.
+            if self._window_cache is not None:
+                spawn(
+                    self._window_cache.record_turn(
+                        session_id,
+                        user_message=TurnMessage(role="user", text=utterance),
+                        assistant_message=TurnMessage(role="assistant", text=result.text),
+                    ),
+                    name=f"memory_window.record_turn:{session_id}",
+                )
+            if self._memory_extractor is not None:
+                spawn(
+                    self._memory_extractor.extract_and_apply(
+                        student_id=student_id,
+                        session_id=session_id,
+                        message_id=message_id,
+                        utterance=utterance,
+                        reply=result.text,
+                    ),
+                    name=f"memory_extractor.extract_and_apply:{session_id}",
+                )
             log.info(
                 "conversation.turn_completed",
                 session_id=str(session_id),
@@ -324,9 +385,9 @@ class ConversationService:
 
     async def _persist_assistant_turn(
         self, *, session_id: uuid.UUID, turn_index: int, result: TurnResult
-    ) -> None:
+    ) -> uuid.UUID:
         token_usage = result.cost.as_dict() if result.cost else None
-        await self._messages.append(
+        message = await self._messages.append(
             session_id=session_id,
             turn_index=turn_index,
             seq=1,
@@ -340,3 +401,4 @@ class ConversationService:
             latency_ms=result.latency_ms,
             token_usage=token_usage,
         )
+        return message.id

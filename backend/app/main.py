@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.intent import IntentGate
+from app.agent.memory_extractor import MemoryExtractor
 from app.agent.tools.registry import DEFAULT_REGISTRY
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
@@ -26,6 +27,7 @@ from app.db.session import create_engine, create_session_factory
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.registry import build_llm, build_reranker
 from app.rag.service import RagService
+from app.services.memory_window import SessionWindowCache
 from app.services.usage import UsageLedger
 from app.ws.voice import router as voice_router
 
@@ -64,6 +66,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.tool_registry = DEFAULT_REGISTRY
     app.state.intent_gate = IntentGate(app.state.llm)
+    # Both wrap only shared, stable dependencies (the LLM, the session factory, settings), so —
+    # like intent_gate above — one instance is reused across every request rather than rebuilt
+    # per turn (ARCHITECTURE §12/§13).
+    app.state.window_cache = SessionWindowCache(
+        app.state.redis, capacity=settings.llm_history_turns, llm=app.state.llm
+    )
+    app.state.memory_extractor = MemoryExtractor(app.state.llm, app.state.session_factory)
 
     if settings.monthly_spend_cap_usd is None:
         # Gate 0 finding M-11: say plainly that nothing is capped rather than implying a limit.

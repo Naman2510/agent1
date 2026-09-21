@@ -432,7 +432,7 @@ Exposing all seven tools on every turn degrades selection accuracy and wastes pr
 | Intent | Tools exposed |
 |---|---|
 | `QUESTION` / `DOUBT` | `search_knowledge` |
-| `QUIZ_REQUEST` | `generate_quiz`, `search_knowledge` |
+| `QUIZ_REQUEST` | `generate_quiz`, `update_student_progress`, `search_knowledge` |
 | `PROGRESS_REQUEST` | `get_student_progress`, `retrieve_previous_conversation` |
 | `REVISION_REQUEST` | `get_student_progress`, `create_study_plan`, `search_knowledge` |
 | `STUDY_PLAN` | `create_study_plan`, `get_study_plan`, `get_student_progress` |
@@ -442,6 +442,12 @@ The gate is a **precision/recall trade**, so it is measured: the agent suite rep
 both gated and ungated, and the gate is kept only if it does not reduce completion. Phase 1–8 use a
 prompted classifier; the gate is also the natural target for the optional fine-tune (spec §41),
 because it is narrow, cheap to label, and directly measurable.
+
+**Known gap:** the classifier sees only the bare utterance, not conversation state, so it cannot
+tell "we are mid-quiz" from a short, out-of-context answer ("5 ohms") — that answer may not read as
+`quiz_request` and can land on an intent with no path to `update_student_progress`. Tracking an open
+quiz per session and overriding the gate while one is pending would close this properly; it is not
+built (ROADMAP.md, Phase 6 known gaps).
 
 ### 8.3 Tool contract
 

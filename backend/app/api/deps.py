@@ -118,6 +118,8 @@ def get_conversation_service(
         intent_gate=intent_gate,
         rag=rag,
         student_profiles=StudentProfileRepository(db),
+        window_cache=request.app.state.window_cache,
+        memory_extractor=request.app.state.memory_extractor,
     )
 
 

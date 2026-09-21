@@ -92,6 +92,10 @@ class LLMRequest:
     tools: Sequence[ToolSpec] = field(default_factory=tuple)
     max_output_tokens: int = 1024
     effort: Effort | None = None
+    # The name of a tool in `tools` the model must call, rather than may call (ADR-0012's "forced
+    # structured output" for MemoryExtractor). None means "auto" — every existing caller, since
+    # ordinary conversation must never be forced into a tool call.
+    tool_choice: str | None = None
 
 
 @dataclass(frozen=True)

@@ -75,6 +75,7 @@ def assemble(
     history: Sequence[TurnMessage],
     utterance: str,
     memory_digest: str | None = None,
+    earlier_turns_summary: str | None = None,
     language_directive: str | None = None,
     retrieved_context: str | None = None,
 ) -> AssembledPrompt:
@@ -83,10 +84,13 @@ def assemble(
     Layout:
       1. persona                 — stable, cache breakpoint after it
       2. long-term memory digest — semi-stable, cache breakpoint after it
-      3. conversation history    — grows by one turn
-      4. retrieved context       — volatile, and untrusted: it goes in a user-role message, never
+      3. earlier-turns summary   — semi-stable, cache breakpoint after it (ARCHITECTURE §12: the
+                                   short-term Redis window's rolling summary of turns older than
+                                   `history` below — absent for any session still inside the window)
+      4. conversation history    — grows by one turn
+      5. retrieved context       — volatile, and untrusted: it goes in a user-role message, never
                                    in the system prompt (ARCHITECTURE §8.4)
-      5. the current utterance   — volatile
+      6. the current utterance   — volatile
     """
     system: list[SystemBlock] = []
 
@@ -99,6 +103,13 @@ def assemble(
         )
         _assert_stable(digest_block)
         system.append(SystemBlock(text=digest_block, cacheable=True))
+
+    if earlier_turns_summary:
+        summary_block = (
+            "Earlier in this session, before the messages below:\n" + earlier_turns_summary
+        )
+        _assert_stable(summary_block)
+        system.append(SystemBlock(text=summary_block, cacheable=True))
 
     if language_directive:
         # After the breakpoints: this can change from turn to turn.

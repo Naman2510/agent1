@@ -172,6 +172,8 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
                     reranker=build_reranker(settings),
                 ),
                 student_profiles=StudentProfileRepository(db),
+                window_cache=app.state.window_cache,
+                memory_extractor=app.state.memory_extractor,
             ),
             settings=settings,
             config=VoiceSessionConfig(pre_roll_ms=settings.voice_pre_roll_ms),

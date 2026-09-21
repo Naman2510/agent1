@@ -172,6 +172,8 @@ class AnthropicLLMProvider(LLMProvider):
             params["tools"] = [
                 self._tool_param(tool) for tool in sorted(request.tools, key=lambda t: t.name)
             ]
+        if request.tool_choice is not None:
+            params["tool_choice"] = {"type": "tool", "name": request.tool_choice}
         return params
 
     # --- streaming ---------------------------------------------------------

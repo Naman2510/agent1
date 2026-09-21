@@ -36,6 +36,31 @@ def test_memory_digest_is_cacheable_but_after_the_persona() -> None:
     assert "waveguides" in prompt.system[1].text
 
 
+def test_earlier_turns_summary_is_cacheable_and_placed_after_the_digest() -> None:
+    prompt = assemble(
+        history=[],
+        utterance="hi",
+        memory_digest="Weak on waveguides.",
+        earlier_turns_summary="Covered Maxwell's equations; asked for a re-explanation twice.",
+    )
+    assert [b.cacheable for b in prompt.system] == [True, True, True]
+    assert "Maxwell" in prompt.system[2].text
+
+
+def test_earlier_turns_summary_absent_by_default() -> None:
+    prompt = assemble(history=[], utterance="hi", memory_digest="Weak on waveguides.")
+    assert len(prompt.system) == 2
+
+
+def test_a_timestamp_in_the_summary_block_is_rejected() -> None:
+    with pytest.raises(UnstableCachedBlockError):
+        assemble(
+            history=[],
+            utterance="hi",
+            earlier_turns_summary="Last discussed 2026-09-18T11:30, covered KVL.",
+        )
+
+
 def test_a_timestamp_in_a_cacheable_block_is_rejected() -> None:
     """The failure this guards against is silent: no error, just a cache miss every turn."""
     with pytest.raises(UnstableCachedBlockError, match="per-request content"):

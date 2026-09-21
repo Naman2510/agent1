@@ -249,6 +249,22 @@ async def test_tools_are_sent_in_a_deterministic_order() -> None:
     assert [t["name"] for t in client.calls[0]["tools"]] == ["a_tool", "m_tool", "z_tool"]
 
 
+async def test_tool_choice_forces_the_named_tool() -> None:
+    client = _StubClient()
+    tool = ToolSpec(name="propose_memory_deltas", description="d", input_schema={"type": "object"})
+    await _drain(_provider(client), _request(tools=[tool], tool_choice="propose_memory_deltas"))
+    assert client.calls[0]["tool_choice"] == {"type": "tool", "name": "propose_memory_deltas"}
+
+
+async def test_no_tool_choice_param_when_unset() -> None:
+    """Every existing caller offers tools without forcing one; adding tool_choice must not
+    change their behaviour."""
+    client = _StubClient()
+    tool = ToolSpec(name="search_knowledge", description="d", input_schema={"type": "object"})
+    await _drain(_provider(client), _request(tools=[tool]))
+    assert "tool_choice" not in client.calls[0]
+
+
 async def test_parallel_tool_results_are_sent_in_one_user_message() -> None:
     """Splitting them across messages trains the model to stop calling tools in parallel."""
     client = _StubClient()

@@ -46,7 +46,16 @@ DEFAULT_INTENT = Intent.QUESTION
 INTENT_TOOLS: dict[Intent, frozenset[str]] = {
     Intent.QUESTION: frozenset({"search_knowledge"}),
     Intent.DOUBT: frozenset({"search_knowledge"}),
-    Intent.QUIZ_REQUEST: frozenset({"generate_quiz", "search_knowledge"}),
+    # update_student_progress lives here rather than in a dedicated "answering a quiz" intent
+    # because the classifier is single-utterance, stateless (see classify() below) — it has no way
+    # to know a quiz is in progress from the bare answer alone. Grouping grading with the request
+    # that starts a quiz is an honest compromise, not a full fix: a short, out-of-context reply
+    # ("5 ohms") may still not read as quiz_request to the classifier and can fall through to
+    # another intent with no path to update_student_progress. Tracking "this session has an open
+    # quiz" and overriding the gate while one is pending is real future work (see ROADMAP.md).
+    Intent.QUIZ_REQUEST: frozenset(
+        {"generate_quiz", "update_student_progress", "search_knowledge"}
+    ),
     Intent.PROGRESS_REQUEST: frozenset({"get_student_progress", "retrieve_previous_conversation"}),
     Intent.REVISION_REQUEST: frozenset(
         {"get_student_progress", "create_study_plan", "search_knowledge"}
@@ -65,7 +74,8 @@ _CLASSIFIER_SYSTEM = SystemBlock(
         f"Labels: {_LABELS}\n\n"
         "question: a course-content question needing an explanation.\n"
         "doubt: a follow-up expressing confusion about something already discussed.\n"
-        "quiz_request: asking to be quizzed or tested.\n"
+        "quiz_request: asking to be quizzed or tested, or reporting/answering quiz questions "
+        "already asked.\n"
         "progress_request: asking how they are doing, or what they are weak at.\n"
         "revision_request: asking what to revise or focus on.\n"
         "study_plan: asking for a study schedule or plan.\n"

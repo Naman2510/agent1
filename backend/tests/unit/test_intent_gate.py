@@ -96,8 +96,12 @@ def test_question_and_doubt_expose_only_search_knowledge() -> None:
     assert INTENT_TOOLS[Intent.DOUBT] == {"search_knowledge"}
 
 
-def test_quiz_request_exposes_generate_quiz_and_search_knowledge() -> None:
-    assert INTENT_TOOLS[Intent.QUIZ_REQUEST] == {"generate_quiz", "search_knowledge"}
+def test_quiz_request_exposes_generate_quiz_update_progress_and_search_knowledge() -> None:
+    assert INTENT_TOOLS[Intent.QUIZ_REQUEST] == {
+        "generate_quiz",
+        "update_student_progress",
+        "search_knowledge",
+    }
 
 
 def test_progress_request_exposes_progress_and_history_but_not_search() -> None:

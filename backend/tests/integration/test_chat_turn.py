@@ -55,13 +55,15 @@ async def _turn(
 
 
 def _mentor_requests(llm: FakeLLMProvider) -> list[LLMRequest]:
-    """The real conversational turns, filtering out IntentGate's own classification calls.
+    """The real conversational turns, filtering out every auxiliary LLM call around them.
 
-    Phase 6 makes every real turn cost two LLM calls, not one: `IntentGate.classify` runs first,
-    against a short, non-cacheable system prompt with no persona text. Tests that index into
-    `llm.requests` need to look past it for the turn they actually mean to assert about — the
-    same "VaaniOS" marker `test_the_request_carries_a_cacheable_persona_prefix` already checks
-    for the real persona block.
+    Phase 6 puts more than one call on the same shared `FakeLLMProvider`: `IntentGate.classify`
+    runs before every real turn, and — off the critical path, in a background task with no fixed
+    timing relative to the test's own next `await` — `MemoryExtractor` and the short-term window's
+    rolling-summary fold can each add one more. None of their system prompts contain the persona
+    text, so filtering on the same "VaaniOS" marker `test_the_request_carries_a_cacheable_persona_
+    prefix` checks for the real block isolates the mentor's own requests regardless of how many
+    auxiliary calls landed, and regardless of the order background tasks happened to run in.
     """
     return [r for r in llm.requests if r.system and "VaaniOS" in r.system[0].text]
 
@@ -180,7 +182,7 @@ async def test_the_request_carries_a_cacheable_persona_prefix(
     session_id = await _session(client, headers)
     await _turn(client, headers, session_id, "What is KVL?")
 
-    request = llm.last_request
+    request = _mentor_requests(llm)[-1]
     assert request.system[0].cacheable is True
     assert "VaaniOS" in request.system[0].text
     # Nothing per-turn may appear in a cached block.
@@ -230,8 +232,9 @@ async def test_the_configured_effort_and_output_cap_are_applied(
     session_id = await _session(client, headers)
     await _turn(client, headers, session_id, "What is KVL?")
 
-    assert str(llm.last_request.effort) == settings.llm_effort
-    assert llm.last_request.max_output_tokens == settings.llm_max_output_tokens
+    request = _mentor_requests(llm)[-1]
+    assert str(request.effort) == settings.llm_effort
+    assert request.max_output_tokens == settings.llm_max_output_tokens
 
 
 # --- failure and refusal ----------------------------------------------------
