@@ -787,6 +787,82 @@ async def test_a_client_that_never_acks_delays_the_turn_rather_than_hanging_it(
     assert transport.of_type("metrics")
 
 
+class _MeasuringSTT(FakeSTTProvider):
+    """Records how much audio each utterance handed to the recogniser actually contained."""
+
+    def __init__(self, transcript: str) -> None:
+        super().__init__(transcript=transcript)
+        self.utterance_bytes: list[int] = []
+
+    async def transcribe_stream(self, frames, context=None):  # type: ignore[no-untyped-def,override]
+        chunks = [chunk async for chunk in frames]
+        self.utterance_bytes.append(sum(len(chunk) for chunk in chunks))
+
+        async def replay():  # type: ignore[no-untyped-def]
+            for chunk in chunks:
+                yield chunk
+
+        async for event in super().transcribe_stream(replay(), context):
+            yield event
+
+
+async def test_an_interrupting_question_arrives_whole_when_frames_carry_the_next_turn(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """The client's half of the fencing contract (API.md, voice protocol).
+
+    A barge-in bumps turn_id, and frames tagged below it are dropped
+    (test_frames_from_the_interrupted_turn_are_dropped). A client that tags mic audio with the
+    last turn_id it *heard* is therefore always one message behind during a barge-in: everything
+    it sends between the server's bump and its own receipt of the new id — the student's
+    interrupting question — is thrown away. Tagging with turn_id + 1 while the mentor is thinking
+    or speaking is accepted before the bump (>=) and after it (==), so nothing is lost.
+    """
+    student_id, session_id = student_and_session
+    stt = _MeasuringSTT(transcript="Ruko, iska matlab kya hai")
+    transport = RecordingTransport()
+    voice = VoiceSession(
+        student_id=student_id,
+        session_id=session_id,
+        transport=transport,
+        vad=VadGate(
+            ScriptedVoiceDetector(
+                speech_timeline(silence_ms=0, speech_ms=1000, trailing_silence_ms=900)
+            ),
+            VadSettings(),
+        ),
+        stt=stt,
+        tts=FakeTTSProvider(),
+        conversation=ConversationService(
+            llm=FakeLLMProvider([ScriptedTurn(text=ANSWER), ScriptedTurn(text="Achha, suno.")]),
+            messages=MessageRepository(db_session),
+            ledger=UsageLedger(redis_client, settings),
+            settings=settings,
+        ),
+        settings=settings,
+        config=VoiceSessionConfig(ack_grace_ms=0),
+        clock=FakeClock(),
+    )
+    await voice.start()
+    await voice.handle_text(text="Samjhao")
+    assert await _until(lambda: voice.machine.state is TurnState.SPEAKING)
+    speaking_turn = voice.machine.turn_id
+
+    speech_frames, silence_frames = 50, 45  # 1000 ms of question, then 900 ms of quiet
+    for seq in range(speech_frames + silence_frames):
+        pcm = SPEECH_FRAME if seq < speech_frames else SILENT_FRAME
+        await voice.handle_audio(AudioFrame(turn_id=speaking_turn + 1, seq=seq, pcm=pcm))
+        if stt.utterance_bytes:
+            break
+    await voice.close()
+
+    assert "barged_in" in transport.states(), "the question interrupted the mentor"
+    assert stt.utterance_bytes, "the interrupting question reached the recogniser"
+    assert stt.utterance_bytes[0] >= speech_frames * FRAME_BYTES, (
+        "every frame of the question is in the utterance — none fell into the fence"
+    )
+
+
 # --- pre-roll and short utterances -----------------------------------------
 
 

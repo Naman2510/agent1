@@ -558,44 +558,60 @@ played) because that is the only definition the user experiences.
 ## 10. WebSocket protocol
 
 One connection per voice session: `wss://…/v1/voice/ws?session_id=…`, bearer token in the
-`Sec-WebSocket-Protocol` header (never in the query string — it would land in access logs).
+`Sec-WebSocket-Protocol` header as `["bearer", "<access token>"]` (never in the query string — it
+would land in access logs). The server selects `bearer`.
 
 **Token lifetime vs. connection lifetime.** Access tokens live 15 minutes; a tutoring conversation can
-run longer. The connection is authenticated at handshake and remains valid for its duration, with a
-hard cap of 60 minutes and a `session.reauth` control frame the client uses to present a fresh token
-before the cap. A revoked refresh-token family also closes live connections for that user, so
-revocation is not silently deferred for an hour.
+run longer. The connection lives only as long as its newest access token, with a hard cap of 60
+minutes: the client sends `session.reauth` with a fresh token (same user only) whenever it
+refreshes, and the first message after the current token's expiry closes the socket with 1008
+`credential expired`. Revocation therefore reaches live connections: a revoked refresh-token family
+cannot mint the next access token, so its sockets end within one token lifetime rather than an hour.
 
-**Client → server.** Binary frames are raw Int16 LE PCM, 16 kHz, mono, 20 ms (640 bytes), prefixed
-with an 8-byte header `[turn_id:u32][seq:u32]`. Text frames are JSON control messages:
+**Client → server.** Binary frames are Int16 LE PCM, 16 kHz, mono, 20 ms (640 bytes), prefixed with
+an 8-byte big-endian header `[turn_id:u32][seq:u32]`. Text frames are JSON control messages:
 
 | Type | Payload | Purpose |
 |---|---|---|
-| `session.start` | `client_info`, `sample_rate`, `locale_hint` | Negotiate + create `sessions` row |
-| `playback.ack` | `turn_id`, `played_ms` | Feeds `PlaybackTracker` (§5.3) |
+| `playback.ack` | `turn_id`, `played_ms` | Feeds the playback ledger (§5.3) |
 | `user.interrupt` | `turn_id` | Explicit button-press interruption |
-| `user.text` | `text`, `lang?` | Typed fallback path (accessibility, noisy rooms) |
-| `session.reauth` | `access_token` | Extends a long conversation past token expiry |
+| `user.text` | `text` | Typed fallback inside a voice session (accessibility, noisy rooms) |
+| `session.reauth` | `access_token` | Renews the connection past token expiry (above) |
 | `session.end` | — | Graceful close |
+| `session.start` | — | Accepted for compatibility; the session starts at accept |
+
+**Tagging mic frames.** The server drops PCM frames whose `turn_id` is below its current turn, and a
+barge-in advances the turn *before* the client can hear about it. A client that tags frames with the
+last `turn_id` it heard therefore has the start of every interrupting question thrown away. The rule:
+while the mentor is `thinking` or `speaking`, tag frames `turn_id + 1` — accepted before the bump
+(`>=`) and after it (`==`); otherwise tag the current `turn_id`. Pinned by
+`test_an_interrupting_question_arrives_whole_when_frames_carry_the_next_turn`.
+
+**What `played_ms` means.** Cumulative milliseconds of *this turn's* audio that have actually left the
+speaker — derived from the audio clock (net of output latency), never from bytes received, and never
+more than was scheduled. ACK every 200 ms while audio plays, immediately on a flush, and once more
+when playback finishes: the turn stays in `speaking` until the ACKs cover all of its audio (§4.1),
+with a bounded wait for clients that stop ACKing.
 
 **Server → client.**
 
 | Type | Payload | Purpose |
 |---|---|---|
-| `stt.partial` | `text`, `stable_prefix_len`, `lang?` | UI only; explicitly unstable |
-| `stt.final` | `text`, `lang`, `confidence` | Commits the user turn |
+| `ready` | `sample_rate`, `frame_ms`, `tts_sample_rate` | The audio contract, sent at accept |
 | `state` | `state`, `turn_id` | Drives UI + assertions in e2e tests |
-| `agent.activity` | `tool`, `status`, `duration_ms` | Tool transparency panel (spec §4) |
-| `rag.citations` | `[{document, page, section, score}]` | Source inspection (spec §16) |
-| `llm.delta` | `text` | Live transcript of the mentor |
-| `audio` (binary) | `[turn_id][seq]` + Opus/PCM | Playback |
+| `stt.partial` | `text`, `stable_prefix_len`, `language`, `turn_id` | UI only; explicitly unstable |
+| `stt.final` | `text`, `language`, `confidence`, `turn_id` | Commits the user turn |
+| `llm.delta` | `text`, `turn_id` | Live transcript of the mentor |
+| `agent.activity` | `turn_id`, `tools: [{tool_name, ok}]` | Tool transparency (spec §4), sent as the turn finishes |
+| `rag.citations` | `turn_id`, `citations: [{ref, document_title, heading_path, section, page_start, page_end}]` | Source inspection (spec §16) — only sources the answer actually cited |
+| audio (binary) | `[turn_id][seq]` + Int16 LE PCM at `tts_sample_rate` | Playback |
 | `tts.cancel` | `turn_id` | Immediate client flush (§5.2) |
-| `metrics` | stage marks for the turn | Live latency HUD |
-| `error` | `code`, `message`, `recoverable` | Safe, non-leaking error surface |
+| `metrics` | `turn_id`, `latency_ms` | Live latency HUD |
+| `error` | `code`, `message` | Safe, non-leaking error surface |
 
-Fencing: the client discards `audio` frames whose `turn_id` is below its current turn; the server
-discards PCM frames whose `turn_id` is stale. This makes the interruption race testable and closes
-the "ghost audio after cancel" class of bug.
+Fencing: the client discards audio frames from a turn it has flushed; the server discards PCM frames
+whose `turn_id` is stale. This makes the interruption race testable and closes the "ghost audio after
+cancel" class of bug.
 
 Transport choice (WebSocket vs WebRTC) and its consequences: [ADR-0001](adr/0001-transport-websocket-over-webrtc.md).
 

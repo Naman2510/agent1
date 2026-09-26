@@ -4,9 +4,11 @@ Authentication happens at the handshake, via the `Sec-WebSocket-Protocol` header
 browser WebSocket API cannot set `Authorization` and a token in the query string lands in access
 logs (ARCHITECTURE §10). The client offers `["bearer", "<token>"]`; the server selects `bearer`.
 
-The connection is capped at 60 minutes and accepts a `session.reauth` frame so a long tutoring
-conversation can outlive a 15-minute access token without the token itself living longer (Gate 0
-finding M-08).
+The connection lives only as long as its newest access token, and is capped at 60 minutes either
+way. A `session.reauth` frame carrying a fresh token for the same user renews it, so a long
+tutoring conversation can outlive a 15-minute access token without the token itself living longer
+(Gate 0 finding M-08) — and a revoked account, which can no longer refresh, loses its socket
+within one token lifetime.
 """
 
 from __future__ import annotations
@@ -105,6 +107,7 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
     try:
         payload = decode_access_token(settings, token)
         user_id = uuid.UUID(payload["sub"])
+        credential_expires_at = float(payload["exp"])
     except (AppError, KeyError, ValueError):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="invalid credentials")
         return
@@ -192,6 +195,14 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
                 message = await websocket.receive()
                 if message["type"] == "websocket.disconnect":
                     break
+                if time.time() >= credential_expires_at:
+                    # The connection is only as good as its newest token (session.reauth renews
+                    # it). A revoked account cannot refresh, so it is cut off within one token
+                    # lifetime instead of keeping a live socket for the full hour.
+                    await websocket.close(
+                        code=status.WS_1008_POLICY_VIOLATION, reason="credential expired"
+                    )
+                    break
 
                 if (payload_bytes := message.get("bytes")) is not None:
                     if len(payload_bytes) > MAX_AUDIO_MESSAGE_BYTES:
@@ -214,7 +225,14 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
                         continue
                     if control.type == ClientMessage.SESSION_END:
                         break
-                    await _dispatch_control(voice, control, settings=settings, socket=websocket)
+                    if control.type == ClientMessage.SESSION_REAUTH:
+                        renewed = _renewed_expiry(settings, control, user_id)
+                        if renewed is None:
+                            await _fail(websocket, "reauth_failed", "Token rejected.")
+                        else:
+                            credential_expires_at = max(credential_expires_at, renewed)
+                        continue
+                    await _dispatch_control(voice, control, socket=websocket)
 
         except WebSocketDisconnect:
             pass
@@ -231,9 +249,7 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
             )
 
 
-async def _dispatch_control(
-    voice: VoiceSession, control: Any, *, settings: Settings, socket: WebSocket
-) -> None:
+async def _dispatch_control(voice: VoiceSession, control: Any, *, socket: WebSocket) -> None:
     if control.type == ClientMessage.PLAYBACK_ACK:
         await voice.handle_playback_ack(
             turn_id=control.get_int("turn_id"), played_ms=control.get_int("played_ms")
@@ -244,16 +260,21 @@ async def _dispatch_control(
         text = str(control.payload.get("text", ""))[:2000].strip()
         if text:
             await voice.handle_text(text=text)
-    elif control.type == ClientMessage.SESSION_REAUTH:
-        token = str(control.payload.get("access_token", ""))
-        try:
-            decode_access_token(settings, token)
-        except AppError:
-            await _fail(socket, "reauth_failed", "Token rejected.")
     elif control.type == ClientMessage.SESSION_START:
         pass  # already started at accept
     else:
         await _fail(socket, "unknown_control", f"Unsupported control frame {control.type!r}.")
+
+
+def _renewed_expiry(settings: Settings, control: Any, user_id: uuid.UUID) -> float | None:
+    """The expiry a `session.reauth` token grants — only for a valid token for this same user."""
+    try:
+        payload = decode_access_token(settings, str(control.payload.get("access_token", "")))
+        if uuid.UUID(payload["sub"]) != user_id:
+            return None
+        return float(payload["exp"])
+    except (AppError, KeyError, ValueError):
+        return None
 
 
 async def _fail(socket: WebSocket, code: str, message: str) -> None:

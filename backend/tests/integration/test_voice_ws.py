@@ -8,12 +8,14 @@ authentication, frame validation, and the guards that run before `accept`.
 from __future__ import annotations
 
 import json
+import time
 import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.core.security import create_access_token, decode_access_token
 from app.voice.audio import FRAME_BYTES, AudioFrame, bytes_to_ms
 from app.voice.protocol import decode_audio, encode_audio, encode_control
 
@@ -253,3 +255,79 @@ def test_a_zero_voice_allowance_closes_the_connection_before_accept(
     state.settings = state.settings.model_copy(update={"rate_limit_voice_minutes_per_day": 0})
     with pytest.raises(WebSocketDisconnect), _connect(sync_client, session_id, token) as ws:
         ws.receive_text()
+
+
+def _short_lived_token(settings, token: str, ttl_seconds: int = 2) -> tuple[str, float]:  # type: ignore[no-untyped-def]
+    """A token for the same user as `token`, expiring in `ttl_seconds`."""
+    claims = decode_access_token(settings, token)
+    brief, _ = create_access_token(
+        settings.model_copy(update={"access_token_ttl_seconds": ttl_seconds}),
+        user_id=uuid.UUID(claims["sub"]),
+        role=claims["role"],
+        student_id=uuid.UUID(claims["sid"]),
+    )
+    return brief, float(decode_access_token(settings, brief)["exp"])
+
+
+def _sleep_past(epoch_seconds: float) -> None:
+    time.sleep(max(0.0, epoch_seconds - time.time()) + 0.3)
+
+
+def test_a_connection_lasts_only_as_long_as_its_latest_token(
+    sync_client: TestClient, settings
+) -> None:  # type: ignore[no-untyped-def]
+    """Revocation must reach live sockets (ARCHITECTURE §10). A revoked account cannot refresh, so
+    bounding the connection by its newest access token cuts it off within one token lifetime —
+    where before, it kept talking for the full hour."""
+    headers, session_id = _register(sync_client)
+    brief, expires_at = _short_lived_token(settings, headers["Authorization"].split()[1])
+
+    with _connect(sync_client, session_id, brief) as ws:
+        ws.receive_text()
+        ws.receive_text()
+        _sleep_past(expires_at)
+        # A live socket answers an unknown frame with an error; this one must not answer at all.
+        ws.send_text(encode_control("no.such.frame"))
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+    assert closed.value.code == 1008
+    assert closed.value.reason == "credential expired"
+
+
+def test_reauth_with_a_fresh_token_keeps_the_connection_alive(
+    sync_client: TestClient, settings
+) -> None:  # type: ignore[no-untyped-def]
+    headers, session_id = _register(sync_client)
+    fresh = headers["Authorization"].split()[1]
+    brief, expires_at = _short_lived_token(settings, fresh)
+
+    with _connect(sync_client, session_id, brief) as ws:
+        ws.receive_text()
+        ws.receive_text()
+        ws.send_text(encode_control("session.reauth", access_token=fresh))
+        _sleep_past(expires_at)
+        # Still open: an unknown control frame gets an error reply rather than a closed socket.
+        ws.send_text(encode_control("no.such.frame"))
+        assert json.loads(ws.receive_text())["code"] == "unknown_control"
+
+
+def test_another_accounts_token_cannot_extend_a_connection(
+    sync_client: TestClient, settings
+) -> None:  # type: ignore[no-untyped-def]
+    headers, session_id = _register(sync_client)
+    brief, expires_at = _short_lived_token(settings, headers["Authorization"].split()[1])
+    stranger, _ = _register(sync_client, prefix="stranger")
+
+    with _connect(sync_client, session_id, brief) as ws:
+        ws.receive_text()
+        ws.receive_text()
+        ws.send_text(
+            encode_control("session.reauth", access_token=stranger["Authorization"].split()[1])
+        )
+        assert json.loads(ws.receive_text())["code"] == "reauth_failed"
+        _sleep_past(expires_at)
+        # A live socket answers an unknown frame with an error; this one must not answer at all.
+        ws.send_text(encode_control("no.such.frame"))
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+    assert closed.value.reason == "credential expired"
