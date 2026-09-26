@@ -6,7 +6,12 @@ The one property that matters most: a citation the model invents must never surv
 
 from __future__ import annotations
 
-from app.rag.context import build_context, extract_cited_refs, resolve_citations
+from app.rag.context import (
+    build_context,
+    extract_cited_refs,
+    resolve_citations,
+    strip_cited_refs,
+)
 from app.rag.retrieve import RetrievedChunk
 
 
@@ -115,6 +120,23 @@ def test_extract_cited_refs_ignores_non_citation_brackets() -> None:
     # A number in brackets that happens to appear in prose is still extracted — the extractor is
     # deliberately simple; the resolver, not the extractor, is what prevents fabrication.
     assert extract_cited_refs("no citations here") == []
+
+
+def test_markers_are_not_spoken() -> None:
+    """A synthesiser reads "[1]" aloud as a number mid-sentence; the voice path shows sources on
+    screen instead, so speech drops every marker the extractor would find."""
+    assert strip_cited_refs("KVL says loop voltages sum to zero [1].") == (
+        "KVL says loop voltages sum to zero."
+    )
+    assert strip_cited_refs("Both hold [1][2], see [3] and [4].") == "Both hold, see and."
+    assert strip_cited_refs("[1]") == ""
+    assert strip_cited_refs("no markers here") == "no markers here"
+
+
+def test_what_is_not_spoken_is_exactly_what_is_extracted() -> None:
+    text = "One [1]. Two [2] and [1] again. Three[3]."
+    assert extract_cited_refs(strip_cited_refs(text)) == []
+    assert extract_cited_refs(text) == ["[1]", "[2]", "[3]"]
 
 
 def test_citation_format_includes_document_and_page() -> None:

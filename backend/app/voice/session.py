@@ -39,7 +39,7 @@ from app.providers.stt.base import (
     TranscriptionContext,
 )
 from app.providers.tts.base import SynthesisRequest, TTSProvider
-from app.rag.context import Citation
+from app.rag.context import Citation, strip_cited_refs
 from app.services.conversation import ConversationService
 from app.voice import marks as stage
 from app.voice.audio import (
@@ -477,13 +477,17 @@ class VoiceSession:
             )
 
     async def _speak(self, chunk: Chunk) -> None:
-        if not chunk.text.strip():
+        speech = strip_cited_refs(chunk.text).strip()
+        if not speech:
+            # Nothing audible (a chunk that was only a citation marker), but the span is still
+            # part of the answer: skipping it would leave a hole in the record of what was said.
+            self._ledger.begin_chunk(chunk.raw)
             return
         if not self._marks.has(stage.FIRST_SENTENCE):
             self._marks.mark(stage.FIRST_SENTENCE)
 
         request = SynthesisRequest(
-            text=chunk.text,
+            text=speech,
             voice=self._speech_plan.voice,
             sample_rate=self.config.tts_sample_rate,
         )

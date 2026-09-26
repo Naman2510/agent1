@@ -303,7 +303,7 @@ async def test_rag_citations_are_sent_live_when_search_knowledge_finds_something
             ScriptedTurn(text="KVL says loop voltages sum to zero [1]."),
         ]
     )
-    voice, transport, _tts = _build(
+    voice, transport, tts = _build(
         db_session=db_session,
         settings=settings,
         redis_client=redis_client,
@@ -322,6 +322,14 @@ async def test_rag_citations_are_sent_live_when_search_knowledge_finds_something
     citations = transport.of_type("rag.citations")
     assert citations, "the reply cited [1] from a real search_knowledge result"
     assert citations[0]["citations"][0]["document_title"] == "KVL Notes"
+    # Shown, not spoken: the marker never reaches the synthesiser, but stays in the record.
+    assert tts.requests and not any("[1]" in r.text for r in tts.requests)
+    assert "sum to zero." in tts.requests[-1].text
+    await db_session.commit()
+    assistant = next(
+        r for r in await _messages(db_session, session_id) if r.role is MessageRole.ASSISTANT
+    )
+    assert assistant.content == "KVL says loop voltages sum to zero [1]."
 
 
 async def test_a_completed_turn_persists_both_messages_with_stage_marks(

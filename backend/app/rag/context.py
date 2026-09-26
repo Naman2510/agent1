@@ -14,6 +14,7 @@ different material. Scoped to a turn, never persisted as an identifier.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from app.rag.retrieve import RetrievedChunk
@@ -21,6 +22,10 @@ from app.rag.retrieve import RetrievedChunk
 # A voice answer is short by design (the persona forbids long answers), so the context budget is
 # modest — this is a token *ceiling* the assembler enforces, not a target it aims for.
 DEFAULT_MAX_CONTEXT_CHARS = 6000
+
+
+_CITED_REF = re.compile(r"\[(\d+)\]")
+_SPOKEN_REF = re.compile(r"\s*\[\d+\]")
 
 
 @dataclass(frozen=True)
@@ -137,11 +142,16 @@ def extract_cited_refs(text: str) -> list[str]:
     """Pull `[1]`-style references out of the model's answer text, in order of first appearance,
     deduplicated. A tiny, deliberately dumb parser: the format is one the assembler itself defines
     and instructs the model to use, so it does not need to handle arbitrary bracket syntax."""
-    import re
-
     seen: list[str] = []
-    for match in re.finditer(r"\[(\d+)\]", text):
+    for match in _CITED_REF.finditer(text):
         ref = f"[{match.group(1)}]"
         if ref not in seen:
             seen.append(ref)
     return seen
+
+
+def strip_cited_refs(text: str) -> str:
+    """The answer as it is *spoken*: every reference `extract_cited_refs` would find, removed with
+    the space before it, so "sum to zero [1]." is read as "sum to zero." The sources reach the
+    student on screen (the `rag.citations` frame) rather than as numbers read aloud."""
+    return _SPOKEN_REF.sub("", text)
