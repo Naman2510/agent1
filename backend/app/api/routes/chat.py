@@ -15,7 +15,7 @@ import structlog
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import ConversationServiceDep, CurrentUserDep, DbDep, rate_limit_ai
+from app.api.deps import ConversationServiceDep, CurrentUserDep, StreamingDbDep, rate_limit_ai
 from app.core.errors import NotFoundError
 from app.db.repositories.sessions import SessionRepository
 from app.schemas.chat import TextTurnRequest, TurnSummary
@@ -38,7 +38,7 @@ async def create_text_turn(
     payload: TextTurnRequest,
     request: Request,
     current: CurrentUserDep,
-    db: DbDep,
+    db: StreamingDbDep,
     conversation: ConversationServiceDep,
 ) -> StreamingResponse:
     student_id = current.require_student_id()

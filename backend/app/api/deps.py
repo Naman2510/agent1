@@ -53,7 +53,14 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-DbDep = Annotated[AsyncSession, Depends(get_db)]
+# The request's transaction commits in get_db's teardown. FastAPI runs a `yield` dependency's
+# teardown *after* the response by default, which let a client read a 201 before the row existed —
+# and would have reported success for a commit that then failed. "function" scope commits first.
+DbDep = Annotated[AsyncSession, Depends(get_db, scope="function")]
+
+# Only for a streaming response, whose body runs after the handler returns and still needs the
+# session. Such a route must commit inside its stream, before it reports the outcome.
+StreamingDbDep = Annotated[AsyncSession, Depends(get_db, scope="request")]
 
 
 def get_redis(request: Request) -> redis.Redis:
@@ -97,7 +104,7 @@ def get_usage_ledger(request: Request) -> UsageLedger:
 
 def get_conversation_service(
     request: Request,
-    db: DbDep,
+    db: StreamingDbDep,
     settings: SettingsDep,
 ) -> ConversationService:
     llm = get_llm(request)
