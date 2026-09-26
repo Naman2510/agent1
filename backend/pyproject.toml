@@ -18,6 +18,15 @@ dependencies = [
     "pyjwt>=2.10",
     "structlog>=24.4",
     "email-validator>=2.2",
+    # Imported by the running server, not only by evaluation: RAG tokenising, the TF-IDF/SVD
+    # embedder, PDF ingestion, and the Silero VAD on every voice connection. They sat in the `rag`
+    # and `voice-local` extras, so the production image (base install only) could not start.
+    "regex>=2024.5",
+    "scikit-learn>=1.5",
+    "scipy>=1.13",
+    "numpy>=1.26",
+    "pypdf>=5.0",
+    "onnxruntime>=1.20",
 ]
 
 [project.optional-dependencies]
@@ -31,14 +40,13 @@ dev = [
     "mypy>=1.13",
 ]
 # Installed only where evaluation runs; never in the production image (ADR-0015).
-eval = ["jiwer>=3.0", "rank-bm25>=0.2.2", "mlflow>=2.18", "numpy>=1.26"]
+eval = ["jiwer>=3.0", "rank-bm25>=0.2.2", "mlflow>=2.18"]
 # Local voice models for offline evaluation and CI (ADR-0002/0003).
-voice-local = ["faster-whisper>=1.1", "onnxruntime>=1.20"]
-# RAG: TF-IDF/SVD embeddings (ADR-0006 amendment) and PDF parsing (ADR ingest pipeline).
-# rank-bm25 lives here too (not only in "eval"): the retrieval suite's offline BM25
-# comparison is exercised by rag-specific tests, and "pip install -e .[rag]" alone should
-# be enough to run them.
-rag = ["scikit-learn>=1.5", "scipy>=1.13", "pypdf>=5.0", "regex>=2024.5", "rank-bm25>=0.2.2"]
+voice-local = ["faster-whisper>=1.1"]
+# The retrieval suite's offline BM25 baseline (the server never imports rank_bm25), so that
+# "pip install -e .[rag]" alone runs the rag-specific tests. The embedder and PDF parsing are
+# runtime dependencies above.
+rag = ["rank-bm25>=0.2.2"]
 
 [build-system]
 requires = ["setuptools>=75"]

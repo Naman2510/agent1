@@ -1,8 +1,8 @@
 """Voice activity detection (ADR-0004).
 
-Silero v5 via ONNX Runtime is the production detector; a scripted detector drives the state-machine
-tests, because a turn-detection or barge-in test should exercise *our* logic on a deterministic
-timeline rather than depend on an acoustic model's judgement of a fixture.
+Silero (v6.2) via ONNX Runtime is the production detector; a scripted detector drives the
+state-machine tests, because a turn-detection or barge-in test should exercise *our* logic on a
+deterministic timeline rather than depend on an acoustic model's judgement of a fixture.
 
 Hysteresis, and why: entering speech at p>0.5 and leaving at p<0.35 stops a detector that hovers
 near the threshold from emitting a burst of start/end events. `min_speech_ms` is the guard that
@@ -140,12 +140,13 @@ class VadGate:
         return VadDecision(VadEvent.SPEECH_END, probability, spoken)
 
 
-# The trailing samples of the previous window that Silero v5 prepends to each one, at 16 kHz.
+# The trailing samples of the previous window that Silero (v5 onward) prepends to each one, at
+# 16 kHz.
 SILERO_CONTEXT_SAMPLES = 64
 
 
 class SileroVoiceDetector(VoiceDetector):
-    """Silero VAD v5 through ONNX Runtime.
+    """Silero VAD (v6.2, pinned by scripts/fetch_models.sh) through ONNX Runtime.
 
     Measured on this project's CPU-only target: ~3.9 ms per second of audio, i.e. about 0.4% of
     one core in real time — small enough to be irrelevant to the latency budget, which is the
@@ -180,7 +181,7 @@ class SileroVoiceDetector(VoiceDetector):
 
     @property
     def info(self) -> ProviderInfo:
-        return ProviderInfo(kind="vad", name="silero", model="silero_vad_v5.onnx")
+        return ProviderInfo(kind="vad", name="silero", model="silero_vad_v6.2.onnx")
 
     def reset(self) -> None:
         self._state = self._np.zeros((2, 1, 128), dtype=self._np.float32)
@@ -191,10 +192,10 @@ class SileroVoiceDetector(VoiceDetector):
         samples = np.frombuffer(window, dtype=np.int16).astype(np.float32) / 32768.0
         if len(samples) != VAD_WINDOW_SAMPLES:
             raise ValueError(
-                f"Silero v5 requires exactly {VAD_WINDOW_SAMPLES} samples at 16 kHz, "
+                f"Silero requires exactly {VAD_WINDOW_SAMPLES} samples at 16 kHz, "
                 f"got {len(samples)}"
             )
-        # v5 scores each window together with the 64 samples before it. Given the bare window it
+        # Silero scores each window together with the 64 samples before it. Given the bare window it
         # stays near zero even for clear speech (at most 0.13 across a whole spoken sentence, so
         # nothing ever crossed the threshold); tests/unit/test_vad.py pins this with a fixture.
         model_input = np.concatenate([self._context, samples]).reshape(1, -1)

@@ -95,11 +95,15 @@ not a rewrite — see [ADR-0016](docs/adr/0016-provider-abstraction-boundaries.m
 ```bash
 cp .env.example .env
 # set VAANIOS_JWT_SECRET — e.g. openssl rand -base64 48
-docker compose -f infra/compose.yaml up --build
+docker compose --env-file .env -f infra/compose.yaml up --build
 ```
 
-Postgres, Redis, migrations, and the API come up together; the API is on `http://localhost:8000`
-with interactive docs at `/docs` (disabled in production builds).
+(`--env-file` matters: Compose otherwise looks for `.env` next to the compose file, in `infra/`.)
+
+Postgres, Redis, migrations, the API and the web app come up together: the app on
+`http://localhost:3000`, the API on `http://localhost:8000` with interactive docs at `/docs`
+(disabled in production builds). Make an account in the app, then give it the admin role with
+`docker compose --env-file .env -f infra/compose.yaml exec backend python scripts/promote_admin.py you@example.com`.
 
 ```bash
 curl localhost:8000/v1/health   # {"status":"ok",...}
@@ -193,7 +197,7 @@ inspectable citations. Agent tools and memory are Phase 6.
 
 ```bash
 # no API key needed — the deterministic fake provider answers
-VAANIOS_LLM_PROVIDER=fake docker compose -f infra/compose.yaml up --build
+VAANIOS_LLM_PROVIDER=fake docker compose --env-file .env -f infra/compose.yaml up --build
 curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"text":"Kirchhoff ka voltage law samjhao"}'

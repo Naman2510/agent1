@@ -1,8 +1,8 @@
 # Local development stack. Run from the repository root:
 #   docker compose -f infra/compose.yaml up --build
 #
-# Phase 1 brings up postgres, redis, and the backend. The frontend, worker, and MLflow services
-# arrive with the phases that need them (7, 6, 8).
+# postgres, redis, migrations, the backend on :8000 and the frontend on :3000. The worker and
+# MLflow services arrive with the phases that need them.
 
 name: vaanios
 
@@ -60,11 +60,42 @@ services:
       VAANIOS_JWT_SECRET: ${VAANIOS_JWT_SECRET:?set VAANIOS_JWT_SECRET in .env - see .env.example}
       VAANIOS_CORS_ORIGINS: ${VAANIOS_CORS_ORIGINS:-http://localhost:3000}
       VAANIOS_LOG_JSON: ${VAANIOS_LOG_JSON:-true}
+      VAANIOS_LLM_PROVIDER: ${VAANIOS_LLM_PROVIDER:-anthropic}
+      # Read by the Anthropic SDK; a container has no `ant auth login` profile to fall back on.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # The frontend's auth proxy calls the backend on the student's behalf and forwards their
+      # address; uvicorn believes X-Forwarded-For from that one container and nobody else
+      # (docs/SECURITY.md §4).
+      FORWARDED_ALLOW_IPS: 172.28.0.10
     ports: ["8000:8000"]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/docker/frontend.Dockerfile
+      args:
+        # Where the *browser* reaches the backend — baked into the bundle at build time.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    environment:
+      # Where the auth proxy reaches it: over the Compose network, not through the host.
+      VAANIOS_API_URL: http://backend:8000
+    ports: ["3000:3000"]
+    networks:
+      default:
+        ipv4_address: 172.28.0.10
+    depends_on:
+      backend: {condition: service_healthy}
+
+networks:
+  default:
+    ipam:
+      # Fixed so the backend can trust exactly the frontend's address with proxy headers.
+      config:
+        - subnet: 172.28.0.0/24
 
 volumes:
   pgdata:

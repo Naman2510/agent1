@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // A self-contained server for the container image (infra/docker/frontend.Dockerfile).
+  output: "standalone",
 };
 
 export default nextConfig;

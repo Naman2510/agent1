@@ -1,0 +1,17 @@
+# Every build context is the repository root: keep it small, and keep secrets out of it.
+**/.env
+**/.env.*
+!.env.example
+.git
+**/node_modules
+**/.next
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+backend/venv
+backend/models
+backend/*.egg-info
+mlruns
+mlartifacts
+eval_output

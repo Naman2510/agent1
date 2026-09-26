@@ -179,7 +179,7 @@ def _fixture_windows() -> list[bytes]:
 
 @needs_silero
 def test_silero_hears_a_spoken_sentence() -> None:
-    """Silero v5 conditions each window on the 64 samples before it. Fed bare windows — as it was
+    """Silero conditions each window on the 64 samples before it. Fed bare windows — as it was
     until Phase 7 — it scored this sentence at most 0.13, under the 0.5 threshold throughout, so no
     spoken turn could ever begin. Only a test with speech in it could have noticed.
     """
@@ -221,7 +221,7 @@ def test_reset_forgets_the_previous_audio() -> None:
 
 @needs_silero
 def test_silero_requires_its_exact_window_size() -> None:
-    """Silero v5 is fixed at 512 samples for 16 kHz; padding a short window would shift timings."""
+    """Silero is fixed at 512 samples for 16 kHz; padding a short window would shift timings."""
     from app.voice.vad import SileroVoiceDetector
 
     detector = SileroVoiceDetector(SILERO_PATH)

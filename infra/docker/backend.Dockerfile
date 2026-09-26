@@ -14,6 +14,17 @@ COPY backend/app ./app
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir .
 
+# The VAD's weights: the same pinned release and checksum as scripts/fetch_models.sh. Without them
+# every voice connection fails at the handshake.
+ARG SILERO_URL=https://raw.githubusercontent.com/snakers4/silero-vad/v6.2/src/silero_vad/data/silero_vad.onnx
+ARG SILERO_SHA256=1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3
+RUN mkdir -p /build/models && python -c "\
+import hashlib, os, sys, urllib.request; \
+data = urllib.request.urlopen(os.environ['SILERO_URL'], timeout=60).read(); \
+digest = hashlib.sha256(data).hexdigest(); \
+sys.exit(f'silero_vad.onnx checksum mismatch: {digest}') if digest != os.environ['SILERO_SHA256'] \
+else open('/build/models/silero_vad.onnx', 'wb').write(data)"
+
 FROM python:3.11-slim-bookworm AS runtime
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -29,6 +40,7 @@ COPY --chown=vaanios:vaanios backend/app ./app
 COPY --chown=vaanios:vaanios backend/migrations ./migrations
 COPY --chown=vaanios:vaanios backend/alembic.ini ./alembic.ini
 COPY --chown=vaanios:vaanios backend/scripts ./scripts
+COPY --from=builder --chown=vaanios:vaanios /build/models ./models
 
 USER vaanios
 EXPOSE 8000
