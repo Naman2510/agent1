@@ -1,8 +1,10 @@
 # Evaluation Framework
 
-**Status:** Phase 5. **Two suites have run.** The language-identification and retrieval numbers
-below are real, recorded, and reproducible from a committed dataset. Every other table in this
-document is still empty, and stays empty until a recorded run fills it.
+**Status:** Phase 7. **Four suites have run.** The language-identification and retrieval numbers
+below are real, recorded, and reproducible from a committed dataset; so are the agent tool-gating
+and prompt-injection results (§5.1, SECURITY.md §2.1), which run against a scripted model and say
+so. Every other table in this document is still empty, and stays empty until a recorded run fills
+it.
 
 The evaluation subsystem is a first-class component, not a test folder. Its job is to make the
 statement "this change improved the system" falsifiable.
