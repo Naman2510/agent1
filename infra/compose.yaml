@@ -1,5 +1,5 @@
 # Local development stack. Run from the repository root:
-#   docker compose -f infra/compose.yaml up --build
+#   docker compose --env-file .env -f infra/compose.yaml up --build
 #
 # postgres, redis, migrations, the backend on :8000 and the frontend on :3000. The worker and
 # MLflow services arrive with the phases that need them.
@@ -41,6 +41,9 @@ services:
       context: ..
       dockerfile: infra/docker/backend.Dockerfile
     command: ["alembic", "upgrade", "head"]
+    env_file:
+      - path: ../.env
+        required: false
     environment:
       VAANIOS_DATABASE_URL: postgresql+asyncpg://vaanios:${POSTGRES_PASSWORD:-vaanios}@postgres:5432/vaanios
       VAANIOS_REDIS_URL: redis://redis:6379/0
@@ -53,6 +56,12 @@ services:
     build:
       context: ..
       dockerfile: infra/docker/backend.Dockerfile
+    # Every setting .env documents reaches the backend. Before, only the variables listed below
+    # did, so a spend cap or rate limit set in .env silently had no effect. `environment` wins
+    # over the file, which is what points the stores at their containers.
+    env_file:
+      - path: ../.env
+        required: false
     environment:
       VAANIOS_ENVIRONMENT: ${VAANIOS_ENVIRONMENT:-development}
       VAANIOS_DATABASE_URL: postgresql+asyncpg://vaanios:${POSTGRES_PASSWORD:-vaanios}@postgres:5432/vaanios
@@ -96,6 +105,9 @@ networks:
       # Fixed so the backend can trust exactly the frontend's address with proxy headers.
       config:
         - subnet: 172.28.0.0/24
+          # Other containers get addresses from the upper half only, so none can be handed the
+          # frontend's fixed .10 first.
+          ip_range: 172.28.0.128/25
 
 volumes:
   pgdata:
