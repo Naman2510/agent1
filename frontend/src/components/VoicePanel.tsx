@@ -58,9 +58,11 @@ export function VoicePanel({
   const speaking = snapshot.state === "speaking" || snapshot.state === "thinking";
   return (
     <Card className="flex flex-col gap-5">
-      <div className="flex items-center gap-4">
+      {/* On a phone the controls wrap onto their own row; without the wrap they squeezed the
+          status — the one line a student must be able to read — down to nothing. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <StateOrb snapshot={snapshot} />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-40 flex-1">
           <p aria-live="polite" className="font-medium">
             {snapshot.connection === "connecting" ? "Connecting…" : STATE_LABEL[snapshot.state]}
           </p>
