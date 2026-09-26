@@ -53,7 +53,7 @@ def _name(requirement: str) -> str:
     return requirement.strip().lower()
 
 
-def test_the_server_starts_with_only_its_base_dependencies() -> None:
+def test_the_server_starts_with_only_its_base_dependencies(tmp_path: Path) -> None:
     project = tomllib.loads((BACKEND / "pyproject.toml").read_text())["project"]
     base = {_name(r) for r in project["dependencies"]}
     extras_only = {
@@ -64,12 +64,20 @@ def test_the_server_starts_with_only_its_base_dependencies() -> None:
     assert not unmapped, f"add these to IMPORT_NAMES: {sorted(unmapped)}"
 
     blocked = ",".join(sorted(IMPORT_NAMES[name] for name in extras_only))
+    # An empty working directory, so a developer's backend/.env cannot supply settings that CI
+    # lacks. Importing only builds the app; nothing connects, so the stores need not exist.
     result = subprocess.run(  # noqa: S603 - our own interpreter and a constant script
         [sys.executable, "-c", PROBE, blocked],
-        cwd=BACKEND,
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         timeout=120,
-        env={"PATH": "", "VAANIOS_JWT_SECRET": "x" * 48},
+        env={
+            "PATH": "",
+            "PYTHONPATH": str(BACKEND),
+            "VAANIOS_JWT_SECRET": "x" * 48,
+            "VAANIOS_DATABASE_URL": "postgresql+asyncpg://probe:probe@127.0.0.1:1/probe",
+            "VAANIOS_REDIS_URL": "redis://127.0.0.1:1/0",
+        },
     )
     assert result.returncode == 0 and result.stdout.strip() == "ok", result.stderr[-2000:]
