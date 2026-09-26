@@ -177,7 +177,7 @@ jobs:
       - run: npm run build
 
   build:
-    name: Docker build
+    name: Images, the Compose stack, and end-to-end in a browser
     runs-on: ubuntu-latest
     needs: [backend, frontend]
     steps:
@@ -198,3 +198,59 @@ jobs:
             vaanios-backend:ci python -c "import app.asgi; from app.voice.vad import SileroVoiceDetector; SileroVoiceDetector('models/silero_vad.onnx')"
       - name: Build frontend image
         run: docker build -f infra/docker/frontend.Dockerfile -t vaanios-frontend:ci .
+
+      - name: Bring up the stack the way the README does
+        # README "Run it": copy the example, set a secret, compose up. The scripted LLM needs no
+        # key. The per-address limits are raised because every E2E test registers its own student
+        # from this one runner; the limits themselves are tested in the backend suite.
+        run: |
+          cp .env.example .env
+          sed -i \
+            -e "s|^VAANIOS_JWT_SECRET=.*|VAANIOS_JWT_SECRET=$(openssl rand -hex 32)|" \
+            -e "s|^VAANIOS_RATE_LIMIT_ANONYMOUS_PER_MIN=.*|VAANIOS_RATE_LIMIT_ANONYMOUS_PER_MIN=1000|" \
+            -e "s|^VAANIOS_RATE_LIMIT_REFRESH_PER_MIN=.*|VAANIOS_RATE_LIMIT_REFRESH_PER_MIN=1000|" \
+            .env
+          VAANIOS_LLM_PROVIDER=fake docker compose --env-file .env -f infra/compose.yaml up --build --detach
+          for _ in $(seq 60); do
+            if curl -fsS http://localhost:8000/v1/ready | grep -q '"status":"ready"' \
+              && curl -fsS -o /dev/null http://localhost:3000/login; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the stack did not become ready"; exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install the browser
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: End-to-end against the stack
+        # The same suite a developer runs from source, pointed at the shipped images.
+        working-directory: frontend
+        env:
+          E2E_WEB_URL: http://localhost:3000
+          E2E_API_URL: http://localhost:8000
+          E2E_PROMOTE_ADMIN: docker compose --env-file .env -f infra/compose.yaml exec -T backend python scripts/promote_admin.py
+        run: npm run e2e
+
+      - name: Stack logs
+        if: failure()
+        run: docker compose --env-file .env -f infra/compose.yaml logs --no-color --tail 200
+      - name: Keep the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file .env -f infra/compose.yaml down --volumes
