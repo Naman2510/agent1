@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 
 import { Button, Card, ErrorText } from "@/components/ui";
-import { formatMs } from "@/lib/format";
+import { formatMs, toolActivityLabel } from "@/lib/format";
 import { VoiceClient, type TurnDetails, type VoiceSnapshot } from "@/lib/voice/client";
 import type { CitationFrame } from "@/lib/voice/protocol";
 
@@ -15,16 +15,6 @@ const STATE_LABEL: Record<VoiceSnapshot["state"], string> = {
   speaking: "Speaking",
   barged_in: "Stopping…",
   error: "That didn’t work",
-};
-
-const TOOL_LABEL: Record<string, string> = {
-  search_knowledge: "Searched your course material",
-  get_student_progress: "Checked your progress",
-  update_student_progress: "Updated your progress",
-  create_study_plan: "Made a study plan",
-  get_study_plan: "Opened your study plan",
-  generate_quiz: "Made a quiz",
-  retrieve_previous_conversation: "Looked back at an earlier session",
 };
 
 export function VoicePanel({
@@ -178,7 +168,7 @@ function TurnInfo({ details }: { details: TurnDetails }) {
               key={`${tool.tool_name}-${index}`}
               className={`rounded-full px-2.5 py-0.5 text-xs ${tool.ok ? "bg-accent/10 text-accent" : "bg-danger/10 text-danger"}`}
             >
-              {TOOL_LABEL[tool.tool_name] ?? tool.tool_name}
+              {toolActivityLabel(tool.tool_name)}
               {tool.ok ? "" : " (failed)"}
             </li>
           ))}

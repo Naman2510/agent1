@@ -8,6 +8,8 @@
   --muted: #78716c;
   --accent: #0f766e;
   --accent-foreground: #f0fdfa;
+  /* The unfilled part of a meter: a lighter step of the accent ramp, so the whole bar reads. */
+  --accent-track: #99f6e4;
   --danger: #b91c1c;
 }
 
@@ -19,6 +21,7 @@
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent-track: var(--accent-track);
   --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -33,6 +36,7 @@
     --muted: #a8a29e;
     --accent: #2dd4bf;
     --accent-foreground: #042f2e;
+    --accent-track: #115e59;
     --danger: #f87171;
   }
 }

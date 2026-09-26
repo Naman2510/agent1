@@ -7,6 +7,7 @@ interface Settled<T> {
   attempt?: number;
   data?: T;
   error?: unknown;
+  at?: number;
 }
 
 /**
@@ -21,10 +22,12 @@ export function useLoad<T>(load: () => Promise<T>) {
     let active = true;
     load().then(
       (data) => {
-        if (active) setSettled({ load, attempt, data });
+        if (active) setSettled({ load, attempt, data, at: Date.now() });
       },
       (error: unknown) => {
-        if (active) setSettled((previous) => ({ load, attempt, data: previous.data, error }));
+        if (active) {
+          setSettled((previous) => ({ load, attempt, data: previous.data, error, at: previous.at }));
+        }
       },
     );
     return () => {
@@ -34,5 +37,11 @@ export function useLoad<T>(load: () => Promise<T>) {
 
   const loading = settled.load !== load || settled.attempt !== attempt;
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
-  return { data: settled.data, error: loading ? undefined : settled.error, loading, reload };
+  return {
+    data: settled.data,
+    error: loading ? undefined : settled.error,
+    loading,
+    reload,
+    updatedAt: settled.at,
+  };
 }
