@@ -67,3 +67,32 @@ async def test_ai_class_is_stricter_than_the_read_class(
 
     # The student can still read their own history while the expensive path is cooling down.
     assert (await client.get("/sessions", headers=headers)).status_code == 200
+
+
+async def test_token_refresh_does_not_share_the_login_bucket(
+    client: AsyncClient, registered, settings: Settings
+) -> None:  # type: ignore[no-untyped-def]
+    """Refresh needs possession of a 256-bit token, so the credential-stuffing limit buys it
+    nothing — and sharing that 10/min per-IP bucket starved real sessions: the web app refreshes
+    on every page load, and a campus NAT puts a whole hostel behind one address."""
+    _, _, tokens = await registered()
+    payload = {"email": "victim@example.com", "password": "guess-guess-guess"}
+    for _ in range(settings.rate_limit_anonymous_per_min):
+        await client.post("/auth/login", json=payload)
+    assert (await client.post("/auth/login", json=payload)).status_code == 429
+
+    refresh_token = tokens["refresh_token"]
+    for _ in range(settings.rate_limit_anonymous_per_min + 5):
+        response = await client.post("/auth/refresh", json={"refresh_token": refresh_token})
+        assert response.status_code == 200, response.text
+        refresh_token = response.json()["refresh_token"]
+
+
+async def test_token_refresh_still_has_a_ceiling(client: AsyncClient, settings: Settings) -> None:
+    """Separate, not unlimited: each attempt is a database lookup."""
+    statuses = [
+        (await client.post("/auth/refresh", json={"refresh_token": f"not-a-token-{n}"})).status_code
+        for n in range(settings.rate_limit_refresh_per_min + 1)
+    ]
+    assert statuses[-1] == 429
+    assert set(statuses[:-1]) == {401}

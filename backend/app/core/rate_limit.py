@@ -58,6 +58,7 @@ return {allowed, retry_after}
 
 class LimitClass(StrEnum):
     ANONYMOUS = "anon"
+    REFRESH = "refresh"
     AUTHENTICATED = "auth"
     AI = "ai"
 
@@ -77,6 +78,7 @@ class RateLimiter:
     def _capacity(self, limit_class: LimitClass) -> int:
         return {
             LimitClass.ANONYMOUS: self._settings.rate_limit_anonymous_per_min,
+            LimitClass.REFRESH: self._settings.rate_limit_refresh_per_min,
             LimitClass.AUTHENTICATED: self._settings.rate_limit_authenticated_per_min,
             LimitClass.AI: self._settings.rate_limit_ai_per_min,
         }[limit_class]

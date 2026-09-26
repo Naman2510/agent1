@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # --- Rate limiting (SECURITY.md §4) -------------------------------------
     rate_limit_enabled: bool = True
     rate_limit_anonymous_per_min: int = 10
+    # Token refresh, per IP: generous, because refresh proves possession of a 256-bit token and a
+    # campus NAT puts many real sessions behind one address (SECURITY.md §4).
+    rate_limit_refresh_per_min: int = 60
     rate_limit_authenticated_per_min: int = 60
     rate_limit_ai_per_min: int = 6
     rate_limit_voice_minutes_per_day: int = 60

@@ -214,6 +214,11 @@ async def rate_limit_anonymous(request: Request) -> None:
     await _enforce(request, LimitClass.ANONYMOUS, _client_identity(request))
 
 
+async def rate_limit_refresh(request: Request) -> None:
+    """Token refresh: its own per-IP bucket, so it never competes with login attempts."""
+    await _enforce(request, LimitClass.REFRESH, _client_identity(request))
+
+
 async def rate_limit_authenticated(request: Request, current: CurrentUserDep) -> None:
     """For ordinary authenticated reads, keyed by user."""
     await _enforce(request, LimitClass.AUTHENTICATED, str(current.user_id))

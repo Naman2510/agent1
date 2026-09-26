@@ -8,6 +8,7 @@ from app.api.deps import (
     DbDep,
     rate_limit_anonymous,
     rate_limit_authenticated,
+    rate_limit_refresh,
 )
 from app.db.repositories.users import StudentRepository, UserRepository
 from app.schemas.auth import (
@@ -56,7 +57,7 @@ async def login(payload: LoginRequest, request: Request, auth: AuthServiceDep) -
     return TokenResponse(access_token=access, refresh_token=refresh, expires_in=expires_in)
 
 
-@router.post("/refresh", response_model=TokenResponse, dependencies=[Depends(rate_limit_anonymous)])
+@router.post("/refresh", response_model=TokenResponse, dependencies=[Depends(rate_limit_refresh)])
 async def refresh(payload: RefreshRequest, request: Request, auth: AuthServiceDep) -> TokenResponse:
     access, new_refresh, expires_in = await auth.refresh(
         raw_token=payload.refresh_token, user_agent=_user_agent(request)

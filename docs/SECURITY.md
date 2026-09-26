@@ -91,6 +91,7 @@ protect the expensive path:
 | Class | Limit | Rationale |
 |---|---|---|
 | Anonymous (auth, health) | 10 / min / IP | Blunts credential stuffing without blocking a shared campus NAT outright |
+| Token refresh | 60 / min / IP | Its own bucket: refresh proves possession of a 256-bit token, so the stuffing limit buys nothing, and sharing it starved real sessions behind one NAT (the web app refreshes on every page load) |
 | Authenticated read (history, profile) | 60 / min / user | Comfortably above UI needs |
 | AI operations (voice session start, quiz generation, ingestion) | 6 / min / user + 60 voice-minutes / day | These cost real money per call; the daily cap is the actual budget control |
 
