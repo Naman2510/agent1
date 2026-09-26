@@ -108,6 +108,15 @@ class MessageRepository:
         )
         self._session.add(message)
         await self._session.flush()
+        if role is MessageRole.USER:
+            # A student's message is a question asked. Counted here, in the message's own
+            # transaction, so the count cannot disagree with the transcript. Nothing maintained it
+            # before Phase 7, and every session listed "0 questions".
+            await self._session.execute(
+                update(Session)
+                .where(Session.id == session_id)
+                .values(turn_count=Session.turn_count + 1)
+            )
         return message
 
     async def list_for_session(

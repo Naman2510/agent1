@@ -168,6 +168,23 @@ async def test_turn_indices_increment(client: AsyncClient, registered, auth_head
     assert (first["turn_index"], second["turn_index"]) == (0, 1)
 
 
+async def test_the_session_list_counts_the_questions_asked(
+    client: AsyncClient, registered, auth_headers
+) -> None:
+    """Nothing maintained turn_count before Phase 7, so every session listed "0 questions"."""
+    _, _, tokens = await registered()
+    headers = auth_headers(tokens)
+    session_id = await _session(client, headers)
+
+    await _turn(client, headers, session_id, "one")
+    await _turn(client, headers, session_id, "two")
+
+    listed = (await client.get("/sessions", headers=headers)).json()["items"]
+    assert [(s["id"], s["turn_count"]) for s in listed] == [(session_id, 2)]
+    single = (await client.get(f"/sessions/{session_id}", headers=headers)).json()
+    assert single["turn_count"] == 2
+
+
 # --- prompt construction ----------------------------------------------------
 
 
