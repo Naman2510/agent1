@@ -1,9 +1,14 @@
 """Configuration invariants, including the production refusals."""
 
+import os
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
+
+REPO = Path(__file__).resolve().parents[3]
 
 BASE = {
     "database_url": "postgresql+asyncpg://u:p@localhost:5432/db",
@@ -37,9 +42,37 @@ def test_production_refuses_disabled_rate_limiting() -> None:
         Settings(**{**BASE, "environment": "production", "rate_limit_enabled": False})  # type: ignore[arg-type]
 
 
-def test_cors_origins_accept_comma_separated_env_value() -> None:
+def test_cors_origins_accept_a_comma_separated_string() -> None:
     settings = Settings(**{**BASE, "cors_origins": "http://a.test, http://b.test"})  # type: ignore[arg-type]
     assert settings.cors_origins == ["http://a.test", "http://b.test"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("http://localhost:3000", ["http://localhost:3000"]),
+        ("http://a.test, http://b.test", ["http://a.test", "http://b.test"]),
+    ],
+)
+def test_cors_origins_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, value: str, expected: list[str]
+) -> None:
+    """Through the real environment source. Passing the string as a keyword skipped the JSON
+    decoding that source applies to list fields, which rejected both of these values."""
+    monkeypatch.setenv("VAANIOS_CORS_ORIGINS", value)
+    assert Settings(**BASE).cors_origins == expected  # type: ignore[arg-type]
+
+
+def test_the_documented_example_configuration_loads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every value .env.example documents must be one the application accepts. Its CORS line and
+    its empty spend cap both failed to parse, so the documented setup could not start."""
+    for name in list(os.environ):
+        if name.startswith("VAANIOS_"):
+            monkeypatch.delenv(name)
+    # The example deliberately ships without a usable secret.
+    settings = Settings(_env_file=REPO / ".env.example", jwt_secret="x" * 32)  # type: ignore[call-arg]
+    assert settings.cors_origins == ["http://localhost:3000"]
+    assert settings.monthly_spend_cap_usd is None, "an empty cap means no cap"
 
 
 def test_argon2_defaults_meet_owasp_guidance() -> None:

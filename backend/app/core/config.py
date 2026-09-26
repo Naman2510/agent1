@@ -5,10 +5,10 @@ application refuses to start with an insecure one outside development.
 """
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, PostgresDsn, RedisDsn, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["development", "test", "production"]
 
@@ -97,7 +97,10 @@ class Settings(BaseSettings):
     monthly_spend_cap_usd: float | None = None
 
     # --- HTTP ---------------------------------------------------------------
-    cors_origins: list[str] = ["http://localhost:3000"]
+    # NoDecode: pydantic-settings otherwise parses a list from the environment as JSON, so the
+    # plain comma-separated value .env.example documents failed startup before _split_origins
+    # ever ran.
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
     request_timeout_seconds: int = 30
 
     # --- Observability ------------------------------------------------------
@@ -111,6 +114,15 @@ class Settings(BaseSettings):
     def _split_origins(cls, v: object) -> object:
         if isinstance(v, str):
             return [o.strip() for o in v.split(",") if o.strip()]
+        return v
+
+    @field_validator("monthly_spend_cap_usd", mode="before")
+    @classmethod
+    def _empty_cap_is_unset(cls, v: object) -> object:
+        # .env.example documents the cap as an empty assignment; that means "no cap", not a
+        # malformed number that stops the application starting.
+        if isinstance(v, str) and not v.strip():
+            return None
         return v
 
     @model_validator(mode="after")
