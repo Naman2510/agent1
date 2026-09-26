@@ -15,3 +15,7 @@ backend/*.egg-info
 mlruns
 mlartifacts
 eval_output
+**/test-results
+**/playwright-report
+**/blob-report
+frontend/e2e/.generated

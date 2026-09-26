@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# VaaniOS web app
 
-## Getting Started
+The student-facing app and the admin dashboard: Next.js 16 (App Router), React 19, Tailwind 4.
+Pages are client-rendered and talk to the backend directly; the only server code is the auth
+proxy under `src/app/api/auth/`.
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+src/app/               pages: /login, /register, / (sessions), /sessions/[id], /admin
+src/app/api/auth/      login, register, refresh, logout — the auth proxy (below)
+src/components/        the voice panel, the typed panel, transcript, session list, dashboard
+src/lib/api/           typed client for the backend API, with one refresh-and-retry on 401
+src/lib/auth/          the in-memory access token and its refresh schedule; AuthProvider
+src/lib/voice/         the voice socket client, wire protocol and gap-free playback queue
+public/voice-capture-worklet.js   microphone capture: resample to 16 kHz, 20 ms frames
+e2e/                   Playwright end-to-end tests
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Running it
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm ci
+npm run dev          # http://localhost:3000, against the backend on :8000
+npm run lint
+npm run typecheck
+npm test             # unit tests (Vitest)
+npm run build
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The whole stack (database, Redis, backend, this app) comes up with Docker Compose — see the
+repository README.
 
-## Learn More
+| Variable | When | What |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | build time | Where the browser reaches the backend; inlined into the bundle |
+| `VAANIOS_API_URL` | run time | Where the auth proxy reaches it (on Compose, the internal address); defaults to the above |
 
-To learn more about Next.js, take a look at the following resources:
+## How sign-in works
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The backend returns an access token and a refresh token. The access token lives only in memory.
+The refresh token never reaches page script: the auth proxy moves it into an `httpOnly`,
+`SameSite=Strict` cookie scoped to `/api/auth`, and refreshing goes through the proxy. Refreshes
+are serialized across tabs with the Web Locks API, because the backend treats a reused refresh
+token as theft and revokes the whole family. The proxy checks that requests come from this
+origin, and forwards the client's address so per-IP rate limits apply to the student rather than
+to the proxy (docs/SECURITY.md §4).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## End-to-end tests
 
-## Deploy on Vercel
+A real browser (Chromium) against the real backend, PostgreSQL and Redis. The VAD is the real
+Silero model, and the microphone plays recordings of speech, generated from
+`datasets/v1/voice/fixtures/` when the run starts. What is faked is what has no real
+implementation yet or needs a paid key: the STT and TTS (fakes are the only adapters that exist)
+and the LLM (the scripted one), so the tests check the application, not a model.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+They cover: registering, signing in and out, staying signed in across a reload, generic sign-in
+errors, the redirect back after signing in; a typed session end to end; a student opening another
+student's session; a voice session with a typed question, the Stop button, a spoken question and a
+spoken interruption (barge-in), checking what the transcript stores in each case; the admin
+dashboard and who can see it; and every page at phone width.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run e2e
+```
+
+This starts the backend from `../backend` (its virtualenv, `../backend/venv`, or set `E2E_PYTHON`)
+on port 8100 and a production build of this app on 3100, so development servers are left alone.
+It needs what the backend needs: `../backend/.env` pointing at a migrated database, Redis, and the
+VAD weights (`backend/scripts/fetch_models.sh`). If Playwright's Chromium is missing, run
+`npx playwright install chromium`.
+
+To test a stack that is already running instead — CI runs these against the Docker Compose stack,
+so the shipped images are what is tested:
+
+```bash
+E2E_WEB_URL=http://localhost:3000 E2E_API_URL=http://localhost:8000 \
+E2E_PROMOTE_ADMIN="docker compose --env-file .env -f infra/compose.yaml exec -T backend python scripts/promote_admin.py" \
+npm run e2e
+```
+
+`E2E_PROMOTE_ADMIN` is the command that makes an account an admin (run from the repository root).
+Every test registers its own student, so these per-IP limits need raising on the stack under test:
+`VAANIOS_RATE_LIMIT_ANONYMOUS_PER_MIN` and `VAANIOS_RATE_LIMIT_REFRESH_PER_MIN`.
