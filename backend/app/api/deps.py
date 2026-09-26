@@ -185,13 +185,13 @@ AdminDep = Annotated[CurrentUser, Depends(require_admin)]
 
 
 def _client_identity(request: Request) -> str:
-    """Hashed client IP. Raw addresses are personal data and are not stored (SECURITY.md §5)."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    ip = (
-        forwarded.split(",")[0].strip()
-        if forwarded
-        else (request.client.host if request.client else "unknown")
-    )
+    """Hashed client IP. Raw addresses are personal data and are not stored (SECURITY.md §5).
+
+    Never read X-Forwarded-For here: any caller can set it. uvicorn rewrites `request.client`
+    from it only for connections from FORWARDED_ALLOW_IPS, which is the one place that knows
+    which proxies to believe.
+    """
+    ip = request.client.host if request.client else "unknown"
     return hashlib.sha256(ip.encode("utf-8")).hexdigest()[:32]
 
 

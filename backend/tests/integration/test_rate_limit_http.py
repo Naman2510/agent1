@@ -18,6 +18,25 @@ async def test_anonymous_login_attempts_are_throttled(
     assert statuses.count(429) == 1, "exactly the request past the limit should be refused"
 
 
+async def test_a_forged_forwarded_for_header_does_not_buy_a_fresh_bucket(
+    client: AsyncClient, settings: Settings
+) -> None:
+    """X-Forwarded-For is only as honest as whoever set it. Read from any caller, rotating it per
+    request gave every login attempt its own bucket, and the credential-stuffing limit above never
+    engaged. Only a trusted proxy's header counts, and uvicorn already applies exactly that rule
+    to `request.client` (FORWARDED_ALLOW_IPS)."""
+    payload = {"email": "victim@example.com", "password": "guess-guess-guess"}
+    statuses = [
+        (
+            await client.post(
+                "/auth/login", json=payload, headers={"X-Forwarded-For": f"203.0.113.{n}"}
+            )
+        ).status_code
+        for n in range(settings.rate_limit_anonymous_per_min + 1)
+    ]
+    assert statuses[-1] == 429
+
+
 async def test_rate_limited_response_carries_retry_after(
     client: AsyncClient, settings: Settings
 ) -> None:

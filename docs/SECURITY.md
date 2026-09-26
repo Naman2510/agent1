@@ -98,6 +98,12 @@ All limits are configurable, return `429` with `Retry-After`, and are asserted b
 are starting points to be revised once real usage exists; that revision is expected, and recording
 the rationale is the point.
 
+"Per IP" means the peer address uvicorn reports. `X-Forwarded-For` is honoured only from proxies
+listed in `FORWARDED_ALLOW_IPS` (uvicorn's own rule); the application never reads the header
+itself, because any caller can set it — until Phase 7 it did, and rotating the header per request
+gave every login attempt a fresh bucket. A deployment behind a reverse proxy (or the frontend's
+auth proxy) must list that proxy there, or every user shares the proxy's single bucket.
+
 ## 5. Data handling
 
 | Data | Stored where | Retention | Sent to third parties |
