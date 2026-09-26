@@ -1,84 +1,115 @@
-# API Contract (planned)
+# API
 
-**Status:** Phase 0 design. Nothing is implemented. This exists so the surface can be reviewed
-before code, and so the frontend and eval harness can be written against a fixed contract.
+**Status:** Phase 7 — what the backend serves today. The machine-checked contract is
+[`openapi.json`](openapi.json), generated from the code by `backend/scripts/export_openapi.py`;
+`backend/tests/unit/test_openapi_snapshot.py` fails when the two disagree. This page is the human
+summary, and also covers the voice socket, which OpenAPI cannot describe.
 
-Base path `/v1`. JSON, `snake_case` fields, UTC ISO-8601 timestamps, UUID identifiers.
+Until Phase 7 this page was the Phase 0 plan, and had drifted: it listed endpoints that were never
+built, missed ones that were, and described cursor pagination the API never had. Planned endpoints
+are now listed separately, at the end.
+
+Base path `/v1`. JSON with `snake_case` fields, UTC ISO-8601 timestamps and UUID identifiers.
+`/docs` and `/openapi.json` are served outside production.
 
 ## Conventions
 
-Errors are uniform and non-leaking:
+**Errors** are uniform and never leak internals:
 
 ```json
-{"error": {"code": "rate_limited", "message": "Too many requests.", "request_id": "01J…"}}
+{"error": {"code": "rate_limited", "message": "Too many requests.", "request_id": "5d0c…"}}
 ```
 
-`code` is a stable machine string; `message` is safe for display; detail is correlated server-side by
-`request_id`. Statuses: `400` validation, `401` unauthenticated, `403` unauthorized, `404` absent or
-not yours (never distinguished — that would be an enumeration oracle), `409` conflict, `422`
-semantic, `429` rate limited (`Retry-After`), `5xx` generic.
+`code` is stable and machine-readable, `message` is safe to show, and a validation error adds
+`fields`. Detail is logged server-side under `request_id`. Statuses: `401` unauthenticated, `403`
+forbidden, `404` absent *or not yours* (never distinguished — that would confirm another student's
+data exists), `409` conflict, `422` invalid input, `429` rate limited with `Retry-After`, `5xx`
+generic.
 
-Every response carries `X-Request-ID`. Paginated collections use `?limit&cursor` and return
-`{items, next_cursor}`.
+**Request IDs.** Every response carries `X-Request-ID`. A client-supplied one (up to 64
+characters) is echoed so a caller can correlate, and trusted for nothing else.
 
-## Endpoints
+**Authentication.** `Authorization: Bearer <access token>`: a 15-minute JWT. The roles are
+`student` and `admin`, read from the database on every request, so a role change or a disabled
+account takes effect immediately rather than at token expiry.
 
-### Auth
+**Rate limits** (docs/SECURITY.md §4), per class:
+
+| Class | Applies to | Keyed by |
+|---|---|---|
+| anonymous | register, login, logout | client address |
+| refresh | refresh | client address |
+| authenticated | reads, profile, end session, admin dashboard | user |
+| ai | starting a session, a typed turn | user |
+
+**Pagination.** The session list takes `limit` (1–100, default 20) and `offset`, and returns
+`{items, total}`. A transcript takes `limit` (1–500, default 200). No cursors.
+
+## Health
+
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/auth/register` | email, password, display_name → student + profile |
-| POST | `/auth/login` | → access token (15 min) + refresh token |
-| POST | `/auth/refresh` | rotating refresh; reuse revokes the family |
-| POST | `/auth/logout` | revokes the presented refresh token |
-| GET | `/auth/me` | current user + student profile |
+| GET | `/health` | liveness: the process answers |
+| GET | `/ready` | `{status, database, redis}`; `503` when a dependency is down |
 
-### Sessions & conversation
+## Auth
+
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/sessions` | start a session → `session_id`, ws URL |
-| GET | `/sessions` | list own sessions (paginated) |
-| GET | `/sessions/{id}` | session detail with turn count and latency summary |
-| POST | `/sessions/{id}/end` | graceful end |
-| GET | `/sessions/{id}/messages` | transcript incl. `was_interrupted`, citations, tool calls |
-| POST | `/sessions/{id}/messages` | **text** turn (accessibility / noisy-environment fallback); SSE stream |
-| WS | `/voice/ws` | the real-time voice channel — protocol in ARCHITECTURE §10 |
+| POST | `/auth/register` | `email`, `password`, `display_name`, optional `semester` → `201` with tokens; creates the student |
+| POST | `/auth/login` | → `{access_token, refresh_token, token_type, expires_in}`; one generic error for any failure |
+| POST | `/auth/refresh` | `{refresh_token}` → a new pair. Rotating: replaying a used token revokes its whole family |
+| POST | `/auth/logout` | `{refresh_token}` → `204`; revokes it |
+| GET | `/auth/me` | the user, role and student profile |
+| PATCH | `/auth/me/profile` | display name, institution, semester, preferred language, audio-retention consent |
+| DELETE | `/auth/me` | deletes the account and everything that cascades from it → `204` |
 
-### Student
+The web app never hands the refresh token to page script: its own `/api/auth/*` routes hold it in
+an `httpOnly` cookie and call these endpoints on the student's behalf (frontend/README.md).
+
+## Sessions and conversation
+
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/students/me/progress` | topic mastery, weak topics, recent quiz scores |
-| GET | `/students/me/profile` | preferences + memory digest (a student can see their own memory) |
-| PATCH | `/students/me/profile` | preferred language, explanation style, audio-retention consent |
-| DELETE | `/students/me` | account + data erasure (cascade) |
-| GET | `/students/me/study-plans` · `/study-plans/{id}` | plans and items |
-| GET | `/students/me/quizzes` · POST `/quizzes/{id}/attempt` | quiz history and submission |
+| POST | `/sessions` | `{transport: "websocket" \| "text"}` → `201` session |
+| GET | `/sessions` | the student's own sessions, newest first, each with `turn_count` |
+| GET | `/sessions/{id}` | one session |
+| POST | `/sessions/{id}/end` | ends it; idempotent |
+| GET | `/sessions/{id}/messages` | the transcript, in turn order. Each message has `language`, `was_interrupted`, `spoken_prefix_chars` and `latency_ms`; each mentor message also has the `citations` it made and the turn's `tool_activity` |
+| POST | `/sessions/{id}/messages` | a **typed** turn, `{text}` (≤ 2000 characters), answered as server-sent events |
 
-That a student can read *and correct* their own long-term memory is a deliberate design choice: an
-AI that keeps an unexplained private model of a person is a worse product and a worse privacy
-posture.
+A typed turn streams `delta` events (`{text}`), then one `done` event: turn index, stop reason,
+language, latency, estimated cost, token usage, and the answer's `citations` and `tool_activity`.
+A failure after the stream has started arrives as a terminal `error` event (`{code, message}`), since
+the status line has already been sent.
 
-### Documents (admin)
+Stored interrupted answers hold what was heard, not what was generated (docs/ARCHITECTURE.md §5.3).
+
+## Voice
+
+`GET /v1/voice/ws?session_id=<id>` upgrades to a WebSocket. The access token travels in the
+subprotocol list — `["bearer", "<token>"]` — never in the URL, which would land in logs. The
+connection lasts only as long as its newest token: the client renews it with a `session.reauth`
+frame, and the server closes with `1008` once it expires. Frames, states, playback acknowledgements
+and the microphone tagging rule are in [ARCHITECTURE.md §10](ARCHITECTURE.md).
+
+## Admin
+
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/documents` | upload + metadata + **licence** (required) → async ingestion |
-| GET | `/documents` · `/documents/{id}` | listing with `ingest_status` |
-| GET | `/documents/{id}/chunks` | inspect chunking — needed for debugging retrieval |
-| DELETE | `/documents/{id}` | cascade chunk deletion |
+| GET | `/admin/health` | the dashboard's data: live and total counts, tool usage by outcome, average time to first token, mastery overview, memory updates. An average with no samples is the string `"not_measured"`, never `0` |
 
-### Evaluation & experiments (admin)
-| Method | Path | Notes |
+There is deliberately no endpoint that grants the admin role: `backend/scripts/promote_admin.py`,
+run with shell access to the deployment, is the only way (README).
+
+## Planned, not built
+
+Course material is ingested from the command line (`backend/scripts/ingest_sample_corpus.py`), and
+study plans, quizzes and progress exist only as the mentor's tools (ARCHITECTURE §8), not as REST
+endpoints. These were in the Phase 0 plan and have no route today:
+
+| Area | Planned surface | Phase |
 |---|---|---|
-| POST | `/eval/runs` | start a suite run (`suite`, `dataset_version`, `config`) |
-| GET | `/eval/runs` · `/eval/runs/{id}` | runs with summary metrics |
-| GET | `/eval/runs/{id}/results?passed=false` | failure browser |
-| GET | `/experiments` · `/experiments/{id}` | baseline vs. candidate comparison |
-| GET | `/admin/health` | active sessions, error rates, stage failure counts |
-| GET | `/admin/metrics/latency` | aggregates from `messages.latency_ms` |
-
-Eval endpoints are admin-only and separately rate-limited: they are the most expensive endpoints in
-the system and the obvious denial-of-wallet target.
-
-## OpenAPI
-
-FastAPI generates the schema; Phase 1 adds a CI check that the committed `openapi.json` matches the
-code, so this document and the implementation cannot drift silently.
+| Student data | read own progress, profile and memory digest; study plans; quiz history and attempts | unscheduled |
+| Documents (admin) | upload with licence, list, inspect chunks, delete | unscheduled |
+| Evaluation (admin) | start suite runs, browse results and failures, compare experiments | 8 |
