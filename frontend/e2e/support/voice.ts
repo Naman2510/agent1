@@ -49,8 +49,9 @@ export async function startTalking(page: Page): Promise<void> {
   await expect(page.getByText("Microphone on")).toBeVisible();
 }
 
+/** The transcript's entries — its own items, not the tool and source lists inside answers. */
 export const transcript = (page: Page) =>
-  page.getByRole("list", { name: "Transcript" }).getByRole("listitem");
+  page.getByRole("list", { name: "Transcript" }).locator(":scope > li");
 
 /** An answer the student cut off, in the transcript. */
 export const INTERRUPTED = /you interrupted here|Interrupted before any of it played/;

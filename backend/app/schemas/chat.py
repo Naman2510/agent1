@@ -4,6 +4,8 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.sessions import CitationResponse, ToolActivityResponse
+
 
 class TextTurnRequest(BaseModel):
     # Capped: an utterance is one spoken question, and an unbounded body is an unbounded bill.
@@ -29,3 +31,5 @@ class TurnSummary(BaseModel):
     # Derived from published list prices, so it is labelled an estimate wherever it appears.
     estimated_cost_usd: float
     token_usage: dict[str, Any]
+    citations: list[CitationResponse]
+    tool_activity: list[ToolActivityResponse]

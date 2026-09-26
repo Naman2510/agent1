@@ -529,17 +529,7 @@ class VoiceSession:
             await self.transport.send_control(
                 ServerMessage.RAG_CITATIONS,
                 turn_id=self.machine.turn_id,
-                citations=[
-                    {
-                        "ref": c.ref,
-                        "document_title": c.document_title,
-                        "heading_path": c.heading_path,
-                        "section": c.section,
-                        "page_start": c.page_start,
-                        "page_end": c.page_end,
-                    }
-                    for c in citations
-                ],
+                citations=[c.as_dict() for c in citations],
             )
         if self.machine.state is TurnState.SPEAKING:
             self.machine.fire(Trigger.PLAYBACK_DRAINED)

@@ -17,7 +17,7 @@ from app.agent.lang.lexicon import (
     HINDI_ONLY,
 )
 from app.agent.lang.policy import response_directive, select_voice
-from app.agent.lang.router import LanguageState, detect_explicit_request, route
+from app.agent.lang.router import LanguageState, detect_explicit_request, replay, route
 from app.agent.lang.script import Script, profile
 from app.providers.tts.fake import FakeTTSProvider
 
@@ -296,3 +296,20 @@ def test_a_missing_voice_for_a_routed_language_is_reported() -> None:
     english_only = (VOICES[0],)
     plan = select_voice("ta", english_only)
     assert plan.voice_matched_language is False
+
+
+def test_replaying_earlier_utterances_reaches_the_state_a_live_session_would_hold() -> None:
+    """A typed session keeps no router state between requests; replay rebuilds it."""
+    history = ["What is KVL?", "hindi mein samjhao", "ok", "aur KCL?"]
+    state = None
+    for text in history:
+        state = route(text, state).state
+    assert replay(history) == state
+    # The explicit request still holds four turns later, which a fresh state would forget.
+    assert route("thanks", replay(history)).language == "hi"
+    assert route("thanks").language == "en"
+
+
+def test_replaying_nothing_is_a_fresh_session() -> None:
+    assert replay([]) is None
+    assert replay([], LanguageState(sticky="ta")) == LanguageState(sticky="ta")

@@ -1,3 +1,4 @@
+import { SourceList, ToolChips } from "@/components/Provenance";
 import type { Message } from "@/lib/api/types";
 import { formatMs, languageName } from "@/lib/format";
 
@@ -42,6 +43,12 @@ function MessageBubble({ message }: { message: Message }) {
           // What is stored for an interrupted answer is exactly what was heard (the playback
           // ledger's spoken prefix), so the cut shown here is the real one.
           <p className="mt-1 text-xs font-medium opacity-80">— you interrupted here</p>
+        ) : null}
+        {!mine && (message.tool_activity.length > 0 || message.citations.length > 0) ? (
+          <div className="mt-2 flex flex-col gap-2">
+            <ToolChips tools={message.tool_activity} />
+            <SourceList citations={message.citations} />
+          </div>
         ) : null}
         {details.length > 0 ? (
           <p className={`mt-1 text-[11px] ${mine ? "opacity-80" : "text-muted"}`}>

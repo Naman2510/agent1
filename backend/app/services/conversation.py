@@ -426,5 +426,6 @@ class ConversationService:
             unspoken_remainder=result.unspoken_remainder if result.interrupted else None,
             latency_ms=result.latency_ms,
             token_usage=token_usage,
+            citations=[c.as_dict() for c in result.citations],
         )
         return message.id

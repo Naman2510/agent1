@@ -43,6 +43,19 @@ class ToolCallRepository:
         await self._session.flush()
         return row
 
+    async def activity_by_turn(self, session_id: uuid.UUID) -> dict[int, list[tuple[str, bool]]]:
+        """Each turn's calls as (tool name, succeeded), in the order they ran: the same entries
+        the voice socket's agent.activity frame carried live."""
+        result = await self._session.execute(
+            select(ToolCall.turn_index, ToolCall.tool_name, ToolCall.status)
+            .where(ToolCall.session_id == session_id)
+            .order_by(ToolCall.turn_index, ToolCall.created_at, ToolCall.id)
+        )
+        by_turn: dict[int, list[tuple[str, bool]]] = {}
+        for turn_index, tool_name, status in result.all():
+            by_turn.setdefault(turn_index, []).append((tool_name, status is ToolStatus.OK))
+        return by_turn
+
     async def usage_summary(self) -> list[tuple[str, ToolStatus, int]]:
         """Every (tool, outcome) combination ever recorded, with its count — the admin dashboard's
         raw material. Deliberately not opinionated about what counts as a "failure": that

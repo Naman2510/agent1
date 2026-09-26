@@ -24,6 +24,7 @@ which keeps this testable without Redis.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
 from app.agent.lang.hinglish import RomanizedGuess, classify
@@ -134,6 +135,18 @@ def route(text: str, state: LanguageState | None = None) -> LanguageDecision:
     # 4. Not enough evidence. The prior holds — this is the path that stops a "haan" from
     #    redefining the conversation.
     return _sticky(script_profile, current, confidence=guess.confidence, guess=guess)
+
+
+def replay(texts: Iterable[str], state: LanguageState | None = None) -> LanguageState | None:
+    """The state after routing `texts`, oldest first.
+
+    For a caller with nowhere to keep state between turns: a typed session is a series of
+    independent requests. Routing is pure, so replaying the earlier utterances reaches exactly the
+    state a voice session carries in memory.
+    """
+    for text in texts:
+        state = route(text, state).state
+    return state
 
 
 def _immediate(

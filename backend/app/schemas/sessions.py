@@ -23,6 +23,24 @@ class SessionResponse(BaseModel):
     turn_count: int
 
 
+class CitationResponse(BaseModel):
+    """A source an answer cited, as the student was shown it (Citation.as_dict)."""
+
+    ref: str
+    document_title: str
+    heading_path: str | None
+    section: str | None
+    page_start: int | None
+    page_end: int | None
+
+
+class ToolActivityResponse(BaseModel):
+    """A tool the mentor called for an answer, and whether it worked."""
+
+    tool_name: str
+    ok: bool
+
+
 class MessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -36,6 +54,9 @@ class MessageResponse(BaseModel):
     spoken_prefix_chars: int | None
     latency_ms: dict[str, Any]
     created_at: datetime
+    # On the mentor's messages; empty on the student's.
+    citations: list[CitationResponse] = []
+    tool_activity: list[ToolActivityResponse] = []
 
 
 class PaginatedSessions(BaseModel):

@@ -330,6 +330,8 @@ async def test_rag_citations_are_sent_live_when_search_knowledge_finds_something
         r for r in await _messages(db_session, session_id) if r.role is MessageRole.ASSISTANT
     )
     assert assistant.content == "KVL says loop voltages sum to zero [1]."
+    # Kept with the answer as well, so history shows the sources the screen showed live.
+    assert assistant.citations == citations[0]["citations"]
 
 
 async def test_a_completed_turn_persists_both_messages_with_stage_marks(

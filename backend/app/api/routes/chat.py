@@ -15,10 +15,13 @@ import structlog
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
+from app.agent.lang.policy import response_directive
+from app.agent.lang.router import replay, route
 from app.api.deps import ConversationServiceDep, CurrentUserDep, StreamingDbDep, rate_limit_ai
 from app.core.errors import NotFoundError
-from app.db.repositories.sessions import SessionRepository
+from app.db.repositories.sessions import MessageRepository, SessionRepository
 from app.schemas.chat import TextTurnRequest, TurnSummary
+from app.schemas.sessions import CitationResponse, ToolActivityResponse
 
 router = APIRouter(prefix="/sessions", tags=["conversation"])
 log = structlog.get_logger(__name__)
@@ -48,10 +51,20 @@ async def create_text_turn(
         # session exists.
         raise NotFoundError("Session not found.")
 
+    # The same language routing as a spoken turn (ADR-0011): the answer's language and the
+    # label stored with both messages. Without it a typed question in romanized Hindi was
+    # labelled English by its script, and the mentor got no instruction about which to answer in.
+    earlier = await MessageRepository(db).recent_questions(session_id)
+    decision = route(payload.text, replay(earlier))
+
     async def events() -> AsyncIterator[str]:
         try:
             async for fragment, result in conversation.stream_turn(
-                session_id=session_id, student_id=student_id, utterance=payload.text
+                session_id=session_id,
+                student_id=student_id,
+                utterance=payload.text,
+                language=decision.language,
+                language_directive=response_directive(decision.language),
             ):
                 if fragment:
                     yield _sse("delta", {"text": fragment})
@@ -64,6 +77,11 @@ async def create_text_turn(
                         latency_ms=result.latency_ms,
                         estimated_cost_usd=round(result.cost.cost_usd if result.cost else 0.0, 6),
                         token_usage=result.cost.usage.as_dict() if result.cost else {},
+                        citations=[CitationResponse(**c.as_dict()) for c in result.citations],
+                        tool_activity=[
+                            ToolActivityResponse(tool_name=e.tool_name, ok=e.ok)
+                            for e in result.tool_activity
+                        ],
                     )
                     yield _sse("done", summary.model_dump())
             # The DB work for this turn happened inside the service; commit it before the

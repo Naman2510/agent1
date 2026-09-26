@@ -8,16 +8,21 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Message, MessageRole
+from app.agent.lang.policy import response_directive
+from app.db.models import Document, Message, MessageRole
 from app.providers.base import ProviderUnavailableError
 from app.providers.llm.base import LLMRequest, TokenUsage, ToolCall
 from app.providers.llm.fake import FakeLLMProvider, ScriptedTurn
+from app.providers.reranker.base import NoopReranker
+from app.rag.ingest import DocumentMetadata
+from app.rag.service import RagService
 from app.services.conversation import FAILURE_REPLY, REFUSAL_REPLY
 
 
@@ -183,6 +188,129 @@ async def test_the_session_list_counts_the_questions_asked(
     assert [(s["id"], s["turn_count"]) for s in listed] == [(session_id, 2)]
     single = (await client.get(f"/sessions/{session_id}", headers=headers)).json()
     assert single["turn_count"] == 2
+
+
+# --- language -----------------------------------------------------------------
+
+
+async def test_a_typed_question_is_routed_like_a_spoken_one(
+    client: AsyncClient, registered, auth_headers, llm: FakeLLMProvider
+) -> None:
+    """ADR-0011 on the typed path too. It was labelled by script alone, so romanized Hindi was
+    stored as English, and the mentor had no instruction about the language to answer in."""
+    _, _, tokens = await registered()
+    headers = auth_headers(tokens)
+    session_id = await _session(client, headers)
+
+    events = await _turn(client, headers, session_id, "Kirchhoff ka voltage law kya hota hai?")
+    assert events[-1][1]["language"] == "hi-Latn"
+
+    messages = (await client.get(f"/sessions/{session_id}/messages", headers=headers)).json()
+    assert [m["language"] for m in messages] == ["hi-Latn", "hi-Latn"]
+    directive = response_directive("hi-Latn")
+    assert directive is not None
+    system = [block.text for block in _mentor_requests(llm)[-1].system]
+    assert directive in system
+
+
+async def test_an_explicit_language_request_carries_across_typed_turns(
+    client: AsyncClient, registered, auth_headers
+) -> None:
+    """The router's state lives across a voice connection; a typed session rebuilds it from the
+    session's earlier questions, so "hindi mein" still holds on the next request."""
+    _, _, tokens = await registered()
+    headers = auth_headers(tokens)
+    session_id = await _session(client, headers)
+
+    await _turn(client, headers, session_id, "hindi mein samjhao")
+    events = await _turn(client, headers, session_id, "ok")
+    assert events[-1][1]["language"] == "hi"
+
+
+# --- sources and tools ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "llm",
+    [
+        FakeLLMProvider(
+            [
+                ScriptedTurn(text="question"),  # IntentGate.classify
+                ScriptedTurn(
+                    tool_calls=[
+                        ToolCall(id="c1", name="search_knowledge", arguments={"query": "KVL"})
+                    ],
+                    stop_reason="tool_use",
+                ),
+                ScriptedTurn(text="KVL says loop voltages sum to zero [1]."),
+            ]
+        )
+    ],
+)
+async def test_an_answer_keeps_its_sources_and_tools_in_history(
+    client: AsyncClient, registered, auth_headers, app, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """Citations were resolved, sent once over the voice socket and lost: history could not say
+    where an answer came from, and a typed answer never said so at all."""
+    rag = RagService(db_session, embeddings=app.state.embeddings, reranker=NoopReranker())
+    doc = tmp_path / "kvl.md"
+    doc.write_text(
+        "# Unit\n\n## 7.1 KVL\n\nKVL states voltages sum to zero.\n\n"
+        "## 7.2 KCL\n\nKCL states currents sum to zero.\n",
+        encoding="utf-8",
+    )
+    await rag.ingest_file(doc, DocumentMetadata(title="History KVL Notes", subject="EMT"))
+    await db_session.commit()
+    await rag.fit_and_embed_all()
+    await db_session.commit()
+    try:
+        _, _, tokens = await registered()
+        headers = auth_headers(tokens)
+        session_id = await _session(client, headers)
+
+        done = (await _turn(client, headers, session_id, "What is KVL?"))[-1][1]
+        assert [c["document_title"] for c in done["citations"]] == ["History KVL Notes"]
+        assert done["citations"][0]["ref"] == "[1]"
+        assert done["tool_activity"] == [{"tool_name": "search_knowledge", "ok": True}]
+
+        question, answer = (
+            await client.get(f"/sessions/{session_id}/messages", headers=headers)
+        ).json()
+        assert answer["citations"] == done["citations"]
+        assert answer["tool_activity"] == done["tool_activity"]
+        assert (question["citations"], question["tool_activity"]) == ([], [])
+    finally:
+        await db_session.execute(delete(Document).where(Document.title == "History KVL Notes"))
+        await db_session.commit()
+
+
+@pytest.mark.parametrize(
+    "llm",
+    [
+        FakeLLMProvider(
+            [
+                ScriptedTurn(text="question"),  # IntentGate.classify
+                ScriptedTurn(
+                    tool_calls=[ToolCall(id="g1", name="ghost", arguments={})],
+                    stop_reason="tool_use",
+                ),
+                ScriptedTurn(text="I could not check that."),
+            ]
+        )
+    ],
+)
+async def test_history_shows_a_refused_tool_call_as_failed(
+    client: AsyncClient, registered, auth_headers
+) -> None:
+    _, _, tokens = await registered()
+    headers = auth_headers(tokens)
+    session_id = await _session(client, headers)
+
+    done = (await _turn(client, headers, session_id, "What is KVL?"))[-1][1]
+    assert done["tool_activity"] == [{"tool_name": "ghost", "ok": False}]
+    answer = (await client.get(f"/sessions/{session_id}/messages", headers=headers)).json()[1]
+    assert answer["tool_activity"] == [{"tool_name": "ghost", "ok": False}]
+    assert answer["citations"] == []
 
 
 # --- prompt construction ----------------------------------------------------

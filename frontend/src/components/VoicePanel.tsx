@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 
+import { SourceList, ToolChips } from "@/components/Provenance";
 import { Button, Card, ErrorText } from "@/components/ui";
-import { formatMs, toolActivityLabel } from "@/lib/format";
+import { formatMs } from "@/lib/format";
 import { VoiceClient, type TurnDetails, type VoiceSnapshot } from "@/lib/voice/client";
-import type { CitationFrame } from "@/lib/voice/protocol";
 
 const STATE_LABEL: Record<VoiceSnapshot["state"], string> = {
   idle: "Connecting…",
@@ -163,32 +163,8 @@ function TurnInfo({ details }: { details: TurnDetails }) {
 
   return (
     <div className="flex flex-col gap-3 border-t border-border pt-4 text-sm">
-      {details.tools.length > 0 ? (
-        <ul className="flex flex-wrap gap-2" aria-label="What the mentor did">
-          {details.tools.map((tool, index) => (
-            <li
-              key={`${tool.tool_name}-${index}`}
-              className={`rounded-full px-2.5 py-0.5 text-xs ${tool.ok ? "bg-accent/10 text-accent" : "bg-danger/10 text-danger"}`}
-            >
-              {toolActivityLabel(tool.tool_name)}
-              {tool.ok ? "" : " (failed)"}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {details.citations.length > 0 ? (
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted">Sources</p>
-          <ol className="mt-1 flex flex-col gap-1">
-            {details.citations.map((citation) => (
-              <li key={citation.ref}>
-                <span className="font-mono text-xs text-muted">{citation.ref}</span>{" "}
-                {describeCitation(citation)}
-              </li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
+      <ToolChips tools={details.tools} />
+      <SourceList citations={details.citations} />
       {stages.length > 0 ? (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted sm:grid-cols-4">
           {stages.map(([label, ms]) => (
@@ -201,17 +177,6 @@ function TurnInfo({ details }: { details: TurnDetails }) {
       ) : null}
     </div>
   );
-}
-
-function describeCitation(citation: CitationFrame): string {
-  const where = citation.heading_path ?? citation.section;
-  const pages =
-    citation.page_start === null
-      ? null
-      : citation.page_end !== null && citation.page_end !== citation.page_start
-        ? `pp. ${citation.page_start}–${citation.page_end}`
-        : `p. ${citation.page_start}`;
-  return [citation.document_title, where, pages].filter(Boolean).join(" — ");
 }
 
 export function TypedQuestion({

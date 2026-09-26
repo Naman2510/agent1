@@ -50,6 +50,17 @@ class Citation:
     page_start: int | None
     page_end: int | None
 
+    def as_dict(self) -> dict[str, str | int | None]:
+        """The wire and storage form: the rag.citations frame, messages.citations, the SSE event."""
+        return {
+            "ref": self.ref,
+            "document_title": self.document_title,
+            "heading_path": self.heading_path,
+            "section": self.section,
+            "page_start": self.page_start,
+            "page_end": self.page_end,
+        }
+
     def format(self) -> str:
         """Human-readable form for spec §16's citation display."""
         parts = [self.document_title]

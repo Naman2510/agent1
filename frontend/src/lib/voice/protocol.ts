@@ -1,6 +1,8 @@
 // The voice socket's wire format (docs/ARCHITECTURE.md §10). Binary frames carry audio behind an
 // 8-byte big-endian header [turn_id:u32][seq:u32]; text frames carry JSON control messages.
 
+import type { Citation } from "@/lib/api/types";
+
 export const HEADER_BYTES = 8;
 
 export type TurnState =
@@ -12,14 +14,8 @@ export type TurnState =
   | "barged_in"
   | "error";
 
-export interface CitationFrame {
-  ref: string;
-  document_title: string;
-  heading_path: string | null;
-  section: string | null;
-  page_start: number | null;
-  page_end: number | null;
-}
+/** The rag.citations frame carries the same shape the API stores with the answer. */
+export type CitationFrame = Citation;
 
 export type ServerFrame =
   | { type: "ready"; sample_rate: number; frame_ms: number; tts_sample_rate: number }

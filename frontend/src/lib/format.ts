@@ -1,3 +1,5 @@
+import type { Citation } from "@/lib/api/types";
+
 const LANGUAGES: Record<string, string> = {
   en: "English",
   hi: "Hindi",
@@ -49,4 +51,16 @@ export const toolName = (tool: string) => TOOLS[tool]?.name ?? tool;
 /** Stat-tile figures: exact below 10,000 (1,284), compact above (12.9K). */
 export function formatCount(value: number): string {
   return new Intl.NumberFormat(undefined, value < 10_000 ? {} : { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+/** "KVL Notes — Unit 7 › 7.1 KVL — p. 12": the document, where in it, and the pages, if known. */
+export function describeCitation(citation: Citation): string {
+  const where = citation.heading_path ?? citation.section;
+  const pages =
+    citation.page_start === null
+      ? null
+      : citation.page_end !== null && citation.page_end !== citation.page_start
+        ? `pp. ${citation.page_start}–${citation.page_end}`
+        : `p. ${citation.page_start}`;
+  return [citation.document_title, where, pages].filter(Boolean).join(" — ");
 }

@@ -39,6 +39,22 @@ export interface PaginatedSessions {
   total: number;
 }
 
+/** A source an answer cited, as the student was shown it. */
+export interface Citation {
+  ref: string;
+  document_title: string;
+  heading_path: string | null;
+  section: string | null;
+  page_start: number | null;
+  page_end: number | null;
+}
+
+/** A tool the mentor called for an answer, and whether it worked. */
+export interface ToolActivity {
+  tool_name: string;
+  ok: boolean;
+}
+
 export interface Message {
   id: string;
   turn_index: number;
@@ -50,6 +66,9 @@ export interface Message {
   spoken_prefix_chars: number | null;
   latency_ms: Record<string, number>;
   created_at: string;
+  /** On the mentor's messages; empty on the student's. */
+  citations: Citation[];
+  tool_activity: ToolActivity[];
 }
 
 export interface TurnSummary {
@@ -60,6 +79,8 @@ export interface TurnSummary {
   latency_ms: Record<string, number>;
   estimated_cost_usd: number;
   token_usage: Record<string, unknown>;
+  citations: Citation[];
+  tool_activity: ToolActivity[];
 }
 
 export interface LatencyStats {

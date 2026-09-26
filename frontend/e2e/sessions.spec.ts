@@ -30,6 +30,53 @@ test("a typed question streams an answer, and both are kept", async ({ page }) =
   await expect(row).toContainText("ended");
 });
 
+test("an answer in the history shows the tools it used and the sources it cited", async ({
+  page,
+}) => {
+  await register(page, newStudent("sources"));
+  await startSession(page, "Type instead");
+  await page.getByLabel("Ask your question").fill(QUESTION);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(transcript(page)).toHaveCount(2);
+
+  // The scripted LLM never calls a tool, so its answer has no sources. Add them to the real stored
+  // answer on its way to the page, in the shape the backend's tests pin
+  // (backend/tests/integration/test_chat_turn.py): this checks the rendering, not the retrieval.
+  await page.route(/\/v1\/sessions\/[0-9a-f-]+\/messages/, async (route) => {
+    const response = await route.fetch();
+    const messages = (await response.json()) as Record<string, unknown>[];
+    messages[1] = {
+      ...messages[1],
+      tool_activity: [
+        { tool_name: "search_knowledge", ok: true },
+        { tool_name: "get_student_progress", ok: false },
+      ],
+      citations: [
+        {
+          ref: "[1]",
+          document_title: "KVL Notes",
+          heading_path: "Unit 7 › 7.1 KVL",
+          section: "7.1",
+          page_start: 12,
+          page_end: 13,
+        },
+      ],
+    };
+    await route.fulfill({ response, json: messages });
+  });
+  await page.reload();
+
+  const answer = transcript(page).nth(1);
+  await expect(answer.getByRole("list", { name: "Sources" })).toHaveText(
+    "[1] KVL Notes — Unit 7 › 7.1 KVL — pp. 12–13",
+  );
+  const tools = answer.getByRole("list", { name: "What the mentor did" });
+  await expect(tools).toContainText("Searched your course material");
+  await expect(tools).toContainText("Checked your progress (failed)");
+  // The student's own message carries neither.
+  await expect(transcript(page).nth(0).getByRole("list")).toHaveCount(0);
+});
+
 test("a student cannot open another student's session", async ({ page, browser }) => {
   await register(page, newStudent("owner"));
   await startSession(page, "Type instead");

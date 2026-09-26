@@ -10,13 +10,15 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import CurrentUserDep, DbDep, rate_limit_ai, rate_limit_authenticated
 from app.core.errors import NotFoundError
-from app.db.models import SessionStatus
+from app.db.models import MessageRole, SessionStatus
 from app.db.repositories.sessions import MessageRepository, SessionRepository
+from app.db.repositories.tool_calls import ToolCallRepository
 from app.schemas.sessions import (
     MessageResponse,
     PaginatedSessions,
     SessionCreateRequest,
     SessionResponse,
+    ToolActivityResponse,
 )
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -102,4 +104,14 @@ async def list_messages(
     if await SessionRepository(db).get_for_student(session_id, student_id) is None:
         raise NotFoundError("Session not found.")
     rows = await MessageRepository(db).list_for_session(session_id, limit=limit)
-    return [MessageResponse.model_validate(r) for r in rows]
+    activity = await ToolCallRepository(db).activity_by_turn(session_id)
+    messages = []
+    for row in rows:
+        message = MessageResponse.model_validate(row)
+        if row.role is MessageRole.ASSISTANT:
+            message.tool_activity = [
+                ToolActivityResponse(tool_name=name, ok=ok)
+                for name, ok in activity.get(row.turn_index, [])
+            ]
+        messages.append(message)
+    return messages

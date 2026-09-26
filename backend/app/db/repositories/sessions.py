@@ -92,6 +92,7 @@ class MessageRepository:
         unspoken_remainder: str | None = None,
         latency_ms: dict[str, Any] | None = None,
         token_usage: dict[str, Any] | None = None,
+        citations: list[dict[str, Any]] | None = None,
     ) -> Message:
         message = Message(
             session_id=session_id,
@@ -105,6 +106,7 @@ class MessageRepository:
             unspoken_remainder=unspoken_remainder,
             latency_ms=latency_ms or {},
             token_usage=token_usage,
+            citations=citations or [],
         )
         self._session.add(message)
         await self._session.flush()
@@ -129,6 +131,16 @@ class MessageRepository:
             .limit(limit)
         )
         return result.scalars().all()
+
+    async def recent_questions(self, session_id: uuid.UUID, *, limit: int = 50) -> list[str]:
+        """The student's last `limit` messages in this session, oldest first."""
+        result = await self._session.execute(
+            select(Message.content)
+            .where(Message.session_id == session_id, Message.role == MessageRole.USER)
+            .order_by(Message.turn_index.desc())
+            .limit(limit)
+        )
+        return list(reversed(result.scalars().all()))
 
     async def next_turn_index(self, session_id: uuid.UUID) -> int:
         result = await self._session.execute(

@@ -205,6 +205,11 @@ class Message(Base):
     audio_ref: Mapped[str | None] = mapped_column(Text)
     token_usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     latency_ms: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    # The sources an answer cited, as shown to the student at the time (Citation.as_dict), so
+    # history shows them too. A snapshot rather than chunk ids: a document can be re-ingested.
+    citations: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
     created_at: Mapped[datetime] = created_at_column()
 
     __table_args__ = (
@@ -240,7 +245,11 @@ class ToolCall(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = created_at_column()
 
-    __table_args__ = (Index("ix_tool_calls_name_status", "tool_name", "status", "created_at"),)
+    __table_args__ = (
+        Index("ix_tool_calls_name_status", "tool_name", "status", "created_at"),
+        # A session's calls, for its history; also what a cascading session delete scans.
+        Index("ix_tool_calls_session_turn", "session_id", "turn_index"),
+    )
 
 
 class AuditLog(Base):
