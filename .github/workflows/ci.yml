@@ -34,6 +34,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,rag]"
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: backend/models
+          key: models-${{ hashFiles('backend/scripts/fetch_models.sh') }}
+      - name: Fetch model weights
+        # Pinned and checksummed. Without them the tests that run the real VAD cannot run, and
+        # CI never exercised the detector production uses (tests/unit/test_vad.py fails, not
+        # skips, when CI is set).
+        run: bash backend/scripts/fetch_models.sh
       - name: Lint and types
         working-directory: backend
         run: |
@@ -63,7 +73,7 @@ jobs:
           POSTGRES_DB: vaanios_test
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U vaanios"
+          --health-cmd "pg_isready -U vaanios -d vaanios_test"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
@@ -82,6 +92,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,rag]"
+
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: backend/models
+          key: models-${{ hashFiles('backend/scripts/fetch_models.sh') }}
+      - name: Fetch model weights
+        # Pinned and checksummed. Without them the tests that run the real VAD cannot run, and
+        # CI never exercised the detector production uses (tests/unit/test_vad.py fails, not
+        # skips, when CI is set).
+        run: bash backend/scripts/fetch_models.sh
 
       - name: Test
         working-directory: backend
@@ -167,11 +188,13 @@ jobs:
         run: |
           uid=$(docker run --rm vaanios-backend:ci id -u)
           test "$uid" != "0" || { echo "container runs as root"; exit 1; }
-      - name: Image can actually start the server and the voice path
-        # Building is not starting: until Phase 7 this image built fine and could not import the
-        # app (runtime packages lived in extras), and it shipped without the VAD's weights.
+      - name: Image starts with the documented configuration, and loads the VAD
+        # Building is not starting: until Phase 7 this image built fine but could not import the
+        # app (runtime packages lived in extras), shipped without the VAD's weights, and could not
+        # parse the CORS line of .env.example. So: the example configuration, the app, the VAD.
         run: |
-          docker run --rm -e VAANIOS_JWT_SECRET=ci-secret-that-is-at-least-32-characters \
+          docker run --rm --env-file .env.example \
+            -e VAANIOS_JWT_SECRET=ci-secret-that-is-at-least-32-characters \
             vaanios-backend:ci python -c "import app.asgi; from app.voice.vad import SileroVoiceDetector; SileroVoiceDetector('models/silero_vad.onnx')"
       - name: Build frontend image
         run: docker build -f infra/docker/frontend.Dockerfile -t vaanios-frontend:ci .

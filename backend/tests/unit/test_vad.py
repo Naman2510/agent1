@@ -9,6 +9,7 @@ substitute for tuning on human voices (DATASET.md); it is enough to prove the de
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -121,8 +122,10 @@ def test_multiple_utterances_in_one_session() -> None:
 # --- the real detector ------------------------------------------------------
 
 
+# CI fetches the pinned weights, so there an absent file is a broken pipeline and these tests fail
+# rather than skip: skipped, they left the detector production runs untested in CI.
 needs_silero = pytest.mark.skipif(
-    not SILERO_PATH.exists(),
+    not SILERO_PATH.exists() and not os.environ.get("CI"),
     reason="Silero weights absent; run scripts/fetch_models.sh",
 )
 
@@ -258,7 +261,6 @@ def test_silero_stays_well_inside_the_latency_budget() -> None:
     )
 
 
-@needs_silero
 def test_a_missing_model_file_fails_loudly() -> None:
     """A silent downgrade to something that cannot tell speech from a fan is the worse failure."""
     from app.voice.vad import SileroVoiceDetector
