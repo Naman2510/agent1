@@ -21,7 +21,7 @@ import asyncio
 import contextlib
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -29,6 +29,7 @@ import structlog
 
 from app.agent.lang.policy import SpeechPlan, response_directive, select_voice
 from app.agent.lang.router import LanguageDecision, LanguageState, route
+from app.agent.orchestrator import ToolActivityEntry
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.providers.stt.base import (
@@ -38,6 +39,7 @@ from app.providers.stt.base import (
     TranscriptionContext,
 )
 from app.providers.tts.base import SynthesisRequest, TTSProvider
+from app.rag.context import Citation
 from app.services.conversation import ConversationService
 from app.voice import marks as stage
 from app.voice.audio import (
@@ -47,7 +49,7 @@ from app.voice.audio import (
     WindowAssembler,
     bytes_to_ms,
 )
-from app.voice.chunker import SentenceChunker
+from app.voice.chunker import Chunk, SentenceChunker
 from app.voice.marks import TurnMarks
 from app.voice.playback import PlaybackLedger
 from app.voice.protocol import ServerMessage
@@ -77,14 +79,16 @@ class _LedgerDelivery:
 
     ledger: PlaybackLedger
     pending_text: Callable[[], str]
+    settle_playback: Callable[[], Awaitable[None]]
 
     def delivered(self) -> str:
         return self.ledger.spoken_prefix()
 
     def remainder(self) -> str:
-        # Note: the ledger works in chunked text, which the chunker has stripped, so this is the
-        # answer *as spoken* rather than byte-identical to the raw generation.
         return self.ledger.unspoken_remainder() + self.pending_text()
+
+    async def settle(self) -> None:
+        await self.settle_playback()
 
 
 # Short acknowledgements are agreement, not interruption, and not questions (R-08). Matched
@@ -132,6 +136,10 @@ class VoiceSessionConfig:
     # How long to wait for the client's final playback ACK before resolving the ledger. Short:
     # the student is already talking, and a stale prefix is better than a stalled session.
     ack_grace_ms: int = 150
+    # After the last audio is sent, the turn stays open for the unplayed audio's own duration plus
+    # this, waiting for ACKs to show it was heard. Covers the client's jitter buffer, the ACK
+    # interval and network delay; a client that never ACKs costs this delay, never a hang.
+    playback_drain_grace_ms: int = 1500
     max_utterance_ms: int = 30_000
     tts_sample_rate: int = 24_000
 
@@ -156,7 +164,8 @@ class VoiceSession:
         self._utterance = bytearray()
         self._capturing = False
         self._turn_task: asyncio.Task[None] | None = None
-        self._ledger = PlaybackLedger()
+        self._ledger = PlaybackLedger(sample_rate=self.config.tts_sample_rate)
+        self._playback_progress = asyncio.Event()
         self._marks = TurnMarks(clock=self.clock)
         self._chunker = SentenceChunker()
         self._detector = TurnDetector(min_silence_ms=self.vad.settings.min_silence_ms)
@@ -362,10 +371,14 @@ class VoiceSession:
     # --- the turn ----------------------------------------------------------
 
     async def _run_turn(self, *, utterance: str, language: str, reason: str) -> None:
-        self._ledger = PlaybackLedger()
+        self._ledger = PlaybackLedger(sample_rate=self.config.tts_sample_rate)
         self._chunker.reset()
         self._audio_seq = 0
-        delivery = _LedgerDelivery(ledger=self._ledger, pending_text=lambda: self._chunker.pending)
+        delivery = _LedgerDelivery(
+            ledger=self._ledger,
+            pending_text=lambda: self._chunker.pending,
+            settle_playback=self._settle_playback,
+        )
 
         stream = self.conversation.stream_turn(
             session_id=self.session_id,
@@ -384,12 +397,13 @@ class VoiceSession:
                         ServerMessage.LLM_DELTA, text=fragment, turn_id=self.machine.turn_id
                     )
                     for chunk in self._chunker.push(fragment):
-                        await self._speak(chunk.text)
+                        await self._speak(chunk)
                 elif result is not None:
-                    tail = self._chunker.flush()
-                    if tail is not None:
-                        await self._speak(tail.text)
-                    await self._finish_turn(result_marks=result.latency_ms)
+                    await self._finish_turn(
+                        result_marks=result.latency_ms,
+                        tool_activity=result.tool_activity,
+                        citations=result.citations,
+                    )
         except asyncio.CancelledError:
             # Barge-in. The ledger already holds what was heard; _barge_in does the accounting.
             raise
@@ -428,20 +442,54 @@ class VoiceSession:
             with contextlib.suppress(Exception):
                 await stream.aclose()
 
-    async def _speak(self, text: str) -> None:
-        if not text.strip():
+    async def _settle_playback(self) -> None:
+        """Speak what is left, then stay in SPEAKING until the student has heard it.
+
+        ARCHITECTURE §4.1 leaves SPEAKING on *playback drained*, not on the last byte sent.
+        Synthesis runs ahead of real time, so the tail of an answer is still playing after the
+        server has finished with it; a student who interrupts that tail is interrupting, and must
+        get a `tts.cancel` and a record of only what they heard. Cancellation (barge-in) lands in
+        the wait below and unwinds through the conversation service's interruption path.
+        """
+        tail = self._chunker.flush()
+        if tail is not None:
+            await self._speak(tail)
+        if self._ledger.total_audio_ms == 0:
+            return
+
+        unplayed_ms = self._ledger.total_audio_ms - self._ledger.played_ms
+        budget_s = (unplayed_ms + self.config.playback_drain_grace_ms) / 1000
+        try:
+            async with asyncio.timeout(budget_s):
+                while not self._ledger.fully_played():
+                    self._playback_progress.clear()
+                    await self._playback_progress.wait()
+        except TimeoutError:
+            # No interruption arrived, so nothing suggests the answer went unheard — only that the
+            # ACKs stopped. Treated as delivered; the alternative stores a truncated answer the
+            # mentor would then contradict itself against.
+            log.warning(
+                "voice.playback_unconfirmed",
+                session_id=str(self.session_id),
+                turn_id=self.machine.turn_id,
+                played_ms=self._ledger.played_ms,
+                total_audio_ms=self._ledger.total_audio_ms,
+            )
+
+    async def _speak(self, chunk: Chunk) -> None:
+        if not chunk.text.strip():
             return
         if not self._marks.has(stage.FIRST_SENTENCE):
             self._marks.mark(stage.FIRST_SENTENCE)
 
         request = SynthesisRequest(
-            text=text,
+            text=chunk.text,
             voice=self._speech_plan.voice,
             sample_rate=self.config.tts_sample_rate,
         )
         # Registered before synthesis starts: if the student interrupts mid-chunk, this text must
         # still appear in the record — as heard, partly heard, or unheard.
-        self._ledger.begin_chunk(text)
+        self._ledger.begin_chunk(chunk.raw)
         async for audio in self.tts.synthesize_stream(request):
             if not self._marks.has(stage.TTS_FIRST_BYTE):
                 self._marks.mark(stage.TTS_FIRST_BYTE)
@@ -453,12 +501,42 @@ class VoiceSession:
             self._audio_seq += 1
             self._ledger.extend_chunk(len(audio))
 
-    async def _finish_turn(self, *, result_marks: dict[str, int]) -> None:
+    async def _finish_turn(
+        self,
+        *,
+        result_marks: dict[str, int],
+        tool_activity: tuple[ToolActivityEntry, ...] = (),
+        citations: list[Citation] | None = None,
+    ) -> None:
         self._marks.mark(stage.PLAYBACK_DRAINED)
         durations = {**result_marks, **self._marks.durations_ms()}
         await self.transport.send_control(
             ServerMessage.METRICS, turn_id=self.machine.turn_id, latency_ms=durations
         )
+        # Sent before the state-transition below, which is what bumps turn_id — these describe
+        # the turn that just finished, the same convention METRICS above already follows.
+        if tool_activity:
+            await self.transport.send_control(
+                ServerMessage.AGENT_ACTIVITY,
+                turn_id=self.machine.turn_id,
+                tools=[{"tool_name": entry.tool_name, "ok": entry.ok} for entry in tool_activity],
+            )
+        if citations:
+            await self.transport.send_control(
+                ServerMessage.RAG_CITATIONS,
+                turn_id=self.machine.turn_id,
+                citations=[
+                    {
+                        "ref": c.ref,
+                        "document_title": c.document_title,
+                        "heading_path": c.heading_path,
+                        "section": c.section,
+                        "page_start": c.page_start,
+                        "page_end": c.page_end,
+                    }
+                    for c in citations
+                ],
+            )
         if self.machine.state is TurnState.SPEAKING:
             self.machine.fire(Trigger.PLAYBACK_DRAINED)
         elif self.machine.can(Trigger.CANCELLED):
@@ -539,6 +617,7 @@ class VoiceSession:
         if played_ms > 0 and not self._marks.has(stage.FIRST_AUDIO_PLAYED):
             self._marks.mark(stage.FIRST_AUDIO_PLAYED)
         self._ledger.acknowledge(played_ms)
+        self._playback_progress.set()
 
     async def handle_user_interrupt(self, *, turn_id: int) -> None:
         """An explicit stop (a button, not the voice). Same path as a detected barge-in."""

@@ -10,21 +10,30 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
+import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.intent import IntentGate
+from app.agent.tools.registry import DEFAULT_REGISTRY
 from app.core.config import Settings
 from app.db.models import Message, MessageRole, Session, Student, User
 from app.db.repositories.sessions import MessageRepository
+from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
+from app.providers.llm.base import ToolCall
 from app.providers.llm.fake import FakeLLMProvider, ScriptedTurn
+from app.providers.reranker.base import NoopReranker
 from app.providers.stt.fake import FakeSTTProvider
 from app.providers.tts.fake import FakeTTSProvider
+from app.rag.ingest import DocumentMetadata
+from app.rag.service import RagService
 from app.services.conversation import ConversationService
 from app.services.usage import UsageLedger
-from app.voice.audio import FRAME_BYTES, AudioFrame
+from app.voice.audio import FRAME_BYTES, AudioFrame, bytes_to_ms
 from app.voice.protocol import ServerMessage
 from app.voice.session import VoiceSession, VoiceSessionConfig
 from app.voice.state import TurnState
@@ -36,16 +45,35 @@ SILENT_FRAME = b"\x00" * FRAME_BYTES
 
 @dataclass
 class RecordingTransport:
-    """Captures everything the session sends, and can replay playback ACKs."""
+    """Captures everything the session sends.
+
+    With `listener` set it also plays the part of a conforming client: each audio frame is
+    "played" the moment it arrives and acknowledged cumulatively, as ARCHITECTURE §5.3 requires.
+    Barge-in tests leave it unset and ACK by hand, to control exactly what was heard.
+    """
 
     control: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     audio: list[tuple[int, int, int]] = field(default_factory=list)  # turn_id, seq, bytes
+    listener: VoiceSession | None = None
+    _acks: set[asyncio.Task[None]] = field(default_factory=set)
 
     async def send_control(self, message_type: ServerMessage | str, **payload: Any) -> None:
         self.control.append((str(message_type), payload))
 
     async def send_audio(self, turn_id: int, seq: int, pcm: bytes) -> None:
         self.audio.append((turn_id, seq, len(pcm)))
+        if self.listener is not None:
+            # Scheduled rather than awaited: a real ACK comes back over the network, after the send.
+            task = asyncio.create_task(self.ack(self.listener, turn_id))
+            self._acks.add(task)
+            task.add_done_callback(self._acks.discard)
+
+    def received_ms(self, turn_id: int, sample_rate: int) -> int:
+        return bytes_to_ms(sum(n for tid, _, n in self.audio if tid == turn_id), sample_rate)
+
+    async def ack(self, voice: VoiceSession, turn_id: int) -> None:
+        played_ms = self.received_ms(turn_id, voice.config.tts_sample_rate)
+        await voice.handle_playback_ack(turn_id=turn_id, played_ms=played_ms)
 
     def types(self) -> list[str]:
         return [name for name, _ in self.control]
@@ -100,9 +128,15 @@ def _build(
     llm: FakeLLMProvider | None = None,
     transcript: str = "Kirchhoff ka voltage law samjhao",
     clock: FakeClock | None = None,
+    tool_registry: Any = None,
+    intent_gate: Any = None,
+    rag: Any = None,
+    acking: bool = True,
+    tts: FakeTTSProvider | None = None,
+    config: VoiceSessionConfig | None = None,
 ) -> tuple[VoiceSession, RecordingTransport, FakeTTSProvider]:
     transport = RecordingTransport()
-    tts = FakeTTSProvider()
+    tts = tts or FakeTTSProvider()
     voice = VoiceSession(
         student_id=student_id,
         session_id=session_id,
@@ -115,11 +149,17 @@ def _build(
             messages=MessageRepository(db_session),
             ledger=UsageLedger(redis_client, settings),
             settings=settings,
+            db=db_session if tool_registry is not None else None,
+            tool_registry=tool_registry,
+            intent_gate=intent_gate,
+            rag=rag,
         ),
         settings=settings,
-        config=VoiceSessionConfig(ack_grace_ms=0),
+        config=config or VoiceSessionConfig(ack_grace_ms=0),
         clock=clock or FakeClock(),
     )
+    if acking:
+        transport.listener = voice
     return voice, transport, tts
 
 
@@ -199,6 +239,89 @@ async def test_a_mid_turn_failure_reaches_the_client_as_an_error_frame_not_silen
     assert states[-1] == "listening", "the session must recover, not stay stuck in error"
     assert not transport.of_type("llm.delta"), "the LLM was never reached"
     assert not transport.of_type("metrics"), "no turn metrics exist for a turn that never ran"
+
+
+async def test_agent_activity_is_sent_live_when_a_tool_runs(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """ARCHITECTURE §10's `agent.activity` frame, wired end to end: previously declared in the
+    protocol enum but never emitted from anywhere (see PHASE_7_AUDIT.md)."""
+    student_id, session_id = student_and_session
+    search_call = ToolCall(id="c1", name="search_knowledge", arguments={"query": "KVL"})
+    llm = FakeLLMProvider(
+        [
+            ScriptedTurn(text="question"),  # IntentGate.classify
+            ScriptedTurn(tool_calls=[search_call], stop_reason="tool_use"),
+            ScriptedTurn(text="KVL says loop voltages sum to zero."),
+        ]
+    )
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=speech_timeline(silence_ms=64, speech_ms=800, trailing_silence_ms=800),
+        llm=llm,
+        tool_registry=DEFAULT_REGISTRY,
+        intent_gate=IntentGate(llm),
+        rag=RagService(db_session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker()),
+    )
+    await voice.start()
+    await _feed(voice, 90)
+    await voice.wait_for_turn()
+
+    activity = transport.of_type("agent.activity")
+    assert activity, "a tool ran this turn; the client must be told live"
+    assert activity[0]["tools"] == [{"tool_name": "search_knowledge", "ok": True}]
+    assert activity[0]["turn_id"] == 0
+
+
+async def test_rag_citations_are_sent_live_when_search_knowledge_finds_something(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session, tmp_path: Path
+) -> None:  # type: ignore[no-untyped-def]
+    """ARCHITECTURE §10's `rag.citations` frame — the same "declared, never emitted" gap as
+    agent.activity, closed the same way."""
+    student_id, session_id = student_and_session
+    rag = RagService(db_session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker())
+    doc = tmp_path / "kvl.md"
+    doc.write_text(
+        "# Unit\n\n## 7.1 KVL\n\nKVL states voltages sum to zero.\n\n"
+        "## 7.2 KCL\n\nKCL states currents sum to zero.\n",
+        encoding="utf-8",
+    )
+    await rag.ingest_file(doc, DocumentMetadata(title="KVL Notes", subject="EMT"))
+    await db_session.commit()
+    await rag.fit_and_embed_all()
+    await db_session.commit()
+
+    search_call = ToolCall(id="c1", name="search_knowledge", arguments={"query": "KVL"})
+    llm = FakeLLMProvider(
+        [
+            ScriptedTurn(text="question"),
+            ScriptedTurn(tool_calls=[search_call], stop_reason="tool_use"),
+            ScriptedTurn(text="KVL says loop voltages sum to zero [1]."),
+        ]
+    )
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=speech_timeline(silence_ms=64, speech_ms=800, trailing_silence_ms=800),
+        llm=llm,
+        tool_registry=DEFAULT_REGISTRY,
+        intent_gate=IntentGate(llm),
+        rag=rag,
+    )
+    await voice.start()
+    await _feed(voice, 90)
+    await voice.wait_for_turn()
+
+    citations = transport.of_type("rag.citations")
+    assert citations, "the reply cited [1] from a real search_knowledge result"
+    assert citations[0]["citations"][0]["document_title"] == "KVL Notes"
 
 
 async def test_a_completed_turn_persists_both_messages_with_stage_marks(
@@ -308,6 +431,14 @@ async def _until(predicate, budget_s: float = 2.0) -> bool:  # type: ignore[no-u
             return True
         await asyncio.sleep(0)
     return False
+
+
+async def _play_out(voice: VoiceSession, transport: RecordingTransport) -> None:
+    """Be the client that plays everything it is sent, until the turn completes."""
+    while voice._turn_task is not None and not voice._turn_task.done():
+        await transport.ack(voice, voice.machine.turn_id)
+        await asyncio.sleep(0)
+    await voice.wait_for_turn()
 
 
 ANSWER = "Pehla hissa yahan hai. Doosra hissa yahan hai. Teesra hissa bhi yahan hai."
@@ -501,7 +632,8 @@ async def test_an_interrupt_for_the_wrong_turn_is_ignored(
 
     await voice.handle_user_interrupt(turn_id=voice.machine.turn_id + 5)
     assert not transport.of_type("tts.cancel")
-    await voice.wait_for_turn()
+    await _play_out(voice, transport)
+    assert voice.machine.state is TurnState.LISTENING
 
 
 async def test_barge_in_is_inert_when_the_mentor_is_not_speaking(
@@ -522,6 +654,129 @@ async def test_barge_in_is_inert_when_the_mentor_is_not_speaking(
     await voice._barge_in()
     assert voice.machine.state is TurnState.LISTENING
     assert not transport.of_type("tts.cancel")
+
+
+# --- completion: a turn ends when the student has heard it ------------------
+
+
+async def test_a_completed_turn_stores_the_whole_answer_not_a_snapshot_of_playback(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """Nobody interrupted, so the answer was heard in full and is stored in full.
+
+    The voice path used to store whatever the ledger said had played at the moment *generation*
+    ended — an empty string before the first ACK, a truncated answer after it — while marking the
+    turn uninterrupted and discarding the rest. The next turn's context then lacked the mentor's
+    own reply (PHASE_7_AUDIT D7-03).
+    """
+    student_id, session_id = student_and_session
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=[0.01] * 100,
+        llm=FakeLLMProvider([ScriptedTurn(text=ANSWER)]),
+    )
+    await voice.start()
+    with structlog.testing.capture_logs() as logs:
+        await voice.handle_text(text="Samjhao")
+        await voice.wait_for_turn()
+    await db_session.commit()
+
+    assistant = next(
+        r for r in await _messages(db_session, session_id) if r.role is MessageRole.ASSISTANT
+    )
+    assert assistant.content == ANSWER
+    assert assistant.was_interrupted is False
+    assert assistant.unspoken_remainder is None
+    assert transport.states()[-1] == "listening"
+    # Drained because the ACKs covered every millisecond, not because the deadline passed: the
+    # ledger and the client must agree on what a millisecond of this audio is.
+    assert not any(entry["event"] == "voice.playback_unconfirmed" for entry in logs)
+
+
+async def test_the_tail_of_an_answer_is_still_interruptible_after_generation_ends(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """ARCHITECTURE §4.1: SPEAKING ends when playback drains, not when the last byte is sent.
+
+    Synthesis outruns real time, so the end of an answer is still playing after the server has
+    finished generating and sending it. An interruption there must still flush the client and
+    store only what was heard. The session used to be back in LISTENING by then: the barge-in was
+    ignored and the mentor talked over the student (PHASE_7_AUDIT D7-04).
+    """
+    student_id, session_id = student_and_session
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=[0.01] * 100,
+        llm=FakeLLMProvider([ScriptedTurn(text=ANSWER)]),
+        acking=False,  # this test decides what was heard
+    )
+    await voice.start()
+    await voice.handle_text(text="Samjhao")
+
+    # The fake synthesiser never yields mid-chunk, so once the last sentence is in the ledger its
+    # audio has all been sent. Then give the turn every chance to finish without the client.
+    assert await _until(lambda: voice._ledger.text.endswith("bhi yahan hai."))
+    await asyncio.sleep(0.05)
+    assert voice.machine.state is TurnState.SPEAKING, "the student is still hearing the answer"
+    assert not transport.of_type("metrics"), "the turn must not be reported finished yet"
+
+    await voice.handle_playback_ack(
+        turn_id=voice.machine.turn_id, played_ms=voice._ledger.total_audio_ms // 2
+    )
+    interrupted_turn = voice.machine.turn_id
+    await voice._barge_in()
+    await db_session.commit()
+
+    assert transport.of_type("tts.cancel")[-1]["turn_id"] == interrupted_turn
+    stored = [r for r in await _messages(db_session, session_id) if r.was_interrupted]
+    assert len(stored) == 1
+    heard = stored[0]
+    assert heard.content, "half the audio was played"
+    assert heard.content != ANSWER
+    assert ANSWER.startswith(heard.content)
+    assert heard.spoken_prefix_chars == len(heard.content)
+    assert heard.unspoken_remainder, "the unheard tail is kept for debugging"
+
+
+async def test_a_client_that_never_acks_delays_the_turn_rather_than_hanging_it(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """The drain wait is bounded by the audio's own duration plus a grace. Past that, nothing
+    interrupted the answer, so it counts as delivered, and the gap is visible in telemetry."""
+    student_id, session_id = student_and_session
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=[0.01] * 100,
+        acking=False,
+        tts=FakeTTSProvider(chars_per_second=500.0),  # ~80 ms of audio
+        config=VoiceSessionConfig(ack_grace_ms=0, playback_drain_grace_ms=50),
+    )
+    await voice.start()
+    with structlog.testing.capture_logs() as logs:
+        await voice.handle_text(text="Samjhao")
+        await asyncio.wait_for(voice.wait_for_turn(), timeout=5)
+    await db_session.commit()
+
+    assert voice.machine.state is TurnState.LISTENING
+    assert any(entry["event"] == "voice.playback_unconfirmed" for entry in logs)
+    assistant = next(
+        r for r in await _messages(db_session, session_id) if r.role is MessageRole.ASSISTANT
+    )
+    assert assistant.content == "Loop ka sum zero hota hai."
+    assert assistant.was_interrupted is False
+    assert transport.of_type("metrics")
 
 
 # --- pre-roll and short utterances -----------------------------------------
@@ -560,6 +815,7 @@ async def test_the_utterance_keeps_its_onset_via_the_pre_roll_buffer(
         config=VoiceSessionConfig(pre_roll_ms=500, ack_grace_ms=0),
         clock=FakeClock(),
     )
+    transport.listener = voice
     await voice.start()
     await _feed(voice, 90)
     await voice.wait_for_turn()
@@ -711,6 +967,7 @@ async def test_mid_conversation_language_switching_preserves_context(
         config=VoiceSessionConfig(ack_grace_ms=0),
         clock=FakeClock(),
     )
+    transport.listener = voice
     await voice.start()
 
     turns = [
@@ -747,10 +1004,11 @@ async def test_the_response_directive_changes_per_turn_without_touching_the_cach
     """The directive is volatile, so it must sit after the cache breakpoints (ARCHITECTURE §8.5)."""
     student_id, session_id = student_and_session
     llm = FakeLLMProvider([ScriptedTurn(text="Reply.")] * 4)
+    transport = RecordingTransport()
     voice = VoiceSession(
         student_id=student_id,
         session_id=session_id,
-        transport=RecordingTransport(),
+        transport=transport,
         vad=VadGate(ScriptedVoiceDetector([0.01] * 200), VadSettings()),
         stt=FakeSTTProvider(),
         tts=FakeTTSProvider(),
@@ -764,6 +1022,7 @@ async def test_the_response_directive_changes_per_turn_without_touching_the_cach
         config=VoiceSessionConfig(ack_grace_ms=0),
         clock=FakeClock(),
     )
+    transport.listener = voice
     await voice.start()
 
     await voice.handle_text(text="Explain mesh analysis in detail please")
@@ -792,10 +1051,11 @@ async def test_the_selected_voice_follows_the_routed_language(
 ) -> None:  # type: ignore[no-untyped-def]
     student_id, session_id = student_and_session
     tts = FakeTTSProvider()
+    transport = RecordingTransport()
     voice = VoiceSession(
         student_id=student_id,
         session_id=session_id,
-        transport=RecordingTransport(),
+        transport=transport,
         vad=VadGate(ScriptedVoiceDetector([0.01] * 200), VadSettings()),
         stt=FakeSTTProvider(),
         tts=tts,
@@ -809,6 +1069,7 @@ async def test_the_selected_voice_follows_the_routed_language(
         config=VoiceSessionConfig(ack_grace_ms=0),
         clock=FakeClock(),
     )
+    transport.listener = voice
     await voice.start()
 
     await voice.handle_text(text="Explain mesh analysis in detail please")

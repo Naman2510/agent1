@@ -59,6 +59,10 @@ class Chunk:
     text: str
     index: int
     reason: str  # terminal | clause | max_wait | flush
+    # The exact span of the stream this chunk accounts for, including the whitespace stripped from
+    # `text` for synthesis. Consecutive raws concatenate back to the generated text, so a record of
+    # what was heard can be a true prefix of what was said rather than sentences glued together.
+    raw: str
 
 
 class SentenceChunker:
@@ -79,11 +83,13 @@ class SentenceChunker:
         self._min_chunk_chars = min_chunk_chars
         self._max_chunk_chars = max_chunk_chars
         self._buffer = ""
+        # Whitespace consumed after the last chunk; it belongs to the next chunk's raw span.
+        self._gap = ""
         self._emitted = 0
 
     @property
     def pending(self) -> str:
-        return self._buffer
+        return self._gap + self._buffer
 
     @property
     def emitted(self) -> int:
@@ -105,13 +111,16 @@ class SentenceChunker:
         text = self._buffer.strip()
         if not text:
             return None
+        raw = self._gap + self._buffer
         self._buffer = ""
-        chunk = Chunk(text=text, index=self._emitted, reason=reason)
+        self._gap = ""
+        chunk = Chunk(text=text, index=self._emitted, reason=reason, raw=raw)
         self._emitted += 1
         return chunk
 
     def reset(self) -> None:
         self._buffer = ""
+        self._gap = ""
         self._emitted = 0
 
     # --- internals ---------------------------------------------------------
@@ -121,8 +130,11 @@ class SentenceChunker:
         if cut is None:
             return None
         text, reason = cut
-        self._buffer = self._buffer[len(text) :].lstrip()
-        chunk = Chunk(text=text.strip(), index=self._emitted, reason=reason)
+        raw = self._gap + text
+        rest = self._buffer[len(text) :]
+        self._buffer = rest.lstrip()
+        self._gap = rest[: len(rest) - len(self._buffer)]
+        chunk = Chunk(text=text.strip(), index=self._emitted, reason=reason, raw=raw)
         self._emitted += 1
         return chunk
 

@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.intent import IntentGate
 from app.agent.language import script_of
 from app.agent.memory_extractor import MemoryExtractor
-from app.agent.orchestrator import run_agent_turn
+from app.agent.orchestrator import ToolActivityEntry, run_agent_turn
 from app.agent.prompts import PROMPT_VERSION, assemble
 from app.agent.tools.base import ToolContext
 from app.agent.tools.registry import ToolRegistry
@@ -75,6 +75,14 @@ class DeliveryTracker(Protocol):
 
     def remainder(self) -> str: ...
 
+    async def settle(self) -> None:
+        """Return once the listener has received everything generated.
+
+        Generation ending is not the turn ending: the student is still hearing the answer, and an
+        interruption now is still an interruption (ARCHITECTURE §4.1, "playback drained").
+        """
+        ...
+
 
 @dataclass
 class TurnResult:
@@ -95,6 +103,10 @@ class TurnResult:
     # Resolved against this turn's own retrieved sources only (spec §16) — empty unless the tool
     # loop ran and at least one search_knowledge call actually found something.
     citations: list[Citation] = field(default_factory=list)
+    # Empty unless the tool loop ran (ARCHITECTURE §10's `agent.activity`) — every tool this turn
+    # actually executed, in call order, coarsely ok/not-ok. The voice path surfaces this live;
+    # the full per-call detail (arguments, exact status, duration) is the `tool_calls` audit row.
+    tool_activity: tuple[ToolActivityEntry, ...] = ()
 
 
 class ConversationService:
@@ -228,90 +240,104 @@ class ConversationService:
         # runs); stays empty, and therefore never triggers citation resolution, on the plain path.
         citation_sources: dict[str, RetrievedChunk] = {}
 
-        try:
-            if self._tool_registry is not None and self._db is not None and self._rag is not None:
-                tool_ctx = ToolContext(
-                    student_id=student_id,
-                    session_id=session_id,
-                    turn_index=turn_index,
-                    db=self._db,
-                    rag=self._rag,
-                    citation_sources=citation_sources,
-                )
-                async for fragment, outcome in run_agent_turn(
-                    llm=self._llm,
-                    system=prompt.system,
-                    initial_messages=prompt.messages,
-                    registry=self._tool_registry,
-                    allowed_tool_names=allowed_tools,
-                    tool_ctx=tool_ctx,
-                    max_output_tokens=self._settings.llm_max_output_tokens,
-                    effort=Effort(self._settings.llm_effort),
-                ):
-                    if outcome is not None:
-                        usage = outcome.usage
-                        model = outcome.model
-                        result.stop_reason = outcome.stop_reason
-                    elif fragment:
-                        if first_token_at is None:
-                            first_token_at = time.perf_counter()
-                        chunks.append(fragment)
-                        yield fragment, None
-            else:
-                request = LLMRequest(
-                    system=prompt.system,
-                    messages=prompt.messages,
-                    max_output_tokens=self._settings.llm_max_output_tokens,
-                    effort=Effort(self._settings.llm_effort),
-                )
-                async for event in self._llm.stream(request):
-                    if isinstance(event, TextDelta):
-                        if first_token_at is None:
-                            first_token_at = time.perf_counter()
-                        chunks.append(event.text)
-                        yield event.text, None
-                    elif isinstance(event, ToolCallDelta):
-                        # No tools were offered on this path, so this means the model invented one.
-                        log.warning("conversation.unexpected_tool_call", tool=event.call.name)
-                    elif isinstance(event, StreamCompleted):
-                        usage = event.usage
-                        model = event.model
-                        result.stop_reason = event.stop_reason
-                        result.cache_breakpoint_ineffective = event.cache_breakpoint_ineffective
+        settled = False
 
-            if result.stop_reason == "refusal" and not chunks:
-                # A decline must still produce something the mentor can say; an empty turn would
-                # read as the system having hung.
-                chunks.append(REFUSAL_REPLY)
-                yield REFUSAL_REPLY, None
+        try:
+            try:
+                if (
+                    self._tool_registry is not None
+                    and self._db is not None
+                    and self._rag is not None
+                ):
+                    tool_ctx = ToolContext(
+                        student_id=student_id,
+                        session_id=session_id,
+                        turn_index=turn_index,
+                        db=self._db,
+                        rag=self._rag,
+                        citation_sources=citation_sources,
+                    )
+                    async for fragment, outcome in run_agent_turn(
+                        llm=self._llm,
+                        system=prompt.system,
+                        initial_messages=prompt.messages,
+                        registry=self._tool_registry,
+                        allowed_tool_names=allowed_tools,
+                        tool_ctx=tool_ctx,
+                        max_output_tokens=self._settings.llm_max_output_tokens,
+                        effort=Effort(self._settings.llm_effort),
+                    ):
+                        if outcome is not None:
+                            usage = outcome.usage
+                            model = outcome.model
+                            result.stop_reason = outcome.stop_reason
+                            result.tool_activity = outcome.tool_activity
+                        elif fragment:
+                            if first_token_at is None:
+                                first_token_at = time.perf_counter()
+                            chunks.append(fragment)
+                            yield fragment, None
+                else:
+                    request = LLMRequest(
+                        system=prompt.system,
+                        messages=prompt.messages,
+                        max_output_tokens=self._settings.llm_max_output_tokens,
+                        effort=Effort(self._settings.llm_effort),
+                    )
+                    async for event in self._llm.stream(request):
+                        if isinstance(event, TextDelta):
+                            if first_token_at is None:
+                                first_token_at = time.perf_counter()
+                            chunks.append(event.text)
+                            yield event.text, None
+                        elif isinstance(event, ToolCallDelta):
+                            # No tools were offered on this path: the model invented one.
+                            log.warning("conversation.unexpected_tool_call", tool=event.call.name)
+                        elif isinstance(event, StreamCompleted):
+                            usage = event.usage
+                            model = event.model
+                            result.stop_reason = event.stop_reason
+                            result.cache_breakpoint_ineffective = event.cache_breakpoint_ineffective
+
+                if result.stop_reason == "refusal" and not chunks:
+                    # A decline must still produce something the mentor can say; an empty turn would
+                    # read as the system having hung.
+                    chunks.append(REFUSAL_REPLY)
+                    yield REFUSAL_REPLY, None
+
+            except ProviderError as exc:
+                log.error(
+                    "conversation.provider_failed",
+                    provider=exc.provider,
+                    retryable=exc.retryable,
+                    exc_info=True,
+                )
+                result.stop_reason = "cancelled"
+                chunks.append(FAILURE_REPLY)
+                yield FAILURE_REPLY, None
+
+            if delivery is not None:
+                await delivery.settle()
+            settled = True
 
         except (GeneratorExit, asyncio.CancelledError):
-            # The consumer went away mid-stream. Keep the partial text: it is what the student
-            # actually received, and the stored record must match that (Gate 0 finding C-03).
+            # The consumer went away mid-stream, or the student interrupted before hearing all
+            # of it. Keep the partial text: it is what the student actually received, and the
+            # stored record must match that (Gate 0 finding C-03).
             result.interrupted = True
             raise
-
-        except ProviderError as exc:
-            log.error(
-                "conversation.provider_failed",
-                provider=exc.provider,
-                retryable=exc.retryable,
-                exc_info=True,
-            )
-            result.stop_reason = "cancelled"
-            chunks.append(FAILURE_REPLY)
-            yield FAILURE_REPLY, None
 
         finally:
             # Runs on the normal path, on a provider failure, and on cancellation (via the
             # generator's aclose), so a turn is never left unrecorded.
             generated = "".join(chunks)
-            if delivery is not None:
+            if delivery is not None and not settled:
                 # What was heard, not what was generated. For a voice turn these differ by
                 # however far generation ran ahead of playback.
                 result.text = delivery.delivered()
                 result.unspoken_remainder = delivery.remainder() or None
             else:
+                # Settled means received in full, so what was generated is what was heard.
                 result.text = generated
             result.language = language or (script_of(result.text) if result.text else None)
             result.cost = self._ledger.price_turn(model, usage)

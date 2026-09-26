@@ -46,6 +46,17 @@ BUDGET_EXCEEDED_MESSAGE = " I couldn't finish checking everything just now — h
 
 
 @dataclass(frozen=True)
+class ToolActivityEntry:
+    """One executed call, for surfacing "the mentor looked something up" to a client live
+    (ARCHITECTURE §10's `agent.activity`). Deliberately coarser than the `tool_calls` audit row
+    it comes from — a live UI indicator needs "did it work", not the full `ToolStatus` enum; the
+    admin dashboard (app/api/routes/admin.py) is where the fine-grained breakdown lives."""
+
+    tool_name: str
+    ok: bool
+
+
+@dataclass(frozen=True)
 class AgentTurnOutcome:
     """What one full turn (all rounds) produced. `usage` is summed across every round: each round
     is a separate billed API call, and a round's input includes the previous round's history
@@ -57,6 +68,7 @@ class AgentTurnOutcome:
     usage: TokenUsage
     model: str
     budget_exceeded: bool = False
+    tool_activity: tuple[ToolActivityEntry, ...] = ()
 
 
 def _add_usage(a: TokenUsage, b: TokenUsage) -> TokenUsage:
@@ -94,6 +106,7 @@ async def run_agent_turn(
     total_calls = 0
     tool_wall_clock_ms = 0
     accumulated_text: list[str] = []
+    tool_activity: list[ToolActivityEntry] = []
     usage_total = TokenUsage()
     model = llm.info.model
     budget_exceeded = False
@@ -179,6 +192,7 @@ async def run_agent_turn(
                 )
             )
             results.append(result)
+            tool_activity.append(ToolActivityEntry(tool_name=call.name, ok=not result.is_error))
         tool_wall_clock_ms += int((time.perf_counter() - started) * 1000)
 
         # ADR-0009: every tool result for a round goes in ONE user message. Splitting them across
@@ -193,5 +207,6 @@ async def run_agent_turn(
             usage=usage_total,
             model=model,
             budget_exceeded=budget_exceeded,
+            tool_activity=tuple(tool_activity),
         ),
     )

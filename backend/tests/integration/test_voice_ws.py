@@ -14,8 +14,8 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from app.voice.audio import FRAME_BYTES, AudioFrame
-from app.voice.protocol import encode_audio, encode_control
+from app.voice.audio import FRAME_BYTES, AudioFrame, bytes_to_ms
+from app.voice.protocol import decode_audio, encode_audio, encode_control
 
 SILENT_FRAME = b"\x00" * FRAME_BYTES
 
@@ -193,17 +193,27 @@ def test_a_typed_turn_over_the_socket_produces_audio_and_metrics(
 
     with _connect(sync_client, session_id, token) as ws:
         ws.receive_text()
-        ws.receive_text()
+        ready = json.loads(ws.receive_text())
         ws.send_text(encode_control("user.text", text="Kirchhoff ka voltage law samjhao"))
 
         saw_audio = False
         metrics = None
+        received = 0
         # Generous: a couple of seconds of synthesised audio is ~100 frames before the final
         # metrics event arrives.
         for _ in range(600):
             message = ws.receive()
-            if message.get("bytes") is not None:
+            if (data := message.get("bytes")) is not None:
                 saw_audio = True
+                # A conforming client: play what arrives and acknowledge it (ARCHITECTURE §5.3).
+                # The turn stays open until playback drains, so without this the metrics would
+                # only arrive after the no-ACK deadline.
+                frame = decode_audio(data)
+                received += len(frame.pcm)
+                played_ms = bytes_to_ms(received, ready["tts_sample_rate"])
+                ws.send_text(
+                    encode_control("playback.ack", turn_id=frame.turn_id, played_ms=played_ms)
+                )
             elif message.get("text") is not None:
                 payload = json.loads(message["text"])
                 if payload["type"] == "metrics":

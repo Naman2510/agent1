@@ -40,6 +40,10 @@ class LedgerEntry:
 class PlaybackLedger:
     """Chunk-to-audio accounting for one turn."""
 
+    # The synthesised audio's rate, which is not the capture rate (audio.SAMPLE_RATE). The client
+    # plays at this rate and ACKs in real milliseconds, so any other rate makes every duration here
+    # disagree with every ACK.
+    sample_rate: int
     entries: list[LedgerEntry] = field(default_factory=list)
     _text_length: int = 0
     _audio_ms: int = 0
@@ -80,7 +84,7 @@ class PlaybackLedger:
             return
         entry = self.entries[-1]
         entry.audio_bytes += audio_bytes
-        entry.end_ms = entry.start_ms + bytes_to_ms(entry.audio_bytes)
+        entry.end_ms = entry.start_ms + bytes_to_ms(entry.audio_bytes, self.sample_rate)
         self._audio_ms = entry.end_ms
 
     def add_chunk(self, text: str, audio_bytes: int) -> LedgerEntry:

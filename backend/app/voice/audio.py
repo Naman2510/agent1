@@ -39,12 +39,12 @@ class AudioFrame:
         return len(self.pcm) * 1000 // (SAMPLE_RATE * SAMPLE_WIDTH_BYTES)
 
 
-def bytes_to_ms(size: int) -> int:
-    return size * 1000 // (SAMPLE_RATE * SAMPLE_WIDTH_BYTES)
+def bytes_to_ms(size: int, sample_rate: int = SAMPLE_RATE) -> int:
+    return size * 1000 // (sample_rate * SAMPLE_WIDTH_BYTES)
 
 
-def ms_to_bytes(milliseconds: int) -> int:
-    return milliseconds * SAMPLE_RATE * SAMPLE_WIDTH_BYTES // 1000
+def ms_to_bytes(milliseconds: int, sample_rate: int = SAMPLE_RATE) -> int:
+    return milliseconds * sample_rate * SAMPLE_WIDTH_BYTES // 1000
 
 
 class PreRollBuffer:

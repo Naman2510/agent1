@@ -8,15 +8,23 @@ C-03 — *what is stored is what the user actually received* — while the thing
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.intent import IntentGate
+from app.agent.tools.registry import DEFAULT_REGISTRY
 from app.core.config import Settings
 from app.db.models import Message, MessageRole, Session, Student, User, UserRole
 from app.db.repositories.sessions import MessageRepository
+from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
+from app.providers.llm.base import ToolCall
 from app.providers.llm.fake import FakeLLMProvider, ScriptedTurn
+from app.providers.reranker.base import NoopReranker
+from app.rag.ingest import DocumentMetadata
+from app.rag.service import RagService
 from app.services.conversation import ConversationService
 from app.services.usage import UsageLedger
 
@@ -219,3 +227,66 @@ async def test_the_turn_path_actually_applies_the_history_bound(
     # 4 replayed history messages + the new utterance.
     assert len(llm.last_request.messages) == 5
     assert llm.last_request.messages[-1].text == "and now?"
+
+
+async def test_a_real_search_hit_produces_a_real_populated_citation(
+    db_session: AsyncSession, settings: Settings, redis_client, tmp_path: Path
+) -> None:
+    """`TurnResult.citations` end to end: a real ingested document, a real search_knowledge hit,
+    and a reply citing it — not just "resolve_citations doesn't crash on a fabricated ref" (already
+    covered elsewhere) but "a real citation actually arrives with the right content." Nothing in
+    this suite checked that before ARCHITECTURE §10's `rag.citations` frame needed it to be true.
+    """
+    user = User(email=f"cite-{uuid.uuid4().hex[:8]}@example.com", password_hash="x")
+    db_session.add(user)
+    await db_session.flush()
+    student = Student(user_id=user.id, display_name="Cite")
+    db_session.add(student)
+    await db_session.flush()
+    session = Session(student_id=student.id, transport="text")
+    db_session.add(session)
+    await db_session.flush()
+    await db_session.commit()
+
+    rag = RagService(db_session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker())
+    doc = tmp_path / "kvl.md"
+    doc.write_text(
+        "# Unit\n\n## 7.1 KVL\n\nKVL states voltages sum to zero.\n\n"
+        "## 7.2 KCL\n\nKCL states currents sum to zero.\n",
+        encoding="utf-8",
+    )
+    await rag.ingest_file(doc, DocumentMetadata(title="KVL Notes", subject="EMT"))
+    await db_session.commit()
+    await rag.fit_and_embed_all()
+    await db_session.commit()
+
+    search_call = ToolCall(id="c1", name="search_knowledge", arguments={"query": "KVL"})
+    llm = FakeLLMProvider(
+        [
+            ScriptedTurn(text="question"),  # IntentGate.classify
+            ScriptedTurn(tool_calls=[search_call], stop_reason="tool_use"),
+            ScriptedTurn(text="KVL says loop voltages sum to zero [1]."),
+        ]
+    )
+    service = ConversationService(
+        llm=llm,
+        messages=MessageRepository(db_session),
+        ledger=UsageLedger(redis_client, settings),
+        settings=settings,
+        db=db_session,
+        tool_registry=DEFAULT_REGISTRY,
+        intent_gate=IntentGate(llm),
+        rag=rag,
+    )
+
+    result = None
+    async for _fragment, maybe_result in service.stream_turn(
+        session_id=session.id, student_id=student.id, utterance="What is KVL?"
+    ):
+        if maybe_result is not None:
+            result = maybe_result
+
+    assert result is not None
+    assert len(result.citations) == 1
+    assert result.citations[0].document_title == "KVL Notes"
+    assert result.citations[0].ref == "[1]"

@@ -155,9 +155,7 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
             tts=build_tts(settings),
             # Same tool/memory capability as the text-chat path (app/api/deps.py) — a voice
             # turn can call search_knowledge, get_student_progress, etc. exactly like a typed
-            # one. Not yet wired to this phase: surfacing agent.activity / rag.citations over
-            # the WebSocket protocol (ARCHITECTURE §10) is presentation-layer work for Phase 7;
-            # the tool calls themselves already run and are logged either way.
+            # one, and reports them live as agent.activity / rag.citations (ARCHITECTURE §10).
             conversation=ConversationService(
                 llm=app.state.llm,
                 messages=MessageRepository(db),

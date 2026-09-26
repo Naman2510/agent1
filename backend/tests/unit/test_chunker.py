@@ -153,3 +153,26 @@ def test_pending_text_is_visible_before_it_is_emitted() -> None:
     chunker = SentenceChunker()
     chunker.push("An unfinished sentence without a terminal")
     assert "unfinished" in chunker.pending
+
+
+def test_raw_spans_partition_the_stream_exactly() -> None:
+    """`text` is normalised for synthesis; `raw` is not, so the playback ledger can hold a true
+    prefix of the answer. Joining the stripped texts glues sentences together ("hai.Doosra")."""
+    source = (
+        "  Sure.  Kirchhoff's voltage law says the sum of potential differences around any "
+        "closed loop is 3.5 volts, or zero in an ideal loop.\n\nDoes that help? "
+        "यह हिंदी वाक्य है। Let us continue with a much longer clause that keeps going well past "
+        "the maximum chunk length so that a max-wait break has to land somewhere on a space "
+        "rather than at any terminal punctuation at all   "
+    )
+    for delta in (1, 3, 7, 50):
+        chunker = SentenceChunker()
+        raws: list[str] = []
+        for start in range(0, len(source), delta):
+            raws.extend(c.raw for c in chunker.push(source[start : start + delta]))
+        tail = chunker.flush()
+        if tail is not None:
+            raws.append(tail.raw)
+        assert "".join(raws) + chunker.pending == source, delta
+        # And every raw span is its chunk's text plus whitespace only.
+        assert all(r.strip() for r in raws)

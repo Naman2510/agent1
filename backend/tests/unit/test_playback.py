@@ -9,17 +9,23 @@ from __future__ import annotations
 from app.voice.audio import ms_to_bytes
 from app.voice.playback import PlaybackLedger
 
+RATE = 24_000  # the synthesised audio's rate, as the voice session uses it
+
+
+def _pcm(duration_ms: int) -> int:
+    return ms_to_bytes(duration_ms, RATE)
+
 
 def _ledger(*chunks: tuple[str, int]) -> PlaybackLedger:
     """Build a ledger from (text, duration_ms) pairs."""
-    ledger = PlaybackLedger()
+    ledger = PlaybackLedger(sample_rate=RATE)
     for text, duration_ms in chunks:
-        ledger.add_chunk(text, ms_to_bytes(duration_ms))
+        ledger.add_chunk(text, _pcm(duration_ms))
     return ledger
 
 
 def test_an_empty_ledger_has_heard_nothing() -> None:
-    ledger = PlaybackLedger()
+    ledger = PlaybackLedger(sample_rate=RATE)
     assert ledger.spoken_prefix() == ""
     assert ledger.unspoken_remainder() == ""
     assert ledger.fully_played() is False
@@ -90,17 +96,17 @@ def test_the_prefix_never_shrinks_as_playback_advances() -> None:
 
 def test_a_silent_chunk_does_not_shift_later_offsets() -> None:
     """A chunk that produced no audio still gets an entry; skipping it would corrupt offsets."""
-    ledger = PlaybackLedger()
-    ledger.add_chunk("audible. ", ms_to_bytes(500))
+    ledger = PlaybackLedger(sample_rate=RATE)
+    ledger.add_chunk("audible. ", _pcm(500))
     ledger.add_chunk("silent.", 0)
-    ledger.add_chunk(" audible again.", ms_to_bytes(500))
+    ledger.add_chunk(" audible again.", _pcm(500))
     ledger.acknowledge(1000)
     assert ledger.spoken_prefix() == "audible. silent. audible again."
 
 
 def test_durations_are_derived_from_audio_bytes_not_guessed() -> None:
-    ledger = PlaybackLedger()
-    entry = ledger.add_chunk("hello", ms_to_bytes(250))
+    ledger = PlaybackLedger(sample_rate=RATE)
+    entry = ledger.add_chunk("hello", _pcm(250))
     assert entry.duration_ms == 250
     assert ledger.total_audio_ms == 250
 
@@ -117,10 +123,10 @@ def test_a_chunk_cancelled_mid_synthesis_is_still_in_the_record() -> None:
     still being synthesised when the student interrupts has its text recorded nowhere — neither as
     heard nor as unheard — which is the same defect class as storing the full generation.
     """
-    ledger = PlaybackLedger()
-    ledger.add_chunk("Fully synthesised. ", ms_to_bytes(500))
+    ledger = PlaybackLedger(sample_rate=RATE)
+    ledger.add_chunk("Fully synthesised. ", _pcm(500))
     ledger.begin_chunk("Half synthesised when cancelled.")
-    ledger.extend_chunk(ms_to_bytes(100))  # only part of its audio was produced
+    ledger.extend_chunk(_pcm(100))  # only part of its audio was produced
 
     ledger.acknowledge(500)
     assert ledger.spoken_prefix() == "Fully synthesised. "
@@ -130,11 +136,11 @@ def test_a_chunk_cancelled_mid_synthesis_is_still_in_the_record() -> None:
 
 
 def test_extending_grows_the_open_chunk_only() -> None:
-    ledger = PlaybackLedger()
-    ledger.add_chunk("first", ms_to_bytes(200))
+    ledger = PlaybackLedger(sample_rate=RATE)
+    ledger.add_chunk("first", _pcm(200))
     ledger.begin_chunk("second")
-    ledger.extend_chunk(ms_to_bytes(50))
-    ledger.extend_chunk(ms_to_bytes(50))
+    ledger.extend_chunk(_pcm(50))
+    ledger.extend_chunk(_pcm(50))
 
     assert ledger.entries[0].duration_ms == 200
     assert ledger.entries[1].duration_ms == 100
@@ -142,6 +148,18 @@ def test_extending_grows_the_open_chunk_only() -> None:
 
 
 def test_extending_with_nothing_open_is_a_no_op() -> None:
-    ledger = PlaybackLedger()
+    ledger = PlaybackLedger(sample_rate=RATE)
     ledger.extend_chunk(1000)
     assert ledger.total_audio_ms == 0
+
+
+def test_durations_use_the_synthesised_audios_rate_not_the_capture_rate() -> None:
+    """One second of 24 kHz speech is 48,000 bytes. Read at the 16 kHz capture rate it measures
+    1.5 s, so a client that has played every sample still looks a third short: each barge-in
+    under-records what was heard, and playback can never be seen to finish."""
+    ledger = PlaybackLedger(sample_rate=24_000)
+    ledger.add_chunk("one second of speech", 48_000)
+    assert ledger.total_audio_ms == 1000
+    ledger.acknowledge(1000)
+    assert ledger.fully_played() is True
+    assert ledger.spoken_prefix() == "one second of speech"
