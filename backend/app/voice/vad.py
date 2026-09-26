@@ -140,6 +140,10 @@ class VadGate:
         return VadDecision(VadEvent.SPEECH_END, probability, spoken)
 
 
+# The trailing samples of the previous window that Silero v5 prepends to each one, at 16 kHz.
+SILERO_CONTEXT_SAMPLES = 64
+
+
 class SileroVoiceDetector(VoiceDetector):
     """Silero VAD v5 through ONNX Runtime.
 
@@ -172,6 +176,7 @@ class SileroVoiceDetector(VoiceDetector):
         )
         self._sample_rate = np.array(16_000, dtype=np.int64)
         self._state = np.zeros((2, 1, 128), dtype=np.float32)
+        self._context = np.zeros(SILERO_CONTEXT_SAMPLES, dtype=np.float32)
 
     @property
     def info(self) -> ProviderInfo:
@@ -179,6 +184,7 @@ class SileroVoiceDetector(VoiceDetector):
 
     def reset(self) -> None:
         self._state = self._np.zeros((2, 1, 128), dtype=self._np.float32)
+        self._context = self._np.zeros(SILERO_CONTEXT_SAMPLES, dtype=self._np.float32)
 
     def probability(self, window: bytes) -> float:
         np = self._np
@@ -188,14 +194,15 @@ class SileroVoiceDetector(VoiceDetector):
                 f"Silero v5 requires exactly {VAD_WINDOW_SAMPLES} samples at 16 kHz, "
                 f"got {len(samples)}"
             )
+        # v5 scores each window together with the 64 samples before it. Given the bare window it
+        # stays near zero even for clear speech (at most 0.13 across a whole spoken sentence, so
+        # nothing ever crossed the threshold); tests/unit/test_vad.py pins this with a fixture.
+        model_input = np.concatenate([self._context, samples]).reshape(1, -1)
         output, self._state = self._session.run(
             None,
-            {
-                "input": samples.reshape(1, -1),
-                "state": self._state,
-                "sr": self._sample_rate,
-            },
+            {"input": model_input, "state": self._state, "sr": self._sample_rate},
         )
+        self._context = samples[-SILERO_CONTEXT_SAMPLES:]
         return float(output[0][0])
 
 

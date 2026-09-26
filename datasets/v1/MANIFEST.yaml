@@ -1,6 +1,6 @@
 version: v1
 created: 2026-09-18
-updated: 2026-09-21
+updated: 2026-09-26
 status: partial
 description: >
   First evaluation dataset. Contains the language-identification, retrieval, and agent slices
@@ -8,6 +8,13 @@ description: >
   response and e2e slices listed in docs/DATASET.md do not exist yet.
 
 slices:
+  voice_fixtures:
+    path: voice/fixtures/
+    cases: 1
+    task: >
+      Synthetic (espeak-ng) speech for detector smoke tests: proves the VAD fires on speech and
+      stays quiet around it. Not a measure of accuracy on human speech. See voice/README.md.
+
   lid:
     path: lid/cases.jsonl
     cases: 88

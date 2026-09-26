@@ -2,8 +2,9 @@
 
 The gate's event semantics are tested with a scripted detector, because turn detection and
 barge-in depend on *our* hysteresis rather than on a model's opinion of a fixture. The Silero
-tests assert only what can honestly be asserted without human speech: that it loads, runs within
-budget, and rejects silence and noise.
+tests check that it loads, runs within budget, and rejects silence and noise — and, since Phase 7,
+that it hears speech at all, against a synthetic (espeak-ng) sentence. Synthetic speech is not a
+substitute for tuning on human voices (DATASET.md); it is enough to prove the detector works.
 """
 
 from __future__ import annotations
@@ -22,6 +23,9 @@ from app.voice.vad import (
 )
 
 SILERO_PATH = Path("models/silero_vad.onnx")
+SPEECH_FIXTURE = (
+    Path(__file__).resolve().parents[3] / "datasets/v1/voice/fixtures/espeak-en-kvl-question.wav"
+)
 WINDOW = b"\x00" * VAD_WINDOW_BYTES
 
 
@@ -154,6 +158,65 @@ def test_silero_rejects_silence_and_white_noise() -> None:
     for _ in range(30):
         noise = (rng.standard_normal(VAD_WINDOW_SAMPLES) * 600).astype(np.int16).tobytes()
         assert detector.probability(noise) < 0.5, "white noise must not read as speech"
+
+
+def _fixture_windows() -> list[bytes]:
+    """The fixture as the gate sees it: 0.5 s quiet | 2.65 s of speech | 0.8 s quiet, 16 kHz."""
+    import wave
+
+    with wave.open(str(SPEECH_FIXTURE), "rb") as fixture:
+        assert (fixture.getframerate(), fixture.getnchannels(), fixture.getsampwidth()) == (
+            16_000,
+            1,
+            2,
+        )
+        pcm = fixture.readframes(fixture.getnframes())
+    return [
+        pcm[i : i + VAD_WINDOW_BYTES]
+        for i in range(0, len(pcm) - VAD_WINDOW_BYTES + 1, VAD_WINDOW_BYTES)
+    ]
+
+
+@needs_silero
+def test_silero_hears_a_spoken_sentence() -> None:
+    """Silero v5 conditions each window on the 64 samples before it. Fed bare windows — as it was
+    until Phase 7 — it scored this sentence at most 0.13, under the 0.5 threshold throughout, so no
+    spoken turn could ever begin. Only a test with speech in it could have noticed.
+    """
+    from app.voice.vad import SileroVoiceDetector
+
+    detector = SileroVoiceDetector(SILERO_PATH)
+    probabilities = [detector.probability(window) for window in _fixture_windows()]
+
+    leading_quiet, speech = probabilities[:12], probabilities[17:-27]
+    assert max(leading_quiet) < 0.2
+    assert sum(p > 0.5 for p in speech) / len(speech) > 0.6, [round(p, 2) for p in speech]
+
+
+@needs_silero
+def test_a_spoken_sentence_is_one_utterance_through_the_gate() -> None:
+    from app.voice.vad import SileroVoiceDetector
+
+    gate = VadGate(SileroVoiceDetector(SILERO_PATH), VadSettings())
+    events = [gate.push(window).event for window in _fixture_windows()]
+    assert events.count(VadEvent.SPEECH_START) == 1
+    assert events.count(VadEvent.SPEECH_END) == 1, "the pauses between words must not split it"
+
+
+@needs_silero
+def test_reset_forgets_the_previous_audio() -> None:
+    """The context is stream state like the recurrent state: a new session must not inherit it."""
+    import numpy as np
+
+    from app.voice.vad import SileroVoiceDetector
+
+    detector = SileroVoiceDetector(SILERO_PATH)
+    silence = np.zeros(VAD_WINDOW_SAMPLES, dtype=np.int16).tobytes()
+    fresh = detector.probability(silence)
+    for window in _fixture_windows()[20:40]:
+        detector.probability(window)
+    detector.reset()
+    assert detector.probability(silence) == pytest.approx(fresh, abs=1e-6)
 
 
 @needs_silero
