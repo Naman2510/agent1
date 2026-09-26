@@ -98,7 +98,7 @@ def bench_chunker(iterations: int = 500) -> dict[str, Any]:
 
 def bench_ledger(iterations: int = 2000) -> dict[str, Any]:
     """Resolving a playback position into the text actually heard — the barge-in hot path."""
-    ledger = PlaybackLedger()
+    ledger = PlaybackLedger(sample_rate=24_000)  # the TTS rate the ledger measures in
     for part in ANSWER.split(". "):
         ledger.add_chunk(part + ". ", 48_000)
     position = ledger.total_audio_ms // 2

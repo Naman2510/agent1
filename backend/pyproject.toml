@@ -83,7 +83,8 @@ plugins = ["pydantic.mypy"]
 warn_unused_ignores = true
 disallow_untyped_defs = true
 exclude = ["migrations/"]
-files = ["app", "eval"]
+# scripts too: nothing else checks them, and bench_voice.py broke silently in Phase 7.
+files = ["app", "eval", "scripts"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*", "migrations.*"]
@@ -97,6 +98,11 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # regex, scikit-learn, and rank-bm25 ship no type information (or py.typed marker) either.
 module = ["regex.*", "sklearn.*", "rank_bm25.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# asyncpg ships no type information; only scripts/reset_schema.py imports it directly.
+module = ["asyncpg.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]

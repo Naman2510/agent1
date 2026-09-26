@@ -49,7 +49,7 @@ jobs:
         run: |
           ruff check .
           ruff format --check .
-          mypy app eval
+          mypy app eval scripts
       - name: Unit tests
         working-directory: backend
         # A database URL is deliberately NOT provided: if a unit test starts needing one, this
