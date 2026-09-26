@@ -1,7 +1,7 @@
 # Roadmap, Phases, and Audit Gates
 
-**Status:** Phase 6 complete. Phases 0–6 have passed their audit gates; Phase 7 (frontend &
-dashboard) has not started.
+**Status:** Phase 7 complete. Phases 0–7 have passed their audit gates; Phase 8 (evaluation,
+experiments, observability) is next.
 
 The specification (§43) mandates phased delivery with an audit gate between phases. Phases 1+ below
 are reconstructed from spec §1–42; **the original specification was truncated part-way through the
@@ -138,6 +138,18 @@ one real turn traced from utterance to a `student_topics` mastery update to its 
 Voice session UI (transcript, language indicator, tool activity, citations, latency HUD), history,
 and the admin dashboard reading real aggregates.
 **Gate 7:** no hardcoded metrics anywhere in the UI; "not measured" rendered where no run exists.
+
+Delivered 2026-09-26: 725 backend tests (97% coverage), 35 frontend unit tests, and 14 end-to-end
+tests in a real browser — with the real VAD and a microphone playing recorded speech — that CI runs
+against the Docker Compose stack built as the README describes. Gate 7 passed —
+[`PHASE_7_AUDIT.md`](PHASE_7_AUDIT.md). The web app is Next.js: sign-in with the refresh token kept
+from page script, the voice session, typed sessions, history with each answer's sources and tools,
+and the dashboard. Building it and running the whole system surfaced 23 defects, three Critical: the
+VAD could not hear speech, so no spoken turn could ever have begun (D7-12); the production image
+could not start (D7-14); and the configuration `.env.example` documents could not start the backend
+(D7-17). CI had been red since Phase 5, so none of its later jobs had run; it is green on every job,
+and now fails where a check used to skip or pass only on the developer's machine. Still provider-less:
+every word heard and spoken in the suite is a fake's (M7-01), and only Chromium is tested (M7-02).
 
 ### Phase 8 — Evaluation, experiments, observability
 All six suites runnable from one entrypoint, MLflow tracking, OpenTelemetry tracing, CI tiers T1–T3,

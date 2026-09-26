@@ -10,16 +10,16 @@ voice pipeline rather than a thin wrapper around an LLM API.
 
 | | |
 |---|---|
-| **Current phase** | Phase 5 complete — RAG: ingestion, hybrid retrieval, citations |
-| **Implementation** | Phase 5 complete — 541 tests. Voice loop with barge-in, language routing, and a working retrieval pipeline; no real ASR/TTS provider, no agent tools yet. |
-| **Benchmarks** | Two suites have run: language identification (0.9205 signal accuracy) and retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893 on `datasets/v1`, 22 cases) — both with documented biases and known gaps. Everything else is still unmeasured. |
-| **Last updated** | 2026-09-19 |
+| **Current phase** | Phase 7 complete — the web app: voice sessions, history, admin dashboard |
+| **Implementation** | 725 backend tests (97% line coverage), 35 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. No real ASR or TTS provider exists yet, and the Claude adapter has never run against the live API. |
+| **Benchmarks** | Four suites have run, each on a small self-authored dataset with its biases documented: language identification (0.9205 signal accuracy), retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893, 22 cases), agent tool gating (14/14 allowlist coverage, against a scripted model) and prompt injection (19/19 attempted mutating calls blocked). Latency is unmeasured. |
+| **Last updated** | 2026-09-26 |
 
-> **Nothing here is measured yet.** Latency figures in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-> are *budgets* (design targets), not results. Quality metrics in
-> [`docs/EVALUATION.md`](docs/EVALUATION.md) are *metric definitions*, not scores. No number will be
-> written into this repository until it comes out of a reproducible run recorded in
-> `evaluation_runs`. See [Honesty rules](#honesty-rules).
+> **Latency is not measured yet.** Latency figures in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+> are *budgets* (design targets), not results. The quality numbers above come from recorded runs
+> of the eval suites, reported in [`docs/EVALUATION.md`](docs/EVALUATION.md) beside the command that
+> reproduces them and the dataset's biases; metrics there without a reported run are definitions,
+> not scores. `evaluation_runs` tracking arrives with Phase 8. See [Honesty rules](#honesty-rules).
 
 ---
 
@@ -66,25 +66,29 @@ Full diagrams, the turn state machine, the barge-in protocol, and the latency bu
 | Document | What it covers |
 |---|---|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design, turn lifecycle, barge-in, WS protocol, latency budget, repo layout |
-| [`docs/PHASE_0_AUDIT.md`](docs/PHASE_0_AUDIT.md) | **Audit Gate 0** — critical review of this design, with blocking findings |
+| [`docs/PHASE_0_AUDIT.md`](docs/PHASE_0_AUDIT.md) … [`PHASE_7_AUDIT.md`](docs/PHASE_7_AUDIT.md) | **The audit gates** — one per phase: what was found, what was fixed, what is still open |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | ADR index (16 records in `docs/adr/`) |
-| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | Entities, relationships, indexing strategy; DDL in [`db/schema.sql`](db/schema.sql) |
-| [`docs/API.md`](docs/API.md) | Planned HTTP + WebSocket contract |
+| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) | Entities, relationships, indexing strategy; the live schema in [`db/schema.current.sql`](db/schema.current.sql) |
+| [`docs/API.md`](docs/API.md) | The HTTP API and the voice socket; the checked contract is [`docs/openapi.json`](docs/openapi.json) |
 | [`docs/EVALUATION.md`](docs/EVALUATION.md) | The six eval suites, metric definitions, CI tiers, judge methodology |
 | [`docs/DATASET.md`](docs/DATASET.md) | Dataset versioning, data-quality pipeline, PII policy, licensing |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Threat model (incl. prompt injection via course material) and checklist |
 | [`docs/RISKS.md`](docs/RISKS.md) | Risk register with triggers and mitigations |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phases, audit gates, and the MVP cut line |
 | [`docs/failure_cases/`](docs/failure_cases/) | Documented failures — input, expected, actual, root cause, fix, result |
+| [`frontend/README.md`](frontend/README.md) | The web app: layout, sign-in design, and how to run the end-to-end tests |
 
-## Tech stack (planned)
+## Tech stack
 
-**Frontend** Next.js · React · TypeScript · Tailwind · Web Audio API (AudioWorklet)
+**Frontend** Next.js 16 · React 19 · TypeScript · Tailwind 4 · Web Audio API (AudioWorklet)
 **Backend** Python 3.11 · FastAPI · Pydantic v2 · asyncio · WebSockets
 **Data** PostgreSQL 16 + pgvector · Redis 7 · SQLAlchemy 2 · Alembic
-**Voice** Silero VAD · faster-whisper (local) / managed streaming ASR · streaming TTS (provider-abstracted)
-**AI** Claude (`claude-opus-5`) via the Anthropic Python SDK · multilingual-e5 embeddings · cross-encoder reranker
-**Eval/Infra** pytest · MLflow · OpenTelemetry · Docker Compose · GitHub Actions
+**Voice** Silero VAD v6.2 · STT and TTS behind interfaces — only deterministic fakes exist so far
+(managed streaming providers are the plan, [ADR-0002](docs/adr/0002-stt-provider-strategy.md))
+**AI** Claude (`claude-opus-5`) via the Anthropic Python SDK · TF-IDF/SVD embeddings, standing in for
+multilingual-e5 ([ADR-0006](docs/adr/0006-embedding-model.md)) · reranker interface, off by default
+**Tests/Infra** pytest · Vitest · Playwright · Docker Compose · GitHub Actions — MLflow and
+OpenTelemetry arrive with Phase 8
 
 Every model-facing component sits behind an interface (`STTProvider`, `TTSProvider`, `LLMProvider`,
 `EmbeddingProvider`, `RerankerProvider`, `VectorStore`) so that A/B comparison is a config change,
@@ -118,20 +122,52 @@ indexes and check constraints:
 cd backend
 pip install -e ".[dev,rag]"
 export VAANIOS_TEST_DATABASE_URL=postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
-pytest -q                       # 541 tests
-pytest -q tests/unit            # 200+ of them need no database at all
-python scripts/fetch_models.sh  # Silero VAD weights (not committed)
+bash scripts/fetch_models.sh    # Silero VAD weights (not committed)
+pytest -q                       # 725 tests
+pytest -q tests/unit            # 525 of them need no database at all
 python scripts/bench_voice.py   # pipeline overhead, with real numbers
-ruff check . && mypy app
+ruff check . && mypy
 ```
+
+The web app's checks, and the end-to-end suite that drives a real browser against the whole stack,
+are in [`frontend/README.md`](frontend/README.md).
 
 Without a Docker daemon, `scripts/dev_db.sh start` brings up a local cluster instead (no pgvector,
 so it is only sufficient through Phase 4).
 
 ## What works today
 
-You can hold a **typed** conversation with the mentor, grounded in real course material with
-inspectable citations. Agent tools and memory are Phase 6.
+In the web app you can hold a **spoken or typed** conversation with the mentor, interrupt it by
+speaking over it or pressing Stop, and see where each answer came from — its sources and the tools
+it used, kept in the session's history. Everything runs today against the deterministic fake STT,
+TTS and LLM, so the words heard and spoken are placeholders: see [What is not
+verified](#what-works-today) below.
+
+**Phase 7 — the web app**
+- The voice session: live state and captions, Stop / Mute / Hang up, a typed fallback, the tools
+  the mentor called, the sources it cited, and per-stage latency. The microphone is captured by an
+  AudioWorklet (16 kHz, 20 ms frames), and playback is acknowledged from the audio clock, so the
+  stored answer is exactly what the student heard — the whole answer, or the prefix they interrupted
+- History: every session, each answer with its sources, tools, language and time to first word
+- Sign-in keeps the refresh token in an `httpOnly` cookie behind a same-origin auth proxy; page
+  script only ever holds the 15-minute access token, and refreshes are serialised across tabs
+- An admin dashboard over real aggregates, showing "not measured" wherever no sample exists
+- **An end-to-end suite in a real browser** (14 tests): a spoken question and a spoken interruption
+  through the real VAD, Stop, typed sessions, sign-in, another student's session, the admin
+  dashboard, and every page at phone width. CI runs it against the Docker Compose stack, brought up
+  exactly as [Setup](#setup) describes
+- Found on the way, and fixed: the VAD could not hear speech at all; completed voice answers were
+  stored empty or truncated; the documented Docker setup could not start; citations were never
+  stored. Twenty-three defects in all, in [PHASE_7_AUDIT.md](docs/PHASE_7_AUDIT.md)
+
+**Phase 6 — agent tools and memory**
+- Seven typed tools — course search, progress, study plans, quizzes, past sessions — offered per
+  intent and re-checked at execution, with budgets of 3 rounds, 6 calls and 2.5 s per turn
+- Student identity is never a tool argument; mutating tools check ownership themselves
+- Two-tier memory: a short-term Redis window with a rolling summary, and long-term profile and topic
+  mastery updated by an audited extractor that records every proposed change
+- The prompt-injection suite: 19/19 attempted mutating calls blocked, checked against real row
+  counts, under a scripted model already persuaded by the injected text
 
 **Phase 5 — RAG**
 - Structure-aware Markdown/PDF ingestion: headings define chunk boundaries, and each chunk's full
@@ -178,11 +214,14 @@ inspectable citations. Agent tools and memory are Phase 6.
 - **Real barge-in**: the client is told to flush first (audible silence is what the student
   experiences), then generation and synthesis are cancelled server-side, and the assistant turn is
   stored as *the prefix that actually reached the speaker*
-- **Silero VAD v5** running for real at **0.12 ms per 32 ms window — 0.38% of one core**
+- **Silero VAD v6.2** at **0.13–0.19 ms per 32 ms window** (p50 over two runs of
+  `scripts/bench_voice.py` at `fcba6ec`, under 1% of one core). Until Phase 7 it was fed windows
+  without the context the model needs, and could not hear speech at all
+  ([D7-12](docs/PHASE_7_AUDIT.md))
 - A 500 ms audio pre-roll, so an interrupting "Wait, stop" doesn't reach the recogniser as "stop"
 - A turn state machine whose 19 legal transitions and all 49 illegal ones are tested
 - Multilingual sentence chunking (Devanagari danda, no splitting inside "3.5 kΩ" or "e.g.")
-- Nine stage marks persisted per turn, and a minimal browser client
+- Nine stage marks persisted per turn
 
 **Phase 2 — providers and the LLM path**
 - Six provider interfaces (`LLMProvider`, `STTProvider`, `TTSProvider`, `EmbeddingProvider`,
@@ -203,7 +242,7 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
   -d '{"text":"Kirchhoff ka voltage law samjhao"}'
 ```
 
-**What is not verified.** Three things, and they are the honest boundary of this project today:
+**What is not verified.** These are the honest boundary of this project today:
 
 1. **No real ASR or TTS.** The voice loop is complete and *provider-less* — every mechanism is
    tested and no word has been transcribed or synthesised by a real model. `build_stt`/`build_tts`
@@ -228,9 +267,9 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
    this English-only corpus returns nothing, honestly, rather than a wrong answer.
    ([FC-004](docs/failure_cases/004-cross-lingual-retrieval-degrades-to-zero-signal.md))
 
-The browser client (`frontend/`) has been driven in a real Chromium with a fake microphone —
-speech in, barge-in, stop button — but only ever against the fake STT, LLM and TTS providers, never
-real ones, and never on a phone.
+6. **One browser, and no real phone.** The end-to-end suite runs in Chromium, with phone widths
+   emulated; Safari and Firefox are untested, and so is a real device's audio stack.
+   ([M7-02](docs/PHASE_7_AUDIT.md))
 
 ## Evaluation approach
 

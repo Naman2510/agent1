@@ -1,11 +1,11 @@
 # Data Model
 
-**Status:** Phase 1. Two schema files, with different jobs:
+**Status:** Phase 7. Two schema files, with different jobs:
 
 | File | What it is |
 |---|---|
 | [`db/schema.sql`](../db/schema.sql) | The full **designed** schema — all 20 tables, including the RAG, memory, quiz and evaluation tables that later phases add. A design reference, not executed by the application. |
-| [`db/schema.current.sql`](../db/schema.current.sql) | **Generated** from a database built by `alembic upgrade head` — the schema that actually exists today (8 tables). Regenerate with `scripts/dump_schema.sh`. |
+| [`db/schema.current.sql`](../db/schema.current.sql) | **Generated** from a database built by `alembic upgrade head` — the schema that actually exists today: 17 of the 20 designed tables (the three evaluation tables arrive with Phase 8). Regenerate with `scripts/dump_schema.sh` (`PGHOST`, `PGPORT` and `PGDATABASE` pick the database). |
 
 Alembic migrations under `backend/migrations/` are authoritative. A migration arrives with the code
 that reads it, so Phase 1 creates only the identity and conversation tables.
@@ -57,6 +57,15 @@ Two columns exist purely because of barge-in (ARCHITECTURE §5.3):
 for debugging and is never replayed into model context. Getting this wrong means the mentor refers to
 explanations the student never heard — the single most likely correctness bug in the whole system,
 which is why it is represented in the schema rather than inferred at read time.
+
+`citations jsonb` on an assistant message holds the sources it cited, resolved against that turn's
+own retrieved passages and stored as the student was shown them (document, heading, pages) rather
+than as chunk ids, because a document can be re-ingested. Until Phase 7 they were sent once over the
+voice socket and lost, so history could not show them (PHASE_7_AUDIT D7-21). A turn's tool calls are
+not copied onto the message: history reads them from `tool_calls` by `(session_id, turn_index)`.
+
+`sessions.turn_count` counts the student's messages, incremented in the same transaction that
+stores each one; nothing wrote it before Phase 7 (D7-19), and migration 0004 backfilled it.
 
 `latency_ms jsonb` carries the nine stage marks per turn. It is JSONB rather than nine columns
 because the set of marks will change across phases, and the voice-latency suite aggregates it rather

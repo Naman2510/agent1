@@ -408,7 +408,7 @@ experiment EXP-006 with intelligibility judged by human raters, not by a machine
 One turn = at most one agentic loop with hard budgets:
 
 ```
-assemble prompt  →  LLM (stream, tools)  →  tool_use?  →  execute (parallel)  →  feed results  →  …
+assemble prompt  →  LLM (stream, tools)  →  tool_use?  →  execute (in order)  →  feed results  →  …
                                            └─ no ────►  stream text to TTS
 ```
 
@@ -657,7 +657,9 @@ Design points that distinguish this from "chunk → top-k":
   ([ADR-0007](adr/0007-reranker-latency-gated.md)).
 - **Citations are constructed, not generated.** The context builder assigns each chunk an ID; the
   model cites IDs; the backend resolves IDs to `(document, page, section)` and drops any ID the model
-  invents. A model cannot fabricate a citation that survives this step (spec §16).
+  invents. A model cannot fabricate a citation that survives this step (spec §16). The resolved
+  citations are stored with the answer (`messages.citations`), so history shows the same sources the
+  student saw live; the markers stay in the stored text and are stripped only from speech.
 
 ---
 
@@ -747,13 +749,18 @@ load to justify it. Recorded in [ADR-0014](adr/0014-observability-scope.md).
 
 ```
 docker compose
-├── frontend    Next.js (dev: next dev; prod: standalone build)
+├── frontend    Next.js standalone server; its auth proxy reaches the backend over the network
 ├── backend     FastAPI + Uvicorn  ── websocket-sticky (session state is worker-local)
-├── worker      ingestion + memory extraction (same image, different entrypoint)
+├── migrate     alembic upgrade head, once, before the backend starts
 ├── postgres    16 + pgvector
-├── redis       7
-└── mlflow      tracking server (Postgres backend, local artifact volume)
+├── redis       7, no persistence
+├── worker      planned: ingestion + memory extraction (same image, different entrypoint)
+└── mlflow      planned (Phase 8): tracking server (Postgres backend, local artifact volume)
 ```
+
+Today memory extraction runs as an in-process background task (`app/core/background.py`) and
+ingestion is a command-line script; the `worker` split waits until either needs its own process.
+CI brings this stack up exactly as the README describes and runs the end-to-end suite against it.
 
 `backend` holds per-session in-memory state (the `TurnContext` task tree), so horizontal scaling
 requires sticky routing by `session_id`. That is an accepted v1 constraint, stated plainly: this
@@ -769,27 +776,30 @@ and streaming cancellation over pub/sub — deliberately out of scope, see §17.
 vaanios/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                 # FastAPI app factory
-│   │   ├── api/                    # HTTP routers: auth, sessions, students, docs, eval, admin
-│   │   ├── ws/                     # WebSocket endpoint + protocol codecs
-│   │   ├── core/                   # config, security, deps, errors, telemetry, rate_limit
+│   │   ├── main.py, asgi.py        # the app factory; the uvicorn entrypoint
+│   │   ├── api/                    # HTTP routers (auth, sessions, chat, admin, health) + deps
+│   │   ├── ws/                     # the voice WebSocket endpoint
+│   │   ├── core/                   # config, security, errors, logging, middleware, rate_limit
 │   │   ├── providers/              # llm/ stt/ tts/ embedding/ reranker/ + registry
-│   │   ├── voice/                  # ingress, vad, turn_detector, stt_stream, chunker, tts_stream, playback
-│   │   ├── agent/                  # orchestrator, state, language, intent, prompts, tools/
-│   │   ├── rag/                    # ingest/, retrieve/, rerank/, context, citations
-│   │   ├── memory/                 # short_term, long_term, extractor
+│   │   ├── voice/                  # session, state, vad, turn_detector, chunker, playback, marks
+│   │   ├── agent/                  # orchestrator, intent, prompts, lang/, tools/, memory extractor
+│   │   ├── rag/                    # ingest, chunking, retrieve, fusion, context (citations)
+│   │   ├── services/               # conversation, auth, usage, the short-term memory window
 │   │   ├── db/                     # models, session, repositories
 │   │   └── schemas/                # Pydantic request/response models
-│   ├── migrations/                 # Alembic
-│   ├── eval/                       # suites/, metrics/, judges/, runner, reporters
-│   └── tests/                      # unit/ integration/ e2e/ fixtures/
+│   ├── migrations/                 # Alembic — authoritative for the schema
+│   ├── eval/                       # suites/, metrics/, runner
+│   ├── scripts/                    # fetch_models, promote_admin, ingest_sample_corpus, export_openapi, …
+│   └── tests/                      # unit/ (no services) and integration/ (real Postgres, Redis)
 ├── frontend/
-│   └── src/  app/ components/ hooks/ lib/ (audio worklet, ws client, session store)
-├── datasets/                       # v1/ v2/ … versioned eval data + manifests
-├── db/schema.sql                   # design reference DDL (Alembic is authoritative once Phase 1 lands)
-├── docs/                           # this directory, incl. adr/ and failure_cases/
-├── infra/                          # docker/, compose files, CI workflow sources
-└── scripts/                        # ingest_docs, run_eval, seed_demo, bench_stage
+│   ├── src/                        # app/ (pages, auth proxy), components/, lib/ (api, auth, voice)
+│   ├── public/                     # the capture AudioWorklet
+│   └── e2e/                        # Playwright, against a stack started from source or Compose
+├── datasets/                       # v1/ — versioned eval data, fixtures and the manifest
+├── db/                             # schema.sql (the design), schema.current.sql (generated)
+├── docs/                           # this directory, incl. adr/ and the API contract (openapi.json)
+├── infra/                          # docker/, compose.yaml
+└── scripts/                        # dev_db.sh, dump_schema.sh
 ```
 
 Rationale for a monorepo and for `eval/` living inside `backend/` (it imports the provider

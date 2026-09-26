@@ -1,7 +1,8 @@
 # Security
 
-**Status:** Phase 0 — threat model and checklist. No controls are implemented yet; each item below
-names the phase that implements it and the test that proves it.
+**Status:** Phase 7. The threat model is Phase 0's. The controls it names have been built phase by
+phase, and each phase audit records the tests that prove them. The checklist in §6 has not been
+re-ticked since Phase 0: reconciling it item by item, with evidence, is Gate 9's criterion.
 
 ---
 
@@ -69,7 +70,7 @@ that injection must not be able to *do* anything, rather than that it can be pre
 | SQL injection | SQLAlchemy parameter binding; no f-string SQL; a lint rule forbids raw `text()` with interpolation | 1 |
 | SSRF via ingestion URLs | Allowlist + no redirects + no internal address ranges | 5 |
 | XSS in transcript rendering | React escaping; no `dangerouslySetInnerHTML`; citations rendered as structured data | 7 |
-| CSRF | Bearer tokens in headers (not cookies); if cookies are added, `SameSite=Strict` + CSRF token | 1 |
+| CSRF | The API takes bearer tokens in headers, never cookies. The web app's refresh token is a cookie (Phase 7): `httpOnly`, `SameSite=Strict`, scoped to `/api/auth`, and the auth proxy refuses any request whose `Origin` is missing or another site's. No separate CSRF token: those two already refuse every cross-site request | 1, 7 |
 | Denial of wallet on eval endpoints | Eval/experiment endpoints are admin-only and rate-limited separately | 6 |
 
 ## 3. Authentication & authorization
@@ -123,8 +124,10 @@ message), with detail correlated by `request_id` in the server logs.
 
 ## 6. Checklist (spec §22)
 
-Each item is unchecked because nothing is implemented. `[ ]` here means "not done", not "not
-required".
+Not yet reconciled: these boxes are as Phase 0 left them, when nothing existed. Many of these
+controls now exist and are tested (the phase audits say where); others do not, such as the security
+headers. Gate 9 ticks each item with its evidence or records why it is accepted as open. Until then
+an unchecked box means "not yet audited", not "not done" — and not "not required".
 
 **Secrets & config**
 - [ ] All secrets from environment / secret manager; `.env.example` values-free

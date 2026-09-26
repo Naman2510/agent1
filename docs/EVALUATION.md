@@ -295,6 +295,11 @@ for this and none will be invented.
 | T2 | nightly + pre-release | `stt` (local model), full `retrieval` | none |
 | T3 | manual / release gate | `agent`, `response`, `voice`, `e2e` live | paid |
 
+T0's e2e is the Playwright suite in `frontend/e2e/` (Phase 7): a real browser against the whole
+stack, with the real VAD and a microphone playing recorded speech, and every model provider faked.
+CI runs it against the Docker Compose stack. It is a test tier, not the `e2e` *eval* suite of §1,
+which would score live conversations and does not exist yet.
+
 T0 mocks at the **provider interface** (`LLMProvider`, `STTProvider`, …), never by patching HTTP, so
 tests exercise real orchestration logic. Determinism comes from: recorded provider fixtures, a fake
 clock for latency assertions, and a seeded fake embedding provider.
