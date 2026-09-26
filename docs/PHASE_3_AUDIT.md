@@ -147,6 +147,16 @@ difficulty and must be reported separately from human speech.* It was a design a
 now a measurement. The consequence for this phase is concrete: VAD and ASR evaluation cannot be
 bootstrapped with TTS output, so M3-04 genuinely blocks on collecting real recordings.
 
+> **Correction (Phase 7): this finding was wrong, and the detector was not working.** Silero v5
+> scores each window together with the 64 samples before it; `SileroVoiceDetector` passed bare
+> windows, and without that context the model stays near zero *for any speech*. Fixed, the same
+> kind of espeak-ng sentence scores 1.0 across the speech and ~0 around it
+> (`tests/unit/test_vad.py`). The low scores above measured the bug, not synthetic speech — and
+> "silence and noise score ~0.001, so the detector is working" was the reasoning error: those only
+> test the negative case. The policy in DATASET.md §3 may still be right, but this is not evidence
+> for it. VAD thresholds remain untuned on human speech (M3-04 stands); detection itself is now
+> verified.
+
 ---
 
 ## 6. Dimensions reviewed with no finding above Minor

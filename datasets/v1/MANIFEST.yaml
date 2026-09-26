@@ -198,7 +198,7 @@ agent_injection_bias:
     - "Sample size (16 cases, 19 attempted calls) is enough to exercise every allowlist row and every mutating tool's schema at least once, not to support a statistical claim — there is no meaningful confidence interval on a boolean-per-mechanism result."
 
 known_gaps:
-  - "No audio. VAD and STT cannot be evaluated from this dataset (see the espeak-ng finding in docs/PHASE_3_AUDIT.md — synthetic speech is not a valid substitute)."
+  - "No human audio. VAD and STT accuracy cannot be evaluated from this dataset; the one synthetic clip (voice_fixtures) only proves the detector fires on speech. (The Phase 3 claim that Silero cannot hear synthetic speech was a detector bug — see the correction in docs/PHASE_3_AUDIT.md §5.)"
   - "No dialectal variation in Hindi or Tamil."
   - "Romanized Tamil has 2 cases and no meaningful coverage; Tamil is deferred past the MVP."
   - "`mixed` has only 8 cases, and it is the hardest class — the least reliable row in the LID report."

@@ -5,7 +5,9 @@ import { useCallback, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
+import { TextPanel } from "@/components/TextPanel";
 import { Transcript } from "@/components/Transcript";
+import { VoicePanel } from "@/components/VoicePanel";
 import { Button, Card, ErrorText, Spinner } from "@/components/ui";
 import { endSession, getSession, listMessages } from "@/lib/api/endpoints";
 import { ApiError, describeError } from "@/lib/api/errors";
@@ -88,6 +90,13 @@ function SessionDetail({ id }: { id: string }) {
           </div>
         ) : null}
       </div>
+      {active ? (
+        session.transport === "text" ? (
+          <TextPanel sessionId={id} onTurnFinished={reload} />
+        ) : (
+          <VoicePanel sessionId={id} onTurnFinished={reload} />
+        )
+      ) : null}
       <Transcript messages={messages} />
     </div>
   );

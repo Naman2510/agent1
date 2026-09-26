@@ -224,8 +224,9 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
    this English-only corpus returns nothing, honestly, rather than a wrong answer.
    ([FC-004](docs/failure_cases/004-cross-lingual-retrieval-degrades-to-zero-signal.md))
 
-The browser client (`frontend/voice-client.html`) was also written without a browser to run it in,
-and says so at the top of the page.
+The browser client (`frontend/`) has been driven in a real Chromium with a fake microphone —
+speech in, barge-in, stop button — but only ever against the fake STT, LLM and TTS providers, never
+real ones, and never on a phone.
 
 ## Evaluation approach
 
