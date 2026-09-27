@@ -98,16 +98,34 @@ reasoning per case) and are written up as
 
 ## 3. STT evaluation
 
-**Status (Phase 8): the suite exists; its numbers come from CI.** `python -m eval.runner --suite
-stt` runs faster-whisper (`small`, int8, language auto-detected) over the 66 spoken parts of the
-synthetic voice dataset, against the sentences they were synthesised from: WER and CER pooled
-over words, per language, and how often the detected language matches the written one. Its
-weights come from Hugging Face, which this project's development environment cannot reach, so it
-runs in tier T2 (`.github/workflows/nightly.yml`), where they can be downloaded. What it measures
-is a recogniser hearing eSpeak — useful for comparing recognisers and settings, not a statement
-about anyone's voice. Its normalisation today is case, apostrophes and punctuation only: no
-numeral expansion, no spelling-variant map (below), so the romanized-Hindi column is mostly the
-distance between two spellings.
+**Status (Phase 8): measured, in CI.** `python -m eval.runner --suite stt` runs faster-whisper
+(`small`, int8, language auto-detected) over the 66 spoken parts of the synthetic voice dataset,
+against the sentences they were synthesised from: WER and CER pooled over words, per language, and
+how often the detected language matches the written one. Its weights come from Hugging Face, which
+this project's development environment cannot reach, so it runs in tier T2
+(`.github/workflows/nightly.yml`), where they can be downloaded; its baseline
+(`backend/eval/baselines/stt.json`) was recorded there at `ac96111` and every T2 run checks it.
+What it measures is a recogniser hearing eSpeak — useful for comparing recognisers and settings,
+not a statement about anyone's voice. Its normalisation today is case, apostrophes and punctuation
+only: no numeral expansion, no spelling-variant map (below).
+
+| Language (eSpeak voice) | Parts | WER | CER | Word for word | Language detected as written |
+|---|---|---|---|---|---|
+| English (`en-us`, `en-gb`) | 44 | 0.127 | 0.068 | 30 | 44 |
+| Hindi, Devanagari (`hi`) | 11 | 1.383 | 1.294 | 0 | 0 |
+| Romanized Hindi (read by the English voice) | 11 | 0.961 | 0.461 | 0 | 0 |
+| **All** | 66 | 0.447 | 0.291 | 30 | 44 |
+
+**What these say.** English is heard well enough to use, and part of what it gets "wrong" is the
+normaliser's: "twelve volts" comes back as "12 volts" and counts as an error. Hindi fails outright,
+and in the way that matters most: with the language left to auto-detection, Whisper never once
+decided the eSpeak Hindi was Hindi — it wrote Japanese, Polish, or fluent invented English ("Thank
+you for watching and I'll see you in the next video!" for "ठीक है, समझ गया।"). A WER above 1 is that:
+more words invented than were spoken. The romanized-Hindi row is mostly English phonetics read back
+as English words. How much of the Hindi failure is eSpeak's Hindi and how much is language
+identification is not separable from this data; passing the language the router already decided
+(ADR-0011) instead of auto-detecting is the obvious next measurement, and none of this says
+anything about a human speaking Hindi.
 
 ### 3.1 Metrics, and where they lie
 

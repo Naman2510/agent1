@@ -1,0 +1,51 @@
+{
+  "config": {
+    "recogniser": {
+      "beam_size": 5,
+      "compute_type": "int8",
+      "language": "auto",
+      "model": "small",
+      "provider": "faster-whisper"
+    },
+    "suite": "stt",
+    "tier": "T2"
+  },
+  "config_name": "stt",
+  "dataset_digest": "1084397f02d7eed9ba859ea73f503cdb002871e8eb890001798fccfc4ddf5bfc",
+  "dataset_version": "v1",
+  "evaluation_run_id": null,
+  "git_dirty": false,
+  "git_sha": "ac96111",
+  "recorded_at": "2026-09-27T18:25:51+00:00",
+  "suite": "stt",
+  "summary": {
+    "by_language": {
+      "en": {
+        "cases": 44,
+        "cer": 0.0682,
+        "exact": 30,
+        "language_detected_as_written": 44,
+        "wer": 0.1273
+      },
+      "hi": {
+        "cases": 11,
+        "cer": 1.2938,
+        "exact": 0,
+        "language_detected_as_written": 0,
+        "wer": 1.383
+      },
+      "hi-Latn": {
+        "cases": 11,
+        "cer": 0.4612,
+        "exact": 0,
+        "language_detected_as_written": 0,
+        "wer": 0.9608
+      }
+    },
+    "cases": 66,
+    "cer": 0.2911,
+    "exact": 30,
+    "language_detected_as_written": 44,
+    "wer": 0.4465
+  }
+}
