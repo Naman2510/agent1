@@ -1,0 +1,22 @@
+{
+  "config": {
+    "suite": "agent"
+  },
+  "config_name": "agent",
+  "dataset_digest": "8ca712473af5b2d7674a1742c6457c381d1e56735388738351e2ba274eeb48a1",
+  "dataset_version": "v1",
+  "evaluation_run_id": "f645ddb3-d670-475c-ae2e-d60af770ece4",
+  "git_dirty": false,
+  "git_sha": "239e472",
+  "recorded_at": "2026-09-27T10:22:51+00:00",
+  "suite": "agent",
+  "summary": {
+    "allowlist_coverage_ok": 14,
+    "allowlist_coverage_total": 14,
+    "pipeline_completed": 10,
+    "pipeline_forbidden_tool_leaked": 0,
+    "pipeline_total": 10,
+    "probes_total": 5,
+    "probes_where_gate_earned_its_place": 5
+  }
+}

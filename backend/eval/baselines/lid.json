@@ -1,0 +1,25 @@
+{
+  "config": {
+    "suite": "lid"
+  },
+  "config_name": "lid",
+  "dataset_digest": "5000d048787d9cd12c41a9165bd9e2755c0d1421e3c07f2fd9822bc799649be1",
+  "dataset_version": "v1",
+  "evaluation_run_id": "0723dfb9-d36e-49e4-a4b7-da3d7667fd10",
+  "git_dirty": false,
+  "git_sha": "239e472",
+  "recorded_at": "2026-09-27T10:22:51+00:00",
+  "suite": "lid",
+  "summary": {
+    "routed": {
+      "accuracy": 0.875,
+      "cases": 88,
+      "macro_f1": 0.7568
+    },
+    "signal": {
+      "accuracy": 0.9205,
+      "cases": 88,
+      "macro_f1": 0.8988
+    }
+  }
+}
