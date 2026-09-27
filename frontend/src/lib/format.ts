@@ -1,4 +1,4 @@
-import type { Citation } from "@/lib/api/types";
+import type { Citation, ExperimentSummary, HeadlineMetric } from "@/lib/api/types";
 
 const LANGUAGES: Record<string, string> = {
   en: "English",
@@ -64,3 +64,46 @@ export function describeCitation(citation: Citation): string {
         : `p. ${citation.page_start}`;
   return [citation.document_title, where, pages].filter(Boolean).join(" — ");
 }
+
+/** A run's headline number as the suite reports it: 0.893, 575 ms, 14 / 14. */
+export function formatHeadline(metric: HeadlineMetric): string {
+  const value =
+    metric.unit === "ms"
+      ? formatMs(metric.value)
+      : metric.unit === "ratio"
+        ? metric.value.toFixed(3)
+        : formatCount(metric.value);
+  return metric.of !== null && metric.unit === "count" ? `${value} / ${formatCount(metric.of)}` : value;
+}
+
+const DECISIONS: Record<string, string> = {
+  adopt: "Adopted",
+  reject: "Rejected",
+  inconclusive: "Inconclusive",
+  pending: "Pending",
+};
+
+export const decisionLabel = (decision: string) => DECISIONS[decision] ?? decision;
+
+const signed = (value: number, digits: number) =>
+  `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
+
+/**
+ * "endpoint_ms 575.3 → 348.1 over 36 cases; gain +227.2 (95% CI +217.2 to +237.2)". The gain is
+ * in the metric's own units and positive means better, whichever way the metric points.
+ */
+export function describeComparison(e: ExperimentSummary): string | null {
+  if (e.metric === null || e.baseline_mean === null || e.candidate_mean === null) return null;
+  const digits = Math.abs(e.baseline_mean) >= 10 ? 1 : 3;
+  const parts = [
+    `${e.metric} ${e.baseline_mean.toFixed(digits)} → ${e.candidate_mean.toFixed(digits)} over ${e.cases} cases`,
+  ];
+  if (e.mean_gain !== null) {
+    const ci = e.gain_95ci ? ` (95% CI ${signed(e.gain_95ci[0], digits)} to ${signed(e.gain_95ci[1], digits)})` : "";
+    parts.push(`gain ${signed(e.mean_gain, digits)}${ci}`);
+  }
+  return parts.join("; ");
+}
+
+/** The short form of a content digest or commit: enough to tell two apart, not to verify one. */
+export const shortHash = (hash: string) => hash.slice(0, 12);

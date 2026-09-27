@@ -111,3 +111,78 @@ export interface AdminDashboard {
   mastery: { tracked_topics: number; average_mastery: number | NotMeasured };
   memory_events: { applied: number; rejected: number; total: number };
 }
+
+// --- evaluation (EVALUATION.md §8) -----------------------------------------------------------
+
+export interface HeadlineMetric {
+  key: string;
+  label: string;
+  unit: "ratio" | "ms" | "count";
+  value: number;
+  of: number | null;
+}
+
+export interface EvaluationRunSummary {
+  id: string;
+  suite: string;
+  config_name: string;
+  dataset_version: string;
+  dataset_digest: string;
+  git_sha: string;
+  git_dirty: boolean;
+  started_at: string;
+  finished_at: string | null;
+  case_count: number | null;
+  failed_count: number;
+  headlines: HeadlineMetric[];
+  reproduces_run_id: string | null;
+}
+
+export interface GuardResult {
+  metric: string;
+  mean_loss: number;
+  max_loss: number;
+  failed: boolean;
+}
+
+export interface ExperimentSummary {
+  slug: string;
+  title: string;
+  hypothesis: string;
+  suite: string;
+  variable_changed: string;
+  decision: "adopt" | "reject" | "inconclusive" | "pending" | string;
+  rationale: string | null;
+  decided_at: string | null;
+  baseline_run_id: string | null;
+  candidate_run_id: string | null;
+  metric: string | null;
+  cases: number;
+  baseline_mean: number | null;
+  candidate_mean: number | null;
+  mean_gain: number | null;
+  gain_95ci: [number, number] | null;
+  guards: GuardResult[];
+}
+
+export interface EvaluationOverview {
+  runs: EvaluationRunSummary[];
+  experiments: ExperimentSummary[];
+}
+
+export interface FailingCase {
+  case_id: string;
+  language: string | null;
+  input: Record<string, unknown>;
+  expected: Record<string, unknown> | null;
+  actual: Record<string, unknown> | null;
+  notes: string | null;
+}
+
+export interface RunFailures {
+  run_id: string;
+  suite: string;
+  config_name: string;
+  failed_count: number;
+  cases: FailingCase[];
+}

@@ -2,7 +2,8 @@
 
 import { useEffect, type ReactNode } from "react";
 
-import { Button, ErrorText, Spinner } from "@/components/ui";
+import { EvaluationPanels } from "@/components/EvaluationPanels";
+import { Button, ErrorText, Section, Spinner } from "@/components/ui";
 import { getAdminDashboard } from "@/lib/api/endpoints";
 import { describeError } from "@/lib/api/errors";
 import type { AdminDashboard as Dashboard, ToolUsageRow } from "@/lib/api/types";
@@ -60,25 +61,12 @@ export function AdminDashboard() {
         <ToolUsage rows={data.tool_usage} />
         <Learning data={data} />
       </div>
+      {/* Loaded on its own: an evaluation read that fails must not take the dashboard with it. */}
+      <EvaluationPanels />
     </div>
   );
 }
 
-function Section({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
-  return (
-    <section aria-labelledby={slug(title)} className="flex flex-col gap-3">
-      <div>
-        <h2 id={slug(title)} className="text-base font-semibold">
-          {title}
-        </h2>
-        {note ? <p className="text-sm text-muted">{note}</p> : null}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-const slug = (title: string) => `admin-${title.toLowerCase().replace(/\W+/g, "-")}`;
 
 function Overview({ data }: { data: Dashboard }) {
   return (

@@ -98,6 +98,8 @@ and the microphone tagging rule are in [ARCHITECTURE.md §10](ARCHITECTURE.md).
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/admin/health` | the dashboard's data: live and total counts, tool usage by outcome, average time to first token, mastery overview, memory updates. An average with no samples is the string `"not_measured"`, never `0` |
+| GET | `/admin/evaluation` | each configuration's latest recorded evaluation run — provenance (git SHA, dataset digest), case and failure counts, headline metrics — and every decided experiment with its comparison and guards. Empty lists when nothing is recorded |
+| GET | `/admin/evaluation/runs/{run_id}/failures` | a run's failing cases as recorded (input, expected, actual, why), at most 200; `404` for an unknown run |
 
 There is deliberately no endpoint that grants the admin role: `backend/scripts/promote_admin.py`,
 run with shell access to the deployment, is the only way (README).
@@ -112,4 +114,4 @@ endpoints. These were in the Phase 0 plan and have no route today:
 |---|---|---|
 | Student data | read own progress, profile and memory digest; study plans; quiz history and attempts | unscheduled |
 | Documents (admin) | upload with licence, list, inspect chunks, delete | unscheduled |
-| Evaluation (admin) | start suite runs, browse results and failures, compare experiments | 8 |
+| Evaluation (admin) | start a suite run from the API — runs are started from the command line (`python -m eval.runner`), and the API only reads them | unscheduled |

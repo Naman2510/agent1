@@ -73,3 +73,19 @@ export function Spinner({ label = "Loading" }: { label?: string }) {
     </div>
   );
 }
+
+/** A titled dashboard section; its heading labels it for assistive technology. */
+export function Section({ title, note, children }: { title: string; note?: ReactNode; children: ReactNode }) {
+  const id = `section-${title.toLowerCase().replace(/\W+/g, "-")}`;
+  return (
+    <section aria-labelledby={id} className="flex flex-col gap-3">
+      <div>
+        <h2 id={id} className="text-base font-semibold">
+          {title}
+        </h2>
+        {note ? <p className="text-sm text-muted">{note}</p> : null}
+      </div>
+      {children}
+    </section>
+  );
+}

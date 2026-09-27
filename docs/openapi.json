@@ -145,6 +145,393 @@
         "title": "CitationResponse",
         "type": "object"
       },
+      "EvaluationOverview": {
+        "properties": {
+          "experiments": {
+            "items": {
+              "$ref": "#/components/schemas/ExperimentSummary"
+            },
+            "title": "Experiments",
+            "type": "array"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationRunSummary"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "experiments"
+        ],
+        "title": "EvaluationOverview",
+        "type": "object"
+      },
+      "EvaluationRunSummary": {
+        "properties": {
+          "case_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Case Count"
+          },
+          "config_name": {
+            "title": "Config Name",
+            "type": "string"
+          },
+          "dataset_digest": {
+            "title": "Dataset Digest",
+            "type": "string"
+          },
+          "dataset_version": {
+            "title": "Dataset Version",
+            "type": "string"
+          },
+          "failed_count": {
+            "title": "Failed Count",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "git_dirty": {
+            "title": "Git Dirty",
+            "type": "boolean"
+          },
+          "git_sha": {
+            "title": "Git Sha",
+            "type": "string"
+          },
+          "headlines": {
+            "items": {
+              "$ref": "#/components/schemas/HeadlineMetric"
+            },
+            "title": "Headlines",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reproduces_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reproduces Run Id"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "suite": {
+            "title": "Suite",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "suite",
+          "config_name",
+          "dataset_version",
+          "dataset_digest",
+          "git_sha",
+          "git_dirty",
+          "started_at",
+          "finished_at",
+          "case_count",
+          "failed_count",
+          "headlines",
+          "reproduces_run_id"
+        ],
+        "title": "EvaluationRunSummary",
+        "type": "object"
+      },
+      "ExperimentSummary": {
+        "properties": {
+          "baseline_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Mean"
+          },
+          "baseline_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Run Id"
+          },
+          "candidate_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Mean"
+          },
+          "candidate_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Run Id"
+          },
+          "cases": {
+            "title": "Cases",
+            "type": "integer"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "gain_95ci": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gain 95Ci"
+          },
+          "guards": {
+            "items": {
+              "$ref": "#/components/schemas/GuardResult"
+            },
+            "title": "Guards",
+            "type": "array"
+          },
+          "hypothesis": {
+            "title": "Hypothesis",
+            "type": "string"
+          },
+          "mean_gain": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Gain"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "suite": {
+            "title": "Suite",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "variable_changed": {
+            "title": "Variable Changed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "hypothesis",
+          "suite",
+          "variable_changed",
+          "decision",
+          "rationale",
+          "decided_at",
+          "baseline_run_id",
+          "candidate_run_id",
+          "metric",
+          "cases",
+          "baseline_mean",
+          "candidate_mean",
+          "mean_gain",
+          "gain_95ci",
+          "guards"
+        ],
+        "title": "ExperimentSummary",
+        "type": "object"
+      },
+      "FailingCase": {
+        "properties": {
+          "actual": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual"
+          },
+          "case_id": {
+            "title": "Case Id",
+            "type": "string"
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected"
+          },
+          "input": {
+            "additionalProperties": true,
+            "title": "Input",
+            "type": "object"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "required": [
+          "case_id",
+          "language",
+          "input",
+          "expected",
+          "actual",
+          "notes"
+        ],
+        "title": "FailingCase",
+        "type": "object"
+      },
+      "GuardResult": {
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "max_loss": {
+            "title": "Max Loss",
+            "type": "number"
+          },
+          "mean_loss": {
+            "title": "Mean Loss",
+            "type": "number"
+          },
+          "metric": {
+            "title": "Metric",
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric",
+          "mean_loss",
+          "max_loss",
+          "failed"
+        ],
+        "title": "GuardResult",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -156,6 +543,51 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeadlineMetric": {
+        "description": "One number worth showing for a run. `of` is the total a count is out of, if it has one.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "of": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Of"
+          },
+          "unit": {
+            "enum": [
+              "ratio",
+              "ms",
+              "count"
+            ],
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "unit",
+          "value"
+        ],
+        "title": "HeadlineMetric",
         "type": "object"
       },
       "HealthResponse": {
@@ -561,6 +993,43 @@
         "title": "RegisterRequest",
         "type": "object"
       },
+      "RunFailures": {
+        "properties": {
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/FailingCase"
+            },
+            "title": "Cases",
+            "type": "array"
+          },
+          "config_name": {
+            "title": "Config Name",
+            "type": "string"
+          },
+          "failed_count": {
+            "title": "Failed Count",
+            "type": "integer"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "suite": {
+            "title": "Suite",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "suite",
+          "config_name",
+          "failed_count",
+          "cases"
+        ],
+        "title": "RunFailures",
+        "type": "object"
+      },
       "SessionCreateRequest": {
         "properties": {
           "client_info": {
@@ -834,6 +1303,82 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/admin/evaluation": {
+      "get": {
+        "description": "Each config's latest recorded run, and every decided experiment. Empty lists, not zeros,\nwhen nothing has been recorded in this database.",
+        "operationId": "evaluation_overview_v1_admin_evaluation_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Evaluation Overview",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/evaluation/runs/{run_id}/failures": {
+      "get": {
+        "description": "The failure-case browser: a run's failing cases, as recorded.",
+        "operationId": "run_failures_v1_admin_evaluation_runs__run_id__failures_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunFailures"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Failures",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/health": {
       "get": {
         "operationId": "system_health_v1_admin_health_get",

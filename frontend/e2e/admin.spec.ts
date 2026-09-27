@@ -35,6 +35,16 @@ test("an admin sees the dashboard, counting what just happened", async ({ page }
   for (const section of ["Right now", "Speed and reliability", "Tools", "Learning"]) {
     await expect(page.getByRole("heading", { name: section, level: 2 })).toBeVisible();
   }
+  // Evaluation comes from runs the evaluation runner recorded. A fresh stack has none, and says
+  // so; a database with runs shows them. Either way, never an invented number.
+  for (const section of ["Evaluation", "Experiments"]) {
+    await expect(page.getByRole("heading", { name: section, level: 2 })).toBeVisible();
+  }
+  await expect(
+    page
+      .getByText("No evaluation run has been recorded in this database.", { exact: false })
+      .or(page.getByRole("columnheader", { name: "Recorded" })),
+  ).toBeVisible();
   expect(await tileValue(page, "Students")).toBeGreaterThanOrEqual(1);
   expect(await tileValue(page, "Sessions, all time")).toBeGreaterThanOrEqual(1);
   expect(await tileValue(page, "Messages, all time")).toBeGreaterThanOrEqual(2);

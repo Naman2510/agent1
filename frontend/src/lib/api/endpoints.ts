@@ -2,9 +2,11 @@ import { apiFetch, apiJson } from "@/lib/api/client";
 import { ApiError, toApiError } from "@/lib/api/errors";
 import type {
   AdminDashboard,
+  EvaluationOverview,
   Me,
   Message,
   PaginatedSessions,
+  RunFailures,
   Session,
   TurnSummary,
 } from "@/lib/api/types";
@@ -26,6 +28,11 @@ export const listMessages = (id: string) =>
   apiJson<Message[]>(`/sessions/${encodeURIComponent(id)}/messages`);
 
 export const getAdminDashboard = () => apiJson<AdminDashboard>("/admin/health");
+
+export const getEvaluation = () => apiJson<EvaluationOverview>("/admin/evaluation");
+
+export const getRunFailures = (runId: string) =>
+  apiJson<RunFailures>(`/admin/evaluation/runs/${encodeURIComponent(runId)}/failures`);
 
 export interface TextTurnHandlers {
   onDelta: (text: string) => void;
