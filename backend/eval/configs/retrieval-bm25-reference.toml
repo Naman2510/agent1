@@ -1,0 +1,9 @@
+# Reference only, not a configuration the system runs: real BM25 over the same chunks, offline, to
+# size what the lexical arm loses without IDF weighting (ADR-0005, FC-003). Ignores filters.
+suite = "retrieval"
+
+[retrieval]
+mode = "bm25_reference"
+
+[embedding]
+heading_prefix = true

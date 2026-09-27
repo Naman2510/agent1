@@ -1,398 +1,339 @@
-"""Evaluation entrypoint.
+"""Evaluation entrypoint: every suite, one command (EVALUATION.md §2).
 
-Every run records what produced it — suite, dataset version, git SHA, config — because a metric
-without those is not a result (EVALUATION.md §1). Writing the row to `evaluation_runs` needs the
-database and lands with the eval API in Phase 8; until then the runner prints the same fields it
-will persist, so the discipline is established before the plumbing.
+    python -m eval.runner --suite lid                          # the suite's default config
+    python -m eval.runner --config eval/configs/retrieval*.toml --record
+    python -m eval.runner --reproduce RUN_ID
+    python -m eval.runner --experiment eval/experiments/EXP-008.toml --record
 
-    python -m eval.runner --suite lid --dataset v1
-    python -m eval.runner --suite lid --dataset v1 --failures
+A run is `(suite, dataset, config, code)` (eval/recording.py). `--record` keeps it: a row in
+`evaluation_runs` with a row per case, and an MLflow run when MLflow is installed. `--reproduce`
+runs a recorded run again from its record alone and fails unless the metrics come out identical.
+`--experiment` runs a registered experiment's baseline and candidate — configs that must differ in
+exactly one knob — and decides it by the rule registered with it (eval/decision.py).
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
-import subprocess
 import sys
+import tomllib
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from eval.suites import agent as agent_suite
-from eval.suites import injection as injection_suite
-from eval.suites import lid
-from eval.suites import retrieval as retrieval_suite
+from eval.decision import DecisionRule, decide
+from eval.harness import SUITES
+from eval.recording import (
+    CONFIGS,
+    DATASETS,
+    ConfigError,
+    RunSpec,
+    RunStore,
+    SuiteOutcome,
+    check_baseline,
+    config_diff,
+    dataset_digest,
+    default_config_path,
+    git_state,
+    leaf_paths,
+    load_config,
+    log_to_mlflow,
+    write_baseline,
+)
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DATASETS = REPO_ROOT / "datasets"
+if TYPE_CHECKING:
+    from app.core.config import Settings
+
+RULE = "=" * 70
 
 
-def git_sha() -> str:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],  # noqa: S607
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # A run that cannot be tied to a commit is not reproducible, and saying so is better than
-        # emitting a number that looks authoritative.
-        return "unknown"
+def load_settings() -> Settings:
+    """The application's settings — read only when a database is involved, so a suite like `lid`
+    runs anywhere, with nothing configured."""
+    from app.core.config import get_settings
+
+    return get_settings()
 
 
-def run_lid(dataset: str, *, show_failures: bool) -> int:
-    path = DATASETS / dataset / "lid" / "cases.jsonl"
-    if not path.exists():
-        print(f"no LID cases at {path}", file=sys.stderr)
-        return 2
+def build_spec(config_name: str, config: dict[str, Any], dataset: str) -> RunSpec:
+    suite = SUITES.get(config["suite"])
+    if suite is None:
+        raise ConfigError(f"unknown suite {config['suite']!r}; known: {', '.join(SUITES)}")
+    files = suite.dataset_files(DATASETS / dataset)
+    missing = [str(f) for f in files if not f.exists()]
+    if missing:
+        raise ConfigError(f"dataset {dataset} lacks {', '.join(missing)}")
+    sha, dirty = git_state()
+    return RunSpec(
+        suite=suite.name,
+        config_name=config_name,
+        config=config,
+        dataset_version=dataset,
+        dataset_digest=dataset_digest(files),
+        git_sha=sha,
+        git_dirty=dirty,
+    )
 
-    cases = lid.load_cases(path)
-    result = lid.run(cases)
 
-    print("=" * 62)
-    print("suite            lid")
-    print(f"dataset          {dataset}")
-    print(f"git sha          {git_sha()}")
+def print_header(spec: RunSpec, *, cases_note: str = "") -> None:
+    print(RULE)
+    print(f"suite            {spec.suite}")
+    print(f"config           {spec.config_name}")
+    print(
+        f"dataset          {spec.dataset_version} (sha256 {spec.dataset_digest[:12]}){cases_note}"
+    )
+    print(f"git sha          {spec.git_sha}{' (dirty working tree)' if spec.git_dirty else ''}")
     print(f"started          {datetime.now(UTC).isoformat(timespec='seconds')}")
-    print("router           app.agent.lang.router (lexicon + script, no model)")
-    print("=" * 62)
-    print()
-    print("SIGNAL — did the utterance itself identify its language?")
-    print("(no usable signal counts as `unknown`, even where the router then answered correctly)")
-    print()
-    print(result.signal.render())
-    print()
-    print("ROUTED — what the router actually chose, sticky prior included")
-    print("(closer to what a student experiences; a fresh session defaults to English)")
-    print()
-    print(result.routed.render())
-    print()
-    print(
-        "BIAS: these cases were authored by the same person who wrote the lexicon under test.\n"
-        "They measure internal consistency and guard against regressions. They are NOT evidence\n"
-        "of accuracy on real student speech — see datasets/v1/MANIFEST.yaml."
-    )
+    print(f"measures         {SUITES[spec.suite].measures}")
+    print(RULE)
 
-    failures = [o for o in result.outcomes if not o.passed]
-    if show_failures and failures:
-        print()
-        print(f"failures ({len(failures)})")
-        for outcome in failures:
-            print(
-                f"  {outcome.case.id:10s} expected {outcome.case.language:8s} "
-                f"got {outcome.predicted:8s} | {outcome.case.text}"
-            )
-            print(f"             {outcome.explanation}")
 
-    print()
-    print(
-        "summary_metrics "
-        + json.dumps(
-            {
-                "signal": result.signal.summary(),
-                "routed": result.routed.summary(),
-            },
-            sort_keys=True,
+async def execute(
+    spec: RunSpec,
+    settings: Settings | None,
+    *,
+    record: bool,
+    show_failures: bool = False,
+    reproduces: uuid.UUID | None = None,
+    store: RunStore | None = None,
+) -> tuple[SuiteOutcome, uuid.UUID | None]:
+    """Run one suite under one config; record it if asked. Returns the outcome and run id."""
+    print_header(spec)
+    suite = SUITES[spec.suite]
+    run_id = None
+    if record:
+        if store is None:
+            raise ValueError("recording needs a run store")
+        run_id = await store.start(spec, reproduces=reproduces)
+    try:
+        outcome = await suite.evaluate(
+            spec.config, DATASETS / spec.dataset_version, show_failures, settings
         )
+    except Exception as exc:
+        if run_id is not None and store is not None:
+            await store.fail(run_id, f"{type(exc).__name__}: {exc}")
+        raise
+
+    print(outcome.report)
+    print()
+    print("summary_metrics " + json.dumps(outcome.summary, sort_keys=True))
+
+    if run_id is not None and store is not None:
+        mlflow_run_id = None
+        try:
+            mlflow_run_id = log_to_mlflow(spec, outcome, run_id=run_id)
+        except ImportError:
+            print("NOT LOGGED TO MLFLOW: mlflow is not installed (pip install -e '.[eval]')")
+        await store.finish(run_id, outcome, mlflow_run_id=mlflow_run_id)
+        print(
+            f"recorded         evaluation_runs {run_id}"
+            + (f", mlflow {mlflow_run_id}" if mlflow_run_id else "")
+        )
+    return outcome, run_id
+
+
+async def run_configs(
+    specs: list[RunSpec],
+    settings: Settings | None,
+    *,
+    record: bool,
+    show_failures: bool,
+    baseline: str | None = None,
+) -> int:
+    """Run each config. `baseline="write"` commits each run's summary as the config's baseline;
+    `baseline="check"` fails unless each run reproduces its committed baseline exactly."""
+    store = RunStore(settings) if record and settings is not None else None
+    status = 0
+    try:
+        for spec in specs:
+            outcome, run_id = await execute(
+                spec, settings, record=record, show_failures=show_failures, store=store
+            )
+            status = max(status, 0 if outcome.ok else 1)
+            if baseline == "write":
+                if spec.git_dirty:
+                    print("warning: a baseline from a dirty working tree names code it cannot pin")
+                print(f"baseline         {write_baseline(spec, outcome, run_id)}")
+            elif baseline == "check":
+                code, lines = check_baseline(spec, outcome)
+                for line in lines:
+                    print(f"baseline         {line}")
+                status = max(status, code)
+            print()
+    finally:
+        if store is not None:
+            await store.close()
+    return status
+
+
+async def reproduce(run_id: uuid.UUID, settings: Settings, *, record: bool) -> int:
+    """Run a recorded run again from its record, and compare."""
+    store = RunStore(settings)
+    try:
+        recorded, recorded_summary = await store.load(run_id)
+        now = build_spec(recorded.config_name, recorded.config, recorded.dataset_version)
+        if now.dataset_digest != recorded.dataset_digest:
+            then, again = recorded.dataset_digest[:12], now.dataset_digest[:12]
+            print(
+                f"cannot reproduce {run_id}: dataset {recorded.dataset_version} has changed "
+                f"since it ran (sha256 {then} then, {again} now)"
+            )
+            return 2
+        if now.git_sha != recorded.git_sha:
+            print(f"note: recorded at {recorded.git_sha}, reproducing at {now.git_sha}")
+        outcome, _ = await execute(now, settings, record=record, reproduces=run_id, store=store)
+    finally:
+        await store.close()
+
+    before, after = leaf_paths(recorded_summary), leaf_paths(outcome.summary)
+    differences = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+    if differences:
+        print(f"NOT REPRODUCED — {len(differences)} metric(s) differ from run {run_id}:")
+        for key in differences:
+            print(f"  {key}: {json.dumps(before.get(key))} then, {json.dumps(after.get(key))} now")
+        return 1
+    print(f"reproduced       every summary metric of run {run_id} came out identical")
+    return 0
+
+
+def describe(rule: DecisionRule, comparison: dict[str, Any]) -> str:
+    """The decision's reason in one sentence, from the comparison alone."""
+    c = comparison
+    if not c.get("cases"):
+        return str(c.get("reason", "no comparable cases"))
+    low, high = c["gain_95ci"]
+    return (
+        f"{c['metric']}: {c['baseline_mean']:.4f} → {c['candidate_mean']:.4f} over {c['cases']} "
+        f"cases (mean gain {c['mean_gain']:+.4f}, 95% CI [{low:+.4f}, {high:+.4f}]; "
+        f"{c['cases_better']} better, {c['cases_worse']} worse). Registered rule: adopt at a gain "
+        f"of at least {rule.min_effect} with the interval above zero, reject at the mirror image"
     )
+
+
+def _per_case(outcome: SuiteOutcome) -> dict[str, dict[str, float]]:
+    return {case.case_id: dict(case.metrics) for case in outcome.cases}
+
+
+async def run_experiment(
+    experiment: dict[str, Any], dataset: str, settings: Settings | None, *, record: bool
+) -> int:
+    baseline_name, baseline = load_config(CONFIGS / experiment["baseline"])
+    candidate_name, candidate = load_config(CONFIGS / experiment["candidate"])
+    changed = config_diff(baseline, candidate)
+    if len(changed) != 1:
+        # EVALUATION.md §7: an experiment changes one variable, or it cannot be attributed.
+        what = ", ".join(changed) or "nothing"
+        print(f"refusing {experiment['slug']}: its configs differ in {what}, not in one knob")
+        return 2
+    rule = DecisionRule.from_config(experiment["decision_rule"])
+
+    print(f"experiment       {experiment['slug']} — {experiment['title']}")
+    print(f"hypothesis       {experiment['hypothesis']}")
+    print(f"variable         {changed[0]}: {baseline_name} → {candidate_name}")
+    print()
+
+    store = RunStore(settings) if record and settings is not None else None
+    try:
+        base_outcome, base_id = await execute(
+            build_spec(baseline_name, baseline, dataset), settings, record=record, store=store
+        )
+        print()
+        cand_outcome, cand_id = await execute(
+            build_spec(candidate_name, candidate, dataset), settings, record=record, store=store
+        )
+        decision, comparison = decide(rule, _per_case(base_outcome), _per_case(cand_outcome))
+        rationale = describe(rule, comparison)
+        print()
+        print(RULE)
+        print(f"decision         {decision.upper()}")
+        print(f"because          {rationale}")
+        for metric, guard in comparison.get("guards", {}).items():
+            verdict = " — FAILED" if guard["failed"] else ""
+            print(
+                f"guard            {metric}: mean loss {guard['mean_loss']:+.4f} "
+                f"(allowed {guard['max_loss']}){verdict}"
+            )
+        print(RULE)
+        if store is not None and base_id is not None and cand_id is not None:
+            await store.record_experiment(
+                slug=experiment["slug"],
+                title=experiment["title"],
+                hypothesis=experiment["hypothesis"],
+                suite=baseline["suite"],
+                variable_changed=changed[0],
+                decision_rule=experiment["decision_rule"],
+                baseline_run_id=base_id,
+                candidate_run_id=cand_id,
+                comparison=comparison,
+                decision=decision,
+                rationale=rationale,
+            )
+            print(f"recorded         experiments {experiment['slug']}")
+    finally:
+        if store is not None:
+            await store.close()
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a VaaniOS evaluation suite.")
-    parser.add_argument(
-        "--suite", required=True, choices=["lid", "retrieval", "injection", "agent"]
-    )
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--suite", choices=sorted(SUITES), help="run a suite's default config")
+    mode.add_argument("--config", nargs="+", type=Path, help="run each of these configs")
+    mode.add_argument("--reproduce", type=uuid.UUID, metavar="RUN_ID", help="re-run a recorded run")
+    mode.add_argument("--experiment", type=Path, help="run and decide a registered experiment")
     parser.add_argument("--dataset", default="v1")
     parser.add_argument(
-        "--failures", action="store_true", help="print every failing case with its reasoning"
+        "--record", action="store_true", help="keep the run in PostgreSQL and MLflow"
+    )
+    parser.add_argument("--failures", action="store_true", help="print every failing case")
+    baselines = parser.add_mutually_exclusive_group()
+    baselines.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="commit each run's summary as its config's baseline (eval/baselines/)",
+    )
+    baselines.add_argument(
+        "--check-baseline",
+        action="store_true",
+        help="fail unless each run reproduces its config's committed baseline",
     )
     args = parser.parse_args()
 
-    if args.suite == "lid":
-        return run_lid(args.dataset, show_failures=args.failures)
-    if args.suite == "retrieval":
-        import asyncio
-
-        return asyncio.run(run_retrieval(args.dataset, show_failures=args.failures))
-    if args.suite == "injection":
-        import asyncio
-
-        return asyncio.run(run_injection(args.dataset))
-    if args.suite == "agent":
-        import asyncio
-
-        return asyncio.run(run_agent(args.dataset))
-    return 2  # pragma: no cover - argparse restricts the choices
-
-
-async def run_injection(dataset: str) -> int:
-    """Runs against a throwaway student/session row that is never committed (like run_retrieval,
-    this suite mutates nothing on success — the whole point is that it does not — so there is
-    nothing here worth persisting, and rolling back on close leaves no trace in a shared database).
-    """
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    from app.agent.tools.base import ToolContext
-    from app.agent.tools.registry import DEFAULT_REGISTRY
-    from app.core.config import get_settings
-    from app.db.models import Session, Student, User, UserRole
-    from app.db.session import create_engine
-    from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
-    from app.providers.reranker.base import NoopReranker
-    from app.rag.service import RagService
-
-    path = DATASETS / dataset / "agent" / "injection_cases.jsonl"
-    if not path.exists():
-        print(f"no injection cases at {path}", file=sys.stderr)
+    try:
+        if args.reproduce is not None:
+            return asyncio.run(reproduce(args.reproduce, load_settings(), record=args.record))
+        if args.experiment is not None:
+            experiment = tomllib.loads(args.experiment.read_text(encoding="utf-8"))
+            suite = load_config(CONFIGS / experiment["baseline"])[1]["suite"]
+            needed = args.record or SUITES[suite].needs_database
+            settings = load_settings() if needed else None
+            return asyncio.run(
+                run_experiment(experiment, args.dataset, settings, record=args.record)
+            )
+        paths = args.config or [default_config_path(args.suite)]
+        specs = [build_spec(*load_config(path), args.dataset) for path in paths]
+        needed = args.record or any(SUITES[spec.suite].needs_database for spec in specs)
+        settings = load_settings() if needed else None
+        return asyncio.run(
+            run_configs(
+                specs,
+                settings,
+                record=args.record,
+                show_failures=args.failures,
+                baseline="write"
+                if args.write_baseline
+                else "check"
+                if args.check_baseline
+                else None,
+            )
+        )
+    except (ConfigError, LookupError) as exc:
+        print(str(exc), file=sys.stderr)
         return 2
-
-    cases = injection_suite.load_cases(path)
-    engine = create_engine(get_settings())
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    print("=" * 70)
-    print("suite            injection")
-    print(f"dataset          {dataset} ({len(cases)} cases)")
-    print(f"git sha          {git_sha()}")
-    print(f"started          {datetime.now(UTC).isoformat(timespec='seconds')}")
-    print(
-        "measures         whether a model already persuaded by injected text is still blocked "
-        "before mutating anything — NOT whether a real model resists the injection itself "
-        "(no LLM call is made; see eval/suites/injection.py)"
-    )
-    print("=" * 70)
-
-    async with factory() as session:
-        user = User(
-            email="eval-injection@example.invalid",
-            password_hash="x",  # noqa: S106 - throwaway actor for a run that is never committed
-            role=UserRole.STUDENT,
-        )
-        session.add(user)
-        await session.flush()
-        student = Student(user_id=user.id, display_name="eval-injection")
-        session.add(student)
-        await session.flush()
-        conversation_session = Session(student_id=student.id, transport="text")
-        session.add(conversation_session)
-        await session.flush()
-
-        rag = RagService(session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker())
-        ctx = ToolContext(
-            student_id=student.id,
-            session_id=conversation_session.id,
-            turn_index=0,
-            db=session,
-            rag=rag,
-            citation_sources={},
-        )
-        report = await injection_suite.run(cases, registry=DEFAULT_REGISTRY, ctx=ctx)
-        # Deliberately not committed — see the docstring above.
-
-    await engine.dispose()
-
-    print(report.render())
-    print()
-    print("summary_metrics " + json.dumps(report.summary(), sort_keys=True))
-    return 0 if not report.executed else 1
-
-
-async def run_agent(dataset: str) -> int:
-    """Runs against throwaway rows that are never committed — see run_injection's docstring for
-    why. See eval/suites/agent.py's own module docstring for what this suite does and does not
-    measure: allowlist coverage and pipeline mechanics are real; a real model's tool-selection
-    judgement is not, for lack of an Anthropic API key in this sandbox.
-    """
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    from app.agent.tools.base import ToolContext
-    from app.agent.tools.registry import DEFAULT_REGISTRY
-    from app.core.config import get_settings
-    from app.db.models import Session, Student, User, UserRole
-    from app.db.session import create_engine
-    from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
-    from app.providers.reranker.base import NoopReranker
-    from app.rag.service import RagService
-
-    path = DATASETS / dataset / "agent" / "scenarios.jsonl"
-    if not path.exists():
-        print(f"no agent scenarios at {path}", file=sys.stderr)
-        return 2
-
-    scenarios = agent_suite.load_cases(path)
-    engine = create_engine(get_settings())
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    print("=" * 70)
-    print("suite            agent")
-    print(f"dataset          {dataset} ({len(scenarios)} scenarios)")
-    print(f"git sha          {git_sha()}")
-    print(f"started          {datetime.now(UTC).isoformat(timespec='seconds')}")
-    print(
-        "measures         allowlist coverage and real pipeline execution under a scripted "
-        "model — NOT a real model's tool-selection accuracy (no LLM call is made; see "
-        "eval/suites/agent.py)"
-    )
-    print("=" * 70)
-
-    report = agent_suite.AgentReport()
-    for scenario in scenarios:
-        report.allowlist_checks.append(agent_suite.check_allowlist_coverage(scenario))
-
-    async with factory() as session:
-        user = User(
-            email="eval-agent@example.invalid",
-            password_hash="x",  # noqa: S106 - throwaway actor for a run that is never committed
-            role=UserRole.STUDENT,
-        )
-        session.add(user)
-        await session.flush()
-        student = Student(user_id=user.id, display_name="eval-agent")
-        session.add(student)
-        await session.flush()
-
-        for scenario in scenarios:
-            conversation_session = Session(student_id=student.id, transport="text")
-            session.add(conversation_session)
-            await session.flush()
-            rag = RagService(
-                session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker()
-            )
-            ctx = ToolContext(
-                student_id=student.id,
-                session_id=conversation_session.id,
-                turn_index=0,
-                db=session,
-                rag=rag,
-                citation_sources={},
-            )
-            if scenario.run_pipeline:
-                report.pipeline_outcomes.append(
-                    await agent_suite.run_pipeline_scenario(
-                        scenario, registry=DEFAULT_REGISTRY, ctx=ctx
-                    )
-                )
-            if scenario.gated_vs_ungated_probe:
-                report.probe_outcomes.append(
-                    await agent_suite.run_gated_vs_ungated_probe(
-                        scenario, registry=DEFAULT_REGISTRY, ctx=ctx
-                    )
-                )
-        # Deliberately not committed — see the docstring above.
-
-    await engine.dispose()
-
-    print(report.render())
-    print()
-    print("summary_metrics " + json.dumps(report.summary(), sort_keys=True))
-    s = report.summary()
-    ok = (
-        s["allowlist_coverage_ok"] == s["allowlist_coverage_total"]
-        and s["pipeline_completed"] == s["pipeline_total"]
-        and s["pipeline_forbidden_tool_leaked"] == 0
-        and s["probes_where_gate_earned_its_place"] == s["probes_total"]
-    )
-    return 0 if ok else 1
-
-
-async def run_retrieval(dataset: str, *, show_failures: bool) -> int:
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    from app.core.config import get_settings
-    from app.db.session import create_engine
-    from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
-
-    path = DATASETS / dataset / "retrieval" / "cases.jsonl"
-    if not path.exists():
-        print(f"no retrieval cases at {path}", file=sys.stderr)
-        return 2
-
-    cases = retrieval_suite.load_cases(path)
-    engine = create_engine(get_settings())
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    print("=" * 70)
-    print("suite            retrieval")
-    print(f"dataset          {dataset} ({len(cases)} cases)")
-    print(f"git sha          {git_sha()}")
-    print(f"started          {datetime.now(UTC).isoformat(timespec='seconds')}")
-    print(
-        "corpus           datasets/v1/corpus (self-authored, 5 docs — see docs/adr/"
-        "0006-embedding-model.md for the embedder substitution)"
-    )
-    print("=" * 70)
-
-    async with factory() as session:
-        embeddings = TfidfSvdEmbeddingProvider()
-        await retrieval_suite.fit_embedder_on_corpus(session, embeddings)
-        print(f"embedder         {embeddings.info.model}\n")
-
-        configs = [
-            ("vector_only", True, False),
-            ("lexical_only", False, True),
-            ("hybrid_rrf", True, True),
-        ]
-        results = {}
-        for name, use_vector, use_lexical in configs:
-            report = await retrieval_suite.run_config(
-                session,
-                cases,
-                embeddings=embeddings,
-                use_vector=use_vector,
-                use_lexical=use_lexical,
-            )
-            results[name] = report
-            print(f"--- {name} ---")
-            print(report.render())
-            print()
-
-        bm25_report = await retrieval_suite.run_bm25_offline(session, cases)
-        results["lexical_bm25_offline"] = bm25_report
-        print("--- lexical_bm25_offline (reference only — not a shipped configuration) ---")
-        print(bm25_report.render())
-        print()
-
-        # Per-language breakdown on the winning configuration, because a single aggregate would
-        # hide exactly the gap this project exists to measure (ADR-0006's amendment).
-        by_language: dict[str, list] = {}
-        for case in cases:
-            by_language.setdefault(case.language, []).append(case)
-        print("--- hybrid_rrf, per language ---")
-        print(
-            f"{'language':10s} {'n':>3s} {'recall@5':>9s} "
-            f"{'recall@10':>10s} {'mrr':>7s} {'ndcg@10':>8s}"
-        )
-        for language, lang_cases in sorted(by_language.items()):
-            lang_report = await retrieval_suite.run_config(
-                session, lang_cases, embeddings=embeddings, use_vector=True, use_lexical=True
-            )
-            s = lang_report.summary()
-            print(
-                f"{language:10s} {len(lang_cases):3d} {s['recall@5']:9.3f} "
-                f"{s['recall@10']:10.3f} {s['mrr']:7.3f} {s['ndcg@10']:8.3f}"
-            )
-
-        if show_failures:
-            print("\nhybrid_rrf failures (recall@10 == 0)")
-            for metric in results["hybrid_rrf"].per_query:
-                if metric.recall_at_k.get(10, 0.0) == 0.0:
-                    print(
-                        f"  {metric.query_id}: 0 of {len(metric.relevant)} "
-                        "relevant chunks found in top 10"
-                    )
-
-    await engine.dispose()
-
-    print()
-    print(
-        "summary_metrics "
-        + json.dumps({name: r.summary() for name, r in results.items()}, sort_keys=True)
-    )
-    return 0
 
 
 if __name__ == "__main__":

@@ -1,9 +1,8 @@
 """SQLAlchemy models, added phase by phase as the code that reads them arrives.
 
 Identity and conversation tables: Phase 1. RAG corpus: Phase 5. Agent tools, memory, study plans
-and quizzes: Phase 6. All are designed in `db/schema.sql`; the evaluation and experiment tables
-there remain undeployed until Phase 8 needs them — a migration should arrive with the code that
-reads it, not years early.
+and quizzes: Phase 6. Evaluation runs and experiments: Phase 8. All are designed in `db/schema.sql`;
+each arrived with the code that reads it.
 """
 
 import enum
@@ -620,3 +619,114 @@ class QuizAttempt(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (Index("ix_quiz_attempts_student", "student_id", "completed_at"),)
+
+
+class EvalStatus(enum.StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ExperimentDecision(enum.StrEnum):
+    ADOPT = "adopt"
+    REJECT = "reject"
+    INCONCLUSIVE = "inconclusive"
+    PENDING = "pending"
+
+
+class EvaluationRun(Base):
+    """One run of one suite (EVALUATION.md §1): everything needed to run it again.
+
+    A result is `(suite, dataset_version, config, git_sha)`; the dataset digest pins the files'
+    content as well as their version label, and `git_dirty` says whether the code at `git_sha` is
+    the whole story.
+    """
+
+    __tablename__ = "evaluation_runs"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    suite: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_version: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_digest: Mapped[str] = mapped_column(Text, nullable=False)
+    config_name: Mapped[str] = mapped_column(Text, nullable=False)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    git_sha: Mapped[str] = mapped_column(Text, nullable=False)
+    git_dirty: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa_false())
+    mlflow_run_id: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[EvalStatus] = mapped_column(
+        _pg_enum(EvalStatus, "eval_status"),
+        nullable=False,
+        default=EvalStatus.RUNNING,
+        server_default="running",
+    )
+    summary_metrics: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    case_count: Mapped[int | None] = mapped_column(Integer)
+    # A reproduction points at the run it repeated, so "reproducible" is a recorded fact.
+    reproduces_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="SET NULL")
+    )
+    started_at: Mapped[datetime] = created_at_column()
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (Index("ix_evaluation_runs_suite_started", "suite", "started_at"),)
+
+
+class EvaluationResult(Base):
+    """One case of a run, for the failure browser (EVALUATION.md §8)."""
+
+    __tablename__ = "evaluation_results"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    case_id: Mapped[str] = mapped_column(Text, nullable=False)
+    language: Mapped[str | None] = mapped_column(Text)
+    input: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    expected: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    actual: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    passed: Mapped[bool | None] = mapped_column(Boolean)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "case_id"),
+        Index("ix_evaluation_results_failed", "run_id", postgresql_where=sa_text("passed = false")),
+    )
+
+
+class Experiment(Base):
+    """A baseline and a candidate run differing in exactly one variable, and what was decided.
+
+    The decision rule is recorded with the experiment before its runs, so the outcome cannot be
+    argued into a threshold after the numbers are known (EVALUATION.md §7).
+    """
+
+    __tablename__ = "experiments"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
+    suite: Mapped[str] = mapped_column(Text, nullable=False)
+    variable_changed: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_rule: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    baseline_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="SET NULL")
+    )
+    candidate_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("evaluation_runs.id", ondelete="SET NULL")
+    )
+    comparison: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    decision: Mapped[ExperimentDecision] = mapped_column(
+        _pg_enum(ExperimentDecision, "exp_decision"),
+        nullable=False,
+        default=ExperimentDecision.PENDING,
+        server_default="pending",
+    )
+    rationale: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_column()
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

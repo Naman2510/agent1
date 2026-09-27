@@ -33,7 +33,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,rag]"
+          pip install -e ".[dev,rag,eval]"
       - name: Cache model weights
         uses: actions/cache@v4
         with:
@@ -91,7 +91,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,rag]"
+          pip install -e ".[dev,rag,eval]"
 
       - name: Cache model weights
         uses: actions/cache@v4
@@ -110,11 +110,18 @@ jobs:
           VAANIOS_TEST_DATABASE_URL: postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
         run: pytest -q --cov --cov-report=term-missing --cov-fail-under=80
 
-      - name: Evaluation suites (tier T1 — no external calls)
+      - name: Every eval config reproduces its recorded baseline (tier T1 — no external calls)
         working-directory: backend
-        # The LID suite runs on a committed dataset with no model providers, so it belongs in the
-        # fast tier. Its recorded baseline is asserted by tests/unit/test_eval_lid_suite.py.
-        run: python -m eval.runner --suite lid --dataset v1
+        # Gate 8: each suite is re-run from its committed config over the committed dataset and
+        # must match the summary recorded in eval/baselines/ exactly. A difference is either a
+        # regression or nondeterminism, and both are worth failing on (PHASE_8_AUDIT D8-01).
+        env:
+          VAANIOS_DATABASE_URL: postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
+          VAANIOS_REDIS_URL: redis://localhost:6379/0
+          VAANIOS_JWT_SECRET: ci-secret-that-is-at-least-32-characters
+        run: |
+          alembic upgrade head
+          python -m eval.runner --config eval/configs/*.toml --check-baseline
 
       - name: Migrations are reversible and match the models
         working-directory: backend

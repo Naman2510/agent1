@@ -14,6 +14,7 @@ the fields an admin uploading a document already knows).
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,6 +71,18 @@ class DocumentMetadata:
     language: str = "en"
     license: str | None = None
     difficulty: str | None = None
+
+
+def load_corpus_manifest(path: Path) -> list[tuple[Path, DocumentMetadata]]:
+    """A corpus described by a JSON manifest: `{"documents": [{"file": ..., "title": ..., ...}]}`,
+    each file relative to the manifest. The metadata is what an admin would supply on upload."""
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    documents = []
+    for entry in manifest["documents"]:
+        fields = dict(entry)
+        filename = fields.pop("file")
+        documents.append((path.parent / filename, DocumentMetadata(**fields)))
+    return documents
 
 
 @dataclass(frozen=True)

@@ -44,10 +44,13 @@ class RagService:
         *,
         embeddings: TfidfSvdEmbeddingProvider,
         reranker: RerankerProvider,
+        heading_prefix: bool = True,
     ) -> None:
         self._session = session
         self._embeddings = embeddings
         self._reranker = reranker
+        # Whether the embedder sees each chunk's heading path (chunking.embed_text; EXP-008).
+        self._heading_prefix = heading_prefix
 
     @property
     def embeddings(self) -> TfidfSvdEmbeddingProvider:
@@ -122,7 +125,9 @@ class RagService:
         if len(chunks) < 2:
             return 0
 
-        texts = [embed_text_from_row(chunk) for chunk in chunks]
+        texts = [
+            embed_text_from_row(chunk, heading_prefix=self._heading_prefix) for chunk in chunks
+        ]
         self._embeddings.fit_corpus(texts)
         vectors = await self._embeddings.embed_documents(texts)
 
@@ -155,7 +160,9 @@ class RagService:
         chunks = list(result.scalars().all())
         if len(chunks) < 2:
             return 0
-        texts = [embed_text_from_row(chunk) for chunk in chunks]
+        texts = [
+            embed_text_from_row(chunk, heading_prefix=self._heading_prefix) for chunk in chunks
+        ]
         self._embeddings.fit_corpus(texts)
         return len(chunks)
 
@@ -182,7 +189,7 @@ class RagService:
         return chunks, build_context(chunks, start_index=citation_start_index)
 
 
-def embed_text_from_row(chunk: DocumentChunk) -> str:
+def embed_text_from_row(chunk: DocumentChunk, *, heading_prefix: bool = True) -> str:
     """Adapts a persisted chunk row to `chunking.embed_text`'s `Chunk` shape."""
     from app.rag.chunking import Chunk as ChunkDTO
 
@@ -192,5 +199,6 @@ def embed_text_from_row(chunk: DocumentChunk) -> str:
             heading_path=chunk.heading_path or "",
             section=chunk.section,
             token_count=chunk.token_count or 0,
-        )
+        ),
+        heading_prefix=heading_prefix,
     )

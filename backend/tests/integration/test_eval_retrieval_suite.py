@@ -15,13 +15,12 @@ import uuid
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Document, DocumentChunk
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.reranker.base import NoopReranker
-from app.rag.retrieve import HybridRetriever, RetrievalConfig
+from app.rag.service import RagService
 from eval.suites import retrieval as retrieval_suite
 from eval.suites.retrieval import RelevanceRef
 
@@ -166,7 +165,9 @@ async def test_run_config_lexical_only_actually_requires_lexical_overlap(
     by a query whose terms appear in only one of two chunks that are otherwise near-identical."""
     await _seed(db_session)
     embeddings = TfidfSvdEmbeddingProvider()
-    await retrieval_suite.fit_embedder_on_corpus(db_session, embeddings)
+    await RagService(
+        db_session, embeddings=embeddings, reranker=NoopReranker()
+    ).refit_from_persisted()
 
     # "voltage" and "loop" appear only in the KVL chunk's content, never the KCL chunk's.
     query = "voltage loop"
@@ -199,7 +200,9 @@ async def test_run_config_with_both_arms_disabled_scores_zero_not_an_error(
 ) -> None:
     await _seed(db_session)
     embeddings = TfidfSvdEmbeddingProvider()
-    await retrieval_suite.fit_embedder_on_corpus(db_session, embeddings)
+    await RagService(
+        db_session, embeddings=embeddings, reranker=NoopReranker()
+    ).refit_from_persisted()
     case = retrieval_suite.RetrievalCase(
         id="t-1",
         query="Kirchhoff voltage",
@@ -227,35 +230,3 @@ async def test_run_bm25_offline_returns_a_real_score_based_ranking(
     report = await retrieval_suite.run_bm25_offline(db_session, [case])
     assert report.summary()["queries"] == 1
     assert report.recall_at(10) == 1.0, "the only chunk sharing real vocabulary must be found"
-
-
-async def test_fit_embedder_on_corpus_produces_a_usable_embedder(
-    db_session: AsyncSession,
-) -> None:
-    """`fit_embedder_on_corpus` only fits — it deliberately does not write embeddings, because in
-    the real eval CLI the corpus was already embedded by the ingestion pipeline beforehand, and
-    re-embedding it would risk a fit that silently drifts from what is actually stored. This test
-    reproduces that real precondition explicitly: embed and persist with one embedder (standing in
-    for ingestion), then verify a *second*, freshly-constructed embedder — the eval process, which
-    starts with no fit at all — reproduces a fit good enough to query against those chunks."""
-    ids = await _seed(db_session)
-
-    ingest_time_embeddings = TfidfSvdEmbeddingProvider()
-    chunks = (await db_session.execute(select(DocumentChunk))).scalars().all()
-    texts = [retrieval_suite.embed_text_from_row(c) for c in chunks]
-    ingest_time_embeddings.fit_corpus(texts)
-    vectors = await ingest_time_embeddings.embed_documents(texts)
-    for chunk, vector in zip(chunks, vectors, strict=True):
-        chunk.embedding = vector
-    await db_session.commit()
-
-    eval_time_embeddings = TfidfSvdEmbeddingProvider()
-    assert not eval_time_embeddings.is_fit
-    await retrieval_suite.fit_embedder_on_corpus(db_session, eval_time_embeddings)
-    assert eval_time_embeddings.is_fit
-
-    retriever = HybridRetriever(
-        db_session, embeddings=eval_time_embeddings, reranker=NoopReranker()
-    )
-    results = await retriever.vector_search("Kirchhoff voltage law", RetrievalConfig())
-    assert {r.id for r in results[:2]} == {str(ids["kvl"]), str(ids["kcl"])}

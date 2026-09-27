@@ -19,6 +19,18 @@ TEST_DB_URL = os.environ.get(
 )
 
 
+@pytest.fixture(autouse=True)
+def _mlflow_outside_the_repository(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recorded eval run also logs to MLflow, whose default store is in the repository root;
+    a test must not write there."""
+    store = tmp_path_factory.getbasetemp() / "mlflow"
+    store.mkdir(exist_ok=True)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{store / 'mlflow.db'}")
+    monkeypatch.setenv("MLFLOW_ARTIFACT_ROOT", (store / "artifacts").as_uri())
+
+
 @pytest.fixture(scope="session")
 def settings() -> Settings:
     return Settings(

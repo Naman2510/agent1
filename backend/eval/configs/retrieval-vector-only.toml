@@ -1,0 +1,8 @@
+# Ablation: the vector arm alone, through the same fusion code with the lexical arm empty.
+suite = "retrieval"
+
+[retrieval]
+mode = "vector_only"
+
+[embedding]
+heading_prefix = true

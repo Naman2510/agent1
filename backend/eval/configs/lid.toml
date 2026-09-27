@@ -1,0 +1,3 @@
+# The language router on text (ADR-0011): Unicode script detection and the romanized-Hinglish
+# lexicon. It has no knobs outside its code; the run's git SHA pins that.
+suite = "lid"

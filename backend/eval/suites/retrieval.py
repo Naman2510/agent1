@@ -26,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Document, DocumentChunk
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.reranker.base import NoopReranker
-from app.rag.chunking import embed_text
 from app.rag.retrieve import HybridRetriever, RetrievalConfig
 from app.rag.tokenize import tokenize
 from eval.metrics.retrieval import RetrievalReport, evaluate_query
@@ -153,27 +152,3 @@ async def run_bm25_offline(session: AsyncSession, cases: list[RetrievalCase]) ->
         report.add(case.id, evaluate_query(returned, relevant))
 
     return report
-
-
-async def fit_embedder_on_corpus(
-    session: AsyncSession, embeddings: TfidfSvdEmbeddingProvider
-) -> None:
-    """A fresh eval process has no fit; this reproduces it from what is already persisted,
-    exactly as `RagService.fit_and_embed_all` does, without re-writing the embeddings."""
-    result = await session.execute(select(DocumentChunk))
-    chunks = list(result.scalars().all())
-    texts = [embed_text_from_row(chunk) for chunk in chunks]
-    embeddings.fit_corpus(texts)
-
-
-def embed_text_from_row(chunk: DocumentChunk) -> str:
-    from app.rag.chunking import Chunk as ChunkDTO
-
-    return embed_text(
-        ChunkDTO(
-            content=chunk.content,
-            heading_path=chunk.heading_path or "",
-            section=chunk.section,
-            token_count=chunk.token_count or 0,
-        )
-    )

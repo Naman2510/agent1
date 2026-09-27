@@ -28,7 +28,7 @@ IMPORT_NAMES = {
     "mypy": "mypy",
     "jiwer": "jiwer",
     "rank-bm25": "rank_bm25",
-    "mlflow": "mlflow",
+    "mlflow-skinny": "mlflow",
     "faster-whisper": "faster_whisper",
 }
 

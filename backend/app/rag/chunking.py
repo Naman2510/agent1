@@ -170,13 +170,14 @@ def _split_long_section(
     return chunks
 
 
-def embed_text(chunk: Chunk) -> str:
+def embed_text(chunk: Chunk, *, heading_prefix: bool = True) -> str:
     """The text actually handed to the embedder: heading path prefixed onto the content.
 
     This is the "large, cheap retrieval win" ARCHITECTURE §11 refers to — a query for "waveguide
     impedance" matches a chunk whose own text says only "the wave impedance rises... near cutoff"
-    because the prefixed path contributes the word "waveguide".
+    because the prefixed path contributes the word "waveguide". Whether it *is* a win is EXP-008,
+    which switches it off.
     """
-    if not chunk.heading_path:
+    if not heading_prefix or not chunk.heading_path:
         return chunk.content
     return f"{chunk.heading_path}\n\n{chunk.content}"

@@ -19,71 +19,15 @@ from app.core.config import get_settings
 from app.db.session import create_engine
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.reranker.base import NoopReranker
-from app.rag.ingest import DocumentMetadata
+from app.rag.ingest import load_corpus_manifest
 from app.rag.service import DocumentTooShortError, RagService
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CORPUS_DIR = REPO_ROOT / "datasets" / "v1" / "corpus"
 
-# Metadata the ingestion pipeline does not infer from content (spec §15) — supplied here exactly
-# as an admin uploading these files would supply it via POST /documents.
-DOCUMENTS: list[tuple[str, DocumentMetadata]] = [
-    (
-        "emt-01-kirchhoffs-laws.md",
-        DocumentMetadata(
-            title="Kirchhoff's Laws",
-            subject="Electromagnetic Theory",
-            topic="Kirchhoff's Laws",
-            semester=3,
-            difficulty="easy",
-            license="authored for this project",
-        ),
-    ),
-    (
-        "emt-02-maxwells-equations.md",
-        DocumentMetadata(
-            title="Maxwell's Equations",
-            subject="Electromagnetic Theory",
-            topic="Maxwell's Equations",
-            semester=3,
-            difficulty="medium",
-            license="authored for this project",
-        ),
-    ),
-    (
-        "emt-03-waveguides.md",
-        DocumentMetadata(
-            title="Waveguides",
-            subject="Electromagnetic Theory",
-            topic="Waveguides",
-            semester=5,
-            difficulty="hard",
-            license="authored for this project",
-        ),
-    ),
-    (
-        "ckt-01-network-theorems.md",
-        DocumentMetadata(
-            title="Network Theorems",
-            subject="Circuit Theory",
-            topic="Network Theorems",
-            semester=3,
-            difficulty="medium",
-            license="authored for this project",
-        ),
-    ),
-    (
-        "ckt-02-transient-response.md",
-        DocumentMetadata(
-            title="Transient Response",
-            subject="Circuit Theory",
-            topic="Transient Response",
-            semester=3,
-            difficulty="medium",
-            license="authored for this project",
-        ),
-    ),
-]
+# Metadata the pipeline does not infer from content (spec §15), as an admin would supply it on
+# upload. It lives with the corpus, so the retrieval suite ingests exactly the same thing.
+MANIFEST = CORPUS_DIR / "documents.json"
 
 
 async def main() -> int:
@@ -99,8 +43,8 @@ async def main() -> int:
         )
 
         ingested = skipped = 0
-        for filename, metadata in DOCUMENTS:
-            path = CORPUS_DIR / filename
+        for path, metadata in load_corpus_manifest(MANIFEST):
+            filename = path.name
             if not path.exists():
                 print(f"missing: {path}", file=sys.stderr)
                 continue

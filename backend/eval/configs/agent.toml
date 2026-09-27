@@ -1,0 +1,3 @@
+# Allowlist coverage and pipeline execution under a scripted model (eval/suites/agent.py). No
+# knobs: the intent gate's table and the tools are code, pinned by the run's git SHA.
+suite = "agent"

@@ -1,0 +1,3 @@
+# Prompt-injection defenses against a model already persuaded (eval/suites/injection.py). No
+# knobs: the defenses are code, pinned by the run's git SHA.
+suite = "injection"
