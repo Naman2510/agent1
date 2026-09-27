@@ -1,10 +1,13 @@
 # Evaluation Framework
 
-**Status:** Phase 7. **Four suites have run.** The language-identification and retrieval numbers
-below are real, recorded, and reproducible from a committed dataset; so are the agent tool-gating
-and prompt-injection results (§5.1, SECURITY.md §2.1), which run against a scripted model and say
-so. Every other table in this document is still empty, and stays empty until a recorded run fills
-it.
+**Status:** Phase 8. **Five suites have run, and every run is recorded and reproducible.** The
+language-identification, retrieval and voice front-end numbers below are real; so are the agent
+tool-gating and prompt-injection results (§5.1, SECURITY.md §2.1), which run against a scripted
+model and say so. Each run keeps what produced it — config, dataset digest, git SHA — in
+`evaluation_runs` and MLflow; `python -m eval.runner --reproduce RUN_ID` runs it again from that
+record, and CI checks every committed config against its baseline (`backend/eval/baselines/`) on
+every push. Two experiments have been decided ([EXPERIMENTS.md](EXPERIMENTS.md)). Every other table
+in this document is still empty, and stays empty until a recorded run fills it.
 
 The evaluation subsystem is a first-class component, not a test folder. Its job is to make the
 statement "this change improved the system" falsifiable.
@@ -30,11 +33,13 @@ statement "this change improved the system" falsifiable.
 | `retrieval` ✅ | Do we find the right course material? | query + labelled relevant chunk IDs | free (local embeddings) |
 | `agent` | Does the mentor choose the right tool with the right arguments? | scenario + expected tool trace | paid LLM, mockable |
 | `response` | Is the answer grounded, relevant, and in the right language? | question + context + rubric | paid LLM + judge |
-| `voice` | Does the conversation feel responsive? | scripted audio sessions | full stack |
+| `voice` ✅ | Does the conversation feel responsive? | scripted audio sessions | front end measured (§5.4); full stack not yet |
 | `e2e` | Do complete multi-turn conversations work, including interruption? | scripted sessions + assertions | full stack (mocked in CI) |
 
 Each writes one `evaluation_runs` row plus per-case `evaluation_results`, and logs to MLflow.
-Invocation: `python -m eval.runner --suite retrieval --dataset v1 --config configs/baseline.yaml`.
+Invocation: `python -m eval.runner --suite retrieval` (its default config), or
+`--config eval/configs/<name>.toml [...]`, `--record` to keep the run, `--reproduce RUN_ID`, and
+`--experiment eval/experiments/<id>.toml` (§7).
 
 ## 2a. Language identification — measured
 
@@ -127,7 +132,8 @@ Always broken down by language; the aggregate is reported last because it hides 
 python -m eval.runner --suite retrieval --dataset v1 [--failures]
 ```
 
-**Run:** suite `retrieval`, dataset `v1` (22 cases), git `de38217`, 2026-09-19. Corpus:
+**Run:** suite `retrieval`, dataset `v1` (22 cases), recorded at git `239e472` — each config's
+baseline is in `backend/eval/baselines/`, and CI reproduces every one on every push. Corpus:
 `datasets/v1/corpus`, 5 self-authored documents, 19 chunks (§ below and DATASET.md). Embedder:
 `tfidf-svd-256d(fit_rank=18)@19docs` — TF-IDF + truncated SVD, substituting for the originally
 planned `multilingual-e5-base` (see [ADR-0006's amendment](adr/0006-embedding-model.md)).
@@ -158,10 +164,16 @@ measured is the real retriever with an arm turned off:
 | Config | Recall@5 | Recall@10 | Precision@5 | MRR | nDCG@10 | Hit rate |
 |---|---|---|---|---|---|---|
 | vector only | 0.932 | 0.955 | 0.209 | 0.856 | 0.885 | 0.955 |
-| lexical only | 0.909 | 0.955 | 0.218 | 0.710 | 0.771 | 0.955 |
+| lexical only | 0.909 | 0.955 | 0.218 | 0.710 | 0.773 | 0.955 |
 | **hybrid (RRF)** | 0.932 | 0.955 | 0.209 | **0.871** | **0.893** | 0.955 |
+| hybrid, no heading prefix (EXP-008) | 0.955 | 0.955 | 0.218 | 0.849 | 0.875 | 0.955 |
 | hybrid + reranker | — | — | — | — | — | — (`NoopReranker` only; a real reranker is unbuilt) |
 | lexical, real BM25 (reference only) | 0.932 | 0.955 | 0.216 | 0.886 | 0.897 | 0.955 |
+
+Until Phase 8 the lexical-only row did not repeat exactly: chunks tied on `ts_rank_cd` came back
+in whatever order Postgres stored them, and its nDCG@10 moved between runs (0.771 was one of them).
+Ties now break on the chunk's content hash (D8-01), and every figure here reproduces to the last
+digit.
 
 The last row is not a retrieval configuration this system runs — it rescores the same queries
 offline with `rank_bm25.BM25Okapi` purely to quantify the gap ADR-0005 predicted for the shipped
@@ -269,7 +281,47 @@ hallucination rate on adversarial "hallucination trap" cases.
 
 ### 5.4 Voice / latency
 
-Measured from real runs against scripted audio sessions, never estimated:
+#### The voice front end — measured
+
+```
+python -m eval.runner --suite voice [--failures]
+```
+
+**Run:** suite `voice`, dataset v1 (48 cases, sha256 `a90a7fde01cb…`), recorded at git `33314a9`
+(`429e29bd-ce7c-42b9-bbaf-ae6a62c2484f`). The production `VoiceSession` — Silero VAD, gate, turn
+detector — fed synthetic speech 20 ms at a time. **All times are audio time**, so they do not
+depend on the machine: this is how long the logic makes the student wait, not what a network or a
+model adds. Two stand-ins, named in every report: a recogniser with perfect words, each stable
+300 ms after it is spoken, and a conversation that ends each turn at once.
+
+| Metric | Definition | Mean | p50 | p90 |
+|---|---|---|---|---|
+| Turn end | speech end → the turn begins | 575 ms | 570 ms | 640 ms |
+| Detection | speech start → the session capturing it | 298 ms | 280 ms | — |
+
+| Kind (12 each) | Cut off mid-turn | Turn end, mean |
+|---|---|---|
+| one sentence | 0 | 575 ms |
+| hesitation mid-sentence (200–750 ms) | 4 | 583 ms |
+| two sentences (250–750 ms apart) | 5 | 568 ms |
+
+No question missed; no false turn from six noise clips or six acknowledgements ("Hmm.", "Haan.").
+
+**What these say.** The turn ends about 75 ms after the 500 ms silence rule would suggest, which is
+Silero's probability taking a few windows to fall after speech stops. A pause of 550 ms or more
+inside a turn ends it — nine of 36 questions, every one of them with such a pause — which is the
+fixed-threshold trade ARCHITECTURE §4.3 describes; the continued-thought merge (§5.6) is what keeps
+such a split from becoming two answers. EXP-003 measured the obvious fix and rejected it
+([EXPERIMENTS.md](EXPERIMENTS.md#exp-003--semantic-endpointing-rejected)).
+
+**What they do not say.** The speech is eSpeak's, the pauses are clean digital silence, and the mix
+of turns is this dataset's (datasets/v1/voice/README.md): nothing here is a claim about real
+students in real rooms. Barge-in detection is not measured yet.
+
+#### Full-stack latency — not yet measured
+
+Measured from real runs against scripted audio sessions, never estimated. Every provider is still a
+fake (M7-01), so none of these has a number:
 
 | Metric | Definition | p50 | p95 |
 |---|---|---|---|
@@ -293,7 +345,7 @@ for this and none will be invented.
 | Tier | Runs on | Contents | External calls |
 |---|---|---|---|
 | T0 | every push | unit + integration + e2e with all providers faked | none |
-| T1 | every push | `retrieval` suite on a small fixture corpus | none (local embeddings) |
+| T1 | every push | every committed eval config reproduces its baseline: `lid`, `retrieval` and its ablations, `agent`, `injection`, `voice` and EXP-003's candidate | none (local models; scripted LLM) |
 | T2 | nightly + pre-release | `stt` (local model), full `retrieval` | none |
 | T3 | manual / release gate | `agent`, `response`, `voice`, `e2e` live | paid |
 
@@ -332,24 +384,28 @@ Observation (from a metric or a failure case)
    → Decision: adopt / reject / inconclusive, with rationale
 ```
 
-Registered experiments (all **pending** — none has been designed in detail, let alone run):
+Registered experiments. Decided ones are written up in [EXPERIMENTS.md](EXPERIMENTS.md), with
+their runs; their registrations — rule, guards, prediction — are in `backend/eval/experiments/`,
+committed before the runs.
 
 | ID | Hypothesis | Variable | Suites | Status |
 |---|---|---|---|---|
-| EXP-001 | A managed Indic ASR beats local faster-whisper on Hinglish entity WER | STT provider | stt | pending |
+| EXP-001 | A managed Indic ASR beats local faster-whisper on Hinglish entity WER | STT provider | stt | blocked: no `stt` suite, human speech, or ASR key |
 | EXP-002 | Contextual vocabulary biasing reduces technical-term errors | ASR prompt/vocab | stt | pending |
-| EXP-003 | Semantic endpointing cuts turn-end latency without more premature cutoffs | turn detector | voice, e2e | pending |
+| EXP-003 | Semantic endpointing cuts turn-end latency without more premature cutoffs | turn detector | voice | **rejected**: −227 ms, but 3 more cut-offs |
 | EXP-004 | Response latency/quality trade across LLM tiers | LLM model | response, voice | pending |
 | EXP-005 | Short first TTS chunk improves TTFA without hurting prosody ratings | chunker policy | voice + human | pending |
 | EXP-006 | Transliterating romanized Hindi before Indic TTS improves intelligibility | TTS preprocessing | human MOS | pending |
-| EXP-007 | Hybrid retrieval beats vector-only on Hindi/Tamil queries | retriever | retrieval | pending |
-| EXP-008 | Heading-path prefixing improves recall on lecture material | chunk enrichment | retrieval | pending |
+| EXP-007 | Hybrid retrieval beats vector-only on Hindi/Tamil queries | retriever | retrieval | blocked: 2 Hindi queries, no Tamil |
+| EXP-008 | Heading-path prefixing improves ranking on lecture material | chunk enrichment | retrieval | **inconclusive**: +0.018 nDCG@10, CI spans 0 |
 | EXP-009 | Intent-gated tool exposure improves selection without hurting completion | tool gate | agent | pending |
 | EXP-010 | A fine-tuned intent classifier beats the prompted baseline | classifier | agent | pending |
 | EXP-011 | Lowering the `mixed` gate raises its recall without costing `en`/`hi-Latn` precision | classifier thresholds | lid | registered, blocked on a dataset that is not self-authored |
+| EXP-012 | Ending early only on a *question* keeps EXP-003's gain without its cut-offs | turn detector | voice | registered, blocked on cases that did not suggest it |
 
-An experiment that changes two variables is recorded as `inconclusive`. This is enforced socially,
-by review, and structurally, by `experiments.variable_changed` being a single column.
+An experiment whose two configs differ in more than one knob is not run at all: the runner
+compares them and refuses (`eval/runner.py`), and `experiments.variable_changed` is a single
+column.
 
 ## 8. Dashboard
 

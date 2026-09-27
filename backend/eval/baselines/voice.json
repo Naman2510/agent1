@@ -1,0 +1,71 @@
+{
+  "config": {
+    "recogniser": {
+      "stable_lag_ms": 300
+    },
+    "session": {
+      "merge_window_ms": 1200,
+      "min_utterance_ms": 400,
+      "pre_roll_ms": 500,
+      "semantic_endpointing": false,
+      "semantic_silence_ms": 250
+    },
+    "suite": "voice",
+    "vad": {
+      "enter_threshold": 0.5,
+      "exit_threshold": 0.35,
+      "min_silence_ms": 500,
+      "min_speech_ms": 250
+    }
+  },
+  "config_name": "voice",
+  "dataset_digest": "a90a7fde01cbe488c757ec89d01723ff96ac15529a3a1e8d45e2478fa6a61587",
+  "dataset_version": "v1",
+  "evaluation_run_id": "c04fdeab-d75f-4897-ae26-a800965b0e20",
+  "git_dirty": false,
+  "git_sha": "33314a9",
+  "recorded_at": "2026-09-27T11:07:10+00:00",
+  "suite": "voice",
+  "summary": {
+    "by_kind": {
+      "backchannel": {
+        "cases": 6,
+        "false_turns": 0
+      },
+      "hesitation": {
+        "cases": 12,
+        "cut_off_cases": 4,
+        "endpoint_ms_mean": 582.5,
+        "missed": 0
+      },
+      "multi_sentence": {
+        "cases": 12,
+        "cut_off_cases": 5,
+        "endpoint_ms_mean": 568.3,
+        "missed": 0
+      },
+      "noise": {
+        "cases": 6,
+        "false_turns": 0
+      },
+      "single": {
+        "cases": 12,
+        "cut_off_cases": 0,
+        "endpoint_ms_mean": 575.0,
+        "missed": 0
+      }
+    },
+    "cases": 48,
+    "cut_off_rate": 0.25,
+    "detect_ms_mean": 297.8,
+    "detect_ms_p50": 280.0,
+    "endpoint_ms_mean": 575.3,
+    "endpoint_ms_p50": 570.0,
+    "endpoint_ms_p90": 640.0,
+    "false_captures": 6,
+    "false_turns": 0,
+    "miss_penalty_ms": 1500,
+    "missed": 0,
+    "questions": 36
+  }
+}
