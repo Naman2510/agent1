@@ -1,7 +1,30 @@
 # Failure Cases
 
-**Status:** empty — the system does not exist yet, so it has not failed yet. Files appear from Phase 3
-onward.
+**Status:** 14 cases (Phase 9 requires at least eight): 8 fixed (one awaiting its cross-runner
+check), 3 accepted as limitations with the reason recorded, 3 open.
+
+| Case | What failed | Category | Status |
+|---|---|---|---|
+| [FC-001](001-insufficient-lexical-evidence.md) | Short English utterances carry no language signal | language detection | accepted-limitation |
+| [FC-002](002-mixed-language-under-detected.md) | Code-switched utterances classified as one language | language detection | open |
+| [FC-003](003-lexical-arm-lacks-idf-weighting.md) | The lexical arm ranks a common word like a rare one | retrieval | accepted-limitation |
+| [FC-004](004-cross-lingual-retrieval-degrades-to-zero-signal.md) | A query with no shared vocabulary got a fake ranking | retrieval | fixed |
+| [FC-005](005-hindi-speech-never-heard-as-hindi.md) | Hindi speech never heard as Hindi; invented English instead | STT, language detection, hallucination | open (EXP-013) |
+| [FC-006](006-stt-baseline-not-reproducible.md) | A recogniser baseline no other machine reproduced | evaluation | fixed; cross-runner check pending |
+| [FC-007](007-redis-outage-broke-answered-turns.md) | A Redis outage broke answered turns and blocked voice | degradation | fixed |
+| [FC-008](008-a-stalled-model-means-silence.md) | A stalled model kept a voice student in silence | latency spike | fixed |
+| [FC-009](009-recogniser-that-never-finishes-freezes-the-session.md) | A recogniser that never finished froze the session | STT | fixed |
+| [FC-010](010-a-lost-voice-ended-the-answer.md) | When the voice failed, the answer stopped too | TTS | fixed |
+| [FC-011](011-one-lost-database-connection-failed-the-session.md) | One lost database connection failed every later turn | interruption, degradation | fixed |
+| [FC-012](012-a-pause-mid-question-ends-the-turn.md) | A pause mid-question ends the student's turn | interruption | accepted-limitation |
+| [FC-013](013-an-embedding-outage-silenced-every-sourced-answer.md) | An embedding outage made every sourced answer an apology | retrieval, degradation | fixed |
+| [FC-014](014-circuit-terms-misheard-in-english.md) | Circuit terms misheard in plain English | STT | open |
+
+**Not yet measured,** so no case can honestly be filed: *wrong tool selection* and *hallucination
+by the mentor* need a real model in the loop, and CI has none (tier T3, which would, is run by hand
+and needs an API key); *TTS pronunciation* needs a real synthesiser (the one in use is a fake). RISKS.md
+predicts where they will appear (R-05, R-07, R-08), so that when they are measured they are not
+surprises.
 
 This directory is not an appendix. A project that reports only successes is either not being measured
 or not being reported honestly, so documented failures are a deliverable (spec §34) and a phase-gate
