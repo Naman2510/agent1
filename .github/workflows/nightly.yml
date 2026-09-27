@@ -64,30 +64,24 @@ jobs:
           segments, _ = model.transcribe(np.zeros(16000, dtype=np.float32))
           list(segments)
           EOF
-      - name: Every tier-T2 config, against its baseline once it has one
+      # Each config runs once. An experiment's two configs are held to their baselines inside the
+      # experiment's own runs; any other T2 config runs on its own. A config with no baseline yet
+      # has one written and printed, to be reviewed and committed.
+      - name: Every tier-T2 experiment and config, each run against its baseline
         working-directory: backend
         run: |
           set -o pipefail
           status=0
+          covered=""
+          for experiment in $(grep -l '^tier = "T2"' eval/experiments/*.toml); do
+            python -m eval.runner --experiment "$experiment" --ensure-baseline --failures | tee -a t2-report.txt || status=1
+            covered="$covered $(python -c 'import sys, tomllib; e = tomllib.load(open(sys.argv[1], "rb")); print(e["baseline"], e["candidate"])' "$experiment")"
+          done
           for config in $(grep -l '^tier = "T2"' eval/configs/*.toml); do
-            name=$(basename "$config" .toml)
-            if [ -f "eval/baselines/$name.json" ]; then
-              python -m eval.runner --config "$config" --check-baseline --failures | tee -a t2-report.txt || status=1
-            else
-              # No baseline yet: write one here and print it, to be reviewed and committed.
-              python -m eval.runner --config "$config" --write-baseline --failures | tee -a t2-report.txt || status=1
-              cat "eval/baselines/$name.json"
-            fi
+            case " $covered " in *" $(basename "$config") "*) continue ;; esac
+            python -m eval.runner --config "$config" --ensure-baseline --failures | tee -a t2-report.txt || status=1
           done
           exit $status
-      - name: Every registered tier-T2 experiment, decided by its own rule
-        if: ${{ !cancelled() }}
-        working-directory: backend
-        run: |
-          set -o pipefail
-          for experiment in $(grep -l '^tier = "T2"' eval/experiments/*.toml); do
-            python -m eval.runner --experiment "$experiment" | tee -a t2-experiments.txt
-          done
       - name: Keep the report
         if: always()
         uses: actions/upload-artifact@v4
@@ -95,6 +89,5 @@ jobs:
           name: t2-report
           path: |
             backend/t2-report.txt
-            backend/t2-experiments.txt
             backend/eval/baselines/stt*.json
           if-no-files-found: ignore

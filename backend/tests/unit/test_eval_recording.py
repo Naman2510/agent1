@@ -96,6 +96,47 @@ def test_an_experiment_that_changes_two_knobs_is_refused(
     assert "a.x, a.y" in capsys.readouterr().out
 
 
+def test_an_experiment_holds_each_run_to_its_baseline_writing_the_missing_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """So CI runs a config once, not once for its baseline and again for the experiment."""
+    import json
+
+    from eval import recording
+
+    baselines = tmp_path / "baselines"
+    monkeypatch.setattr(recording, "BASELINES", baselines)
+    (tmp_path / "base.toml").write_text('suite = "lid"\n[a]\nx = 1\n')
+    (tmp_path / "candidate.toml").write_text('suite = "lid"\n[a]\nx = 2\n')
+    experiment = {
+        "slug": "EXP-TEST",
+        "title": "one knob",
+        "hypothesis": "h",
+        "baseline": str(tmp_path / "base.toml"),
+        "candidate": str(tmp_path / "candidate.toml"),
+        "decision_rule": {"metric": "correct", "higher_is_better": True, "min_effect": 0.1},
+    }
+
+    def run() -> int:
+        return asyncio.run(
+            runner.run_experiment(experiment, "v1", None, record=False, baseline_mode="ensure")
+        )
+
+    assert run() == 0
+    written = capsys.readouterr().out
+    assert sorted(p.name for p in baselines.iterdir()) == ["base.json", "candidate.json"]
+    assert '"config_name": "candidate"' in written, "a new baseline is printed, to be committed"
+    assert "decision" in written
+
+    assert run() == 0
+    assert "every metric matches the baseline" in capsys.readouterr().out
+
+    record = json.loads((baselines / "candidate.json").read_text())
+    record["summary"]["accuracy"] = 0.5
+    (baselines / "candidate.json").write_text(json.dumps(record))
+    assert run() == 1
+
+
 # --- MLflow --------------------------------------------------------------------
 
 

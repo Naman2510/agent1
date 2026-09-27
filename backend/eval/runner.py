@@ -33,6 +33,7 @@ from eval.recording import (
     RunSpec,
     RunStore,
     SuiteOutcome,
+    baseline_path,
     check_baseline,
     config_diff,
     dataset_digest,
@@ -135,6 +136,34 @@ async def execute(
     return outcome, run_id
 
 
+def apply_baseline(
+    spec: RunSpec, outcome: SuiteOutcome, run_id: uuid.UUID | None, mode: str | None
+) -> int:
+    """`write` commits the run's summary as the config's baseline; `check` fails unless the run
+    reproduces its committed baseline exactly; `ensure` checks, or writes and prints a baseline
+    for a config that has none — for tier T2, whose baselines can only be computed in CI."""
+    if mode == "ensure":
+        mode = "check" if baseline_path(spec.config_name).exists() else "write"
+        printing = mode == "write"
+    else:
+        printing = False
+    if mode == "write":
+        if spec.git_dirty:
+            print("warning: a baseline from a dirty working tree names code it cannot pin")
+        path = write_baseline(spec, outcome, run_id)
+        print(f"baseline         {path}")
+        if printing:
+            # To be reviewed and committed from the log: CI's working tree is thrown away.
+            print(path.read_text(encoding="utf-8"))
+        return 0
+    if mode == "check":
+        code, lines = check_baseline(spec, outcome)
+        for line in lines:
+            print(f"baseline         {line}")
+        return code
+    return 0
+
+
 async def run_configs(
     specs: list[RunSpec],
     settings: Settings | None,
@@ -143,8 +172,7 @@ async def run_configs(
     show_failures: bool,
     baseline: str | None = None,
 ) -> int:
-    """Run each config. `baseline="write"` commits each run's summary as the config's baseline;
-    `baseline="check"` fails unless each run reproduces its committed baseline exactly."""
+    """Run each config, and hold it to its baseline as `baseline` says (apply_baseline)."""
     store = RunStore(settings) if record and settings is not None else None
     status = 0
     try:
@@ -153,15 +181,7 @@ async def run_configs(
                 spec, settings, record=record, show_failures=show_failures, store=store
             )
             status = max(status, 0 if outcome.ok else 1)
-            if baseline == "write":
-                if spec.git_dirty:
-                    print("warning: a baseline from a dirty working tree names code it cannot pin")
-                print(f"baseline         {write_baseline(spec, outcome, run_id)}")
-            elif baseline == "check":
-                code, lines = check_baseline(spec, outcome)
-                for line in lines:
-                    print(f"baseline         {line}")
-                status = max(status, code)
+            status = max(status, apply_baseline(spec, outcome, run_id, baseline))
             print()
     finally:
         if store is not None:
@@ -218,8 +238,16 @@ def _per_case(outcome: SuiteOutcome) -> dict[str, dict[str, float]]:
 
 
 async def run_experiment(
-    experiment: dict[str, Any], dataset: str, settings: Settings | None, *, record: bool
+    experiment: dict[str, Any],
+    dataset: str,
+    settings: Settings | None,
+    *,
+    record: bool,
+    show_failures: bool = False,
+    baseline_mode: str | None = None,
 ) -> int:
+    """Run both configs and decide. Each run can be held to its own baseline too, so CI need not
+    run the same config twice — once for its baseline and once for the experiment."""
     baseline_name, baseline = load_config(CONFIGS / experiment["baseline"])
     candidate_name, candidate = load_config(CONFIGS / experiment["candidate"])
     changed = config_diff(baseline, candidate)
@@ -238,14 +266,19 @@ async def run_experiment(
     print()
 
     store = RunStore(settings) if record and settings is not None else None
+    status = 0
     try:
+        base_spec = build_spec(baseline_name, baseline, dataset)
         base_outcome, base_id = await execute(
-            build_spec(baseline_name, baseline, dataset), settings, record=record, store=store
+            base_spec, settings, record=record, show_failures=show_failures, store=store
         )
+        status = max(status, apply_baseline(base_spec, base_outcome, base_id, baseline_mode))
         print()
+        cand_spec = build_spec(candidate_name, candidate, dataset)
         cand_outcome, cand_id = await execute(
-            build_spec(candidate_name, candidate, dataset), settings, record=record, store=store
+            cand_spec, settings, record=record, show_failures=show_failures, store=store
         )
+        status = max(status, apply_baseline(cand_spec, cand_outcome, cand_id, baseline_mode))
         decision, comparison = decide(rule, _per_case(base_outcome), _per_case(cand_outcome))
         rationale = describe(rule, comparison)
         print()
@@ -277,7 +310,7 @@ async def run_experiment(
     finally:
         if store is not None:
             await store.close()
-    return 0
+    return status
 
 
 def _quiet_application_logs() -> None:
@@ -319,7 +352,21 @@ def main() -> int:
         action="store_true",
         help="fail unless each run reproduces its config's committed baseline",
     )
+    baselines.add_argument(
+        "--ensure-baseline",
+        action="store_true",
+        help="check each run against its baseline, or write and print one where there is none",
+    )
     args = parser.parse_args()
+    baseline_mode = (
+        "write"
+        if args.write_baseline
+        else "check"
+        if args.check_baseline
+        else "ensure"
+        if args.ensure_baseline
+        else None
+    )
 
     try:
         if args.reproduce is not None:
@@ -330,7 +377,14 @@ def main() -> int:
             needed = args.record or SUITES[suite].needs_database
             settings = load_settings() if needed else None
             return asyncio.run(
-                run_experiment(experiment, args.dataset, settings, record=args.record)
+                run_experiment(
+                    experiment,
+                    args.dataset,
+                    settings,
+                    record=args.record,
+                    show_failures=args.failures,
+                    baseline_mode=baseline_mode,
+                )
             )
         paths = args.config or [default_config_path(args.suite)]
         loaded = [load_config(path) for path in paths]
@@ -350,11 +404,7 @@ def main() -> int:
                 settings,
                 record=args.record,
                 show_failures=args.failures,
-                baseline="write"
-                if args.write_baseline
-                else "check"
-                if args.check_baseline
-                else None,
+                baseline=baseline_mode,
             )
         )
     except (ConfigError, LookupError) as exc:
