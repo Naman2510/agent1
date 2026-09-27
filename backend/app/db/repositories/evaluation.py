@@ -18,16 +18,29 @@ class EvaluationRepository:
         self._session = session
 
     async def latest_runs(self) -> Sequence[EvaluationRun]:
-        """The latest completed run of each config, by suite and config name."""
+        """The latest completed run of each config, by suite and config name.
+
+        A window function rather than PostgreSQL's DISTINCT ON: SQLAlchemy 2.1 deprecates
+        `distinct(*columns)`, and its replacement does not exist in 2.0.
+        """
+        ranked = (
+            select(
+                EvaluationRun.id,
+                func.row_number()
+                .over(
+                    partition_by=(EvaluationRun.suite, EvaluationRun.config_name),
+                    order_by=EvaluationRun.finished_at.desc(),
+                )
+                .label("recency"),
+            )
+            .where(EvaluationRun.status == EvalStatus.COMPLETED)
+            .subquery()
+        )
         result = await self._session.execute(
             select(EvaluationRun)
-            .where(EvaluationRun.status == EvalStatus.COMPLETED)
-            .order_by(
-                EvaluationRun.suite,
-                EvaluationRun.config_name,
-                EvaluationRun.finished_at.desc(),
-            )
-            .distinct(EvaluationRun.suite, EvaluationRun.config_name)
+            .join(ranked, ranked.c.id == EvaluationRun.id)
+            .where(ranked.c.recency == 1)
+            .order_by(EvaluationRun.suite, EvaluationRun.config_name)
         )
         return result.scalars().all()
 
