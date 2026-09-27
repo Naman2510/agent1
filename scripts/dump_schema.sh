@@ -6,6 +6,9 @@ set -euo pipefail
 : "${PGPORT:=55432}"
 : "${PGDATABASE:=vaanios}"
 OUT="$(git rev-parse --show-toplevel)/db/schema.current.sql"
+# Written aside and moved into place only on success: a failed dump must not empty the file.
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
 {
   cat <<'HDR'
 -- GENERATED FILE — do not edit.
@@ -19,5 +22,6 @@ HDR
   su postgres -c "pg_dump -h $PGHOST -p $PGPORT -d $PGDATABASE --schema-only --no-owner --no-privileges --no-comments" \
     | grep -v '^--' | grep -v '^SET ' | grep -v '^SELECT pg_catalog' \
     | grep -v '^\\restrict' | grep -v '^\\unrestrict' | cat -s
-} > "$OUT"
+} > "$TMP"
+mv "$TMP" "$OUT"
 echo "wrote $OUT"

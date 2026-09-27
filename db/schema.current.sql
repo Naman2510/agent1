@@ -12,6 +12,19 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
+CREATE TYPE public.eval_status AS ENUM (
+    'running',
+    'completed',
+    'failed'
+);
+
+CREATE TYPE public.exp_decision AS ENUM (
+    'adopt',
+    'reject',
+    'inconclusive',
+    'pending'
+);
+
 CREATE TYPE public.ingest_status AS ENUM (
     'pending',
     'parsing',
@@ -109,6 +122,55 @@ CREATE TABLE public.documents (
     metadata_ jsonb DEFAULT '{}'::jsonb NOT NULL,
     ingested_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE TABLE public.evaluation_results (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    run_id uuid NOT NULL,
+    case_id text NOT NULL,
+    language text,
+    input jsonb NOT NULL,
+    expected jsonb,
+    actual jsonb,
+    metrics jsonb DEFAULT '{}'::jsonb NOT NULL,
+    passed boolean,
+    notes text
+);
+
+CREATE TABLE public.evaluation_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    suite text NOT NULL,
+    dataset_version text NOT NULL,
+    dataset_digest text NOT NULL,
+    config_name text NOT NULL,
+    config jsonb NOT NULL,
+    git_sha text NOT NULL,
+    git_dirty boolean DEFAULT false NOT NULL,
+    mlflow_run_id text,
+    status public.eval_status DEFAULT 'running'::public.eval_status NOT NULL,
+    summary_metrics jsonb DEFAULT '{}'::jsonb NOT NULL,
+    case_count integer,
+    reproduces_run_id uuid,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone,
+    notes text
+);
+
+CREATE TABLE public.experiments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    slug text NOT NULL,
+    title text NOT NULL,
+    hypothesis text NOT NULL,
+    suite text NOT NULL,
+    variable_changed text NOT NULL,
+    decision_rule jsonb NOT NULL,
+    baseline_run_id uuid,
+    candidate_run_id uuid,
+    comparison jsonb DEFAULT '{}'::jsonb NOT NULL,
+    decision public.exp_decision DEFAULT 'pending'::public.exp_decision NOT NULL,
+    rationale text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    decided_at timestamp with time zone
 );
 
 CREATE TABLE public.memory_events (
@@ -306,6 +368,15 @@ ALTER TABLE ONLY public.document_chunks
 ALTER TABLE ONLY public.documents
     ADD CONSTRAINT pk_documents PRIMARY KEY (id);
 
+ALTER TABLE ONLY public.evaluation_results
+    ADD CONSTRAINT pk_evaluation_results PRIMARY KEY (id);
+
+ALTER TABLE ONLY public.evaluation_runs
+    ADD CONSTRAINT pk_evaluation_runs PRIMARY KEY (id);
+
+ALTER TABLE ONLY public.experiments
+    ADD CONSTRAINT pk_experiments PRIMARY KEY (id);
+
 ALTER TABLE ONLY public.memory_events
     ADD CONSTRAINT pk_memory_events PRIMARY KEY (id);
 
@@ -354,6 +425,12 @@ ALTER TABLE ONLY public.document_chunks
 ALTER TABLE ONLY public.documents
     ADD CONSTRAINT uq_documents_source_hash UNIQUE (source_hash);
 
+ALTER TABLE ONLY public.evaluation_results
+    ADD CONSTRAINT uq_evaluation_results_run_id_case_id UNIQUE (run_id, case_id);
+
+ALTER TABLE ONLY public.experiments
+    ADD CONSTRAINT uq_experiments_slug UNIQUE (slug);
+
 ALTER TABLE ONLY public.messages
     ADD CONSTRAINT uq_messages_turn_seq UNIQUE (session_id, turn_index, seq);
 
@@ -387,6 +464,10 @@ CREATE INDEX ix_document_chunks_trgm ON public.document_chunks USING gin (conten
 
 CREATE INDEX ix_document_chunks_tsv ON public.document_chunks USING gin (content_tsv);
 
+CREATE INDEX ix_evaluation_results_failed ON public.evaluation_results USING btree (run_id) WHERE (passed = false);
+
+CREATE INDEX ix_evaluation_runs_suite_started ON public.evaluation_runs USING btree (suite, started_at);
+
 CREATE INDEX ix_memory_events_student ON public.memory_events USING btree (student_id, created_at);
 
 CREATE INDEX ix_messages_session_turn ON public.messages USING btree (session_id, turn_index, seq);
@@ -412,6 +493,18 @@ ALTER TABLE ONLY public.audit_log
 
 ALTER TABLE ONLY public.document_chunks
     ADD CONSTRAINT fk_document_chunks_document_id_documents FOREIGN KEY (document_id) REFERENCES public.documents(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.evaluation_results
+    ADD CONSTRAINT fk_evaluation_results_run_id_evaluation_runs FOREIGN KEY (run_id) REFERENCES public.evaluation_runs(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.evaluation_runs
+    ADD CONSTRAINT fk_evaluation_runs_reproduces_run_id_evaluation_runs FOREIGN KEY (reproduces_run_id) REFERENCES public.evaluation_runs(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY public.experiments
+    ADD CONSTRAINT fk_experiments_baseline_run_id_evaluation_runs FOREIGN KEY (baseline_run_id) REFERENCES public.evaluation_runs(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY public.experiments
+    ADD CONSTRAINT fk_experiments_candidate_run_id_evaluation_runs FOREIGN KEY (candidate_run_id) REFERENCES public.evaluation_runs(id) ON DELETE SET NULL;
 
 ALTER TABLE ONLY public.memory_events
     ADD CONSTRAINT fk_memory_events_message_id_messages FOREIGN KEY (message_id) REFERENCES public.messages(id) ON DELETE SET NULL;

@@ -5,7 +5,7 @@
 | File | What it is |
 |---|---|
 | [`db/schema.sql`](../db/schema.sql) | The full **designed** schema — all 20 tables, including the RAG, memory, quiz and evaluation tables that later phases add. A design reference, not executed by the application. |
-| [`db/schema.current.sql`](../db/schema.current.sql) | **Generated** from a database built by `alembic upgrade head` — the schema that actually exists today: 17 of the 20 designed tables (the three evaluation tables arrive with Phase 8). Regenerate with `scripts/dump_schema.sh` (`PGHOST`, `PGPORT` and `PGDATABASE` pick the database). |
+| [`db/schema.current.sql`](../db/schema.current.sql) | **Generated** from a database built by `alembic upgrade head` — the schema that actually exists today: all 20 designed tables, since Phase 8's migration 0006 added `evaluation_runs`, `evaluation_results` and `experiments`. Regenerate with `scripts/dump_schema.sh` (`PGHOST`, `PGPORT` and `PGDATABASE` pick the database; it runs `pg_dump` as the `postgres` user, so a local socket such as `PGHOST=/var/run/postgresql` needs no password). |
 
 Alembic migrations under `backend/migrations/` are authoritative. A migration arrives with the code
 that reads it, so Phase 1 creates only the identity and conversation tables.
