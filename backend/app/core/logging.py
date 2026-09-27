@@ -85,5 +85,8 @@ def configure_logging(settings: Settings) -> None:
         ],
         wrapper_class=structlog.make_filtering_bound_logger(getattr(logging, settings.log_level)),
         logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
+        # A cached logger keeps the processors it was first used with, so under test a module that
+        # logged before `structlog.testing.capture_logs` was entered stayed invisible to it, and a
+        # log assertion passed or failed by test order. Caching is only a speed-up.
+        cache_logger_on_first_use=settings.environment != "test",
     )

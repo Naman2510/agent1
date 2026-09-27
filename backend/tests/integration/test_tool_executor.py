@@ -19,12 +19,14 @@ from app.agent.tools.base import ToolContext, ToolDefinition, ToolExecutionError
 from app.agent.tools.executor import (
     NOT_ALLOWED_MESSAGE,
     TIMEOUT_MESSAGE,
+    UNAVAILABLE_MESSAGE,
     UNKNOWN_TOOL_MESSAGE,
     execute_tool_call,
 )
 from app.agent.tools.registry import ToolRegistry
 from app.db.models import Session, Student, ToolStatus, User, UserRole
 from app.db.models import ToolCall as ToolCallRow
+from app.providers.base import ProviderUnavailableError
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.llm.base import ToolCall, ToolSpec
 from app.providers.reranker.base import NoopReranker
@@ -52,6 +54,10 @@ async def _always_bugs(args: _EchoInput, ctx: ToolContext) -> dict:  # type: ign
     raise RuntimeError("a genuine, unanticipated bug")
 
 
+async def _provider_down(args: _EchoInput, ctx: ToolContext) -> dict:  # type: ignore[type-arg]
+    raise ProviderUnavailableError("connection refused", provider="embeddings")
+
+
 _TEST_REGISTRY = ToolRegistry(
     [
         ToolDefinition(
@@ -75,6 +81,11 @@ _TEST_REGISTRY = ToolRegistry(
             spec=ToolSpec(name="bugs", description="d", input_schema={"type": "object"}),
             input_model=_EchoInput,
             handler=_always_bugs,
+        ),
+        ToolDefinition(
+            spec=ToolSpec(name="down", description="d", input_schema={"type": "object"}),
+            input_model=_EchoInput,
+            handler=_provider_down,
         ),
     ]
 )
@@ -187,6 +198,21 @@ async def test_a_slow_tool_is_stopped_at_its_own_timeout_and_reported_as_such(
     assert result.content == TIMEOUT_MESSAGE
     logged = await _logged_call(db_session, actor.session_id)
     assert logged.status is ToolStatus.TIMEOUT
+
+
+async def test_a_tool_whose_provider_is_down_is_an_error_the_model_can_answer_around(
+    db_session: AsyncSession, actor: Actor
+) -> None:
+    """A provider outage is an operational fact, not a defect: before, it escaped the tool and
+    turned the whole turn into an apology, although the model could have answered without it."""
+    call = ToolCall(id="t8", name="down", arguments={"value": "x"})
+    result = await execute_tool_call(call, registry=_TEST_REGISTRY, ctx=_ctx(db_session, actor))
+
+    assert result.is_error is True
+    assert result.content == UNAVAILABLE_MESSAGE
+    logged = await _logged_call(db_session, actor.session_id)
+    assert logged.status is ToolStatus.ERROR
+    assert logged.error == "embeddings unavailable"
 
 
 async def test_a_call_outside_the_turns_allowlist_is_rejected_even_though_it_exists(

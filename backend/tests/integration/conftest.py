@@ -9,6 +9,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import uuid
 from collections.abc import AsyncIterator
 
 import pytest
@@ -22,6 +23,7 @@ from app.agent.tools.registry import DEFAULT_REGISTRY
 from app.core.config import Settings
 from app.core.rate_limit import RateLimiter
 from app.core.security import PasswordHasherService
+from app.db.models import Session, Student, User
 from app.main import create_app
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.llm.fake import FakeLLMProvider
@@ -143,3 +145,19 @@ async def registered(client: AsyncClient):  # type: ignore[no-untyped-def]
         return email, password, response.json()
 
     return _register
+
+
+@pytest.fixture
+async def student_and_session(db_session: AsyncSession) -> tuple[uuid.UUID, uuid.UUID]:
+    """A student with one voice session, for tests that drive a VoiceSession directly."""
+    user = User(email=f"voice-{uuid.uuid4().hex[:8]}@example.com", password_hash="x")
+    db_session.add(user)
+    await db_session.flush()
+    student = Student(user_id=user.id, display_name="Voice Student")
+    db_session.add(student)
+    await db_session.flush()
+    session = Session(student_id=student.id, transport="websocket")
+    db_session.add(session)
+    await db_session.flush()
+    await db_session.commit()
+    return student.id, session.id

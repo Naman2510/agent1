@@ -347,7 +347,7 @@ async def test_a_connection_lost_to_a_cancelled_query_is_recovered(
     with contextlib.suppress(asyncio.CancelledError):
         await query
 
-    await service.recover_after_cancel()
+    await service.recover()
     assert (await db_session.execute(sql("SELECT 1"))).scalar() == 1
 
 
@@ -357,6 +357,6 @@ async def test_recovery_leaves_a_healthy_session_and_its_work_alone(
     service = _service(db_session, settings, redis_client, FakeLLMProvider())
     await _turn(MessageRepository(db_session), student_session, 0, "Kept?", "")
 
-    await service.recover_after_cancel()
+    await service.recover()
     await db_session.commit()
     assert len(await _messages(db_session, student_session)) == 2

@@ -23,8 +23,9 @@ Base path `/v1`. JSON with `snake_case` fields, UTC ISO-8601 timestamps and UUID
 `code` is stable and machine-readable, `message` is safe to show, and a validation error adds
 `fields`. Detail is logged server-side under `request_id`. Statuses: `401` unauthenticated, `403`
 forbidden, `404` absent *or not yours* (never distinguished — that would confirm another student's
-data exists), `409` conflict, `422` invalid input, `429` rate limited with `Retry-After`, `5xx`
-generic.
+data exists), `409` conflict, `422` invalid input, `429` rate limited with `Retry-After`, `503`
+`service_unavailable` with `Retry-After` when a dependency cannot be reached right now (the database;
+[DEGRADATION.md](DEGRADATION.md)), `500` otherwise.
 
 **Request IDs.** Every response carries `X-Request-ID`. A client-supplied one (up to 64
 characters) is echoed so a caller can correlate, and trusted for nothing else.
@@ -50,7 +51,7 @@ account takes effect immediately rather than at token expiry.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/health` | liveness: the process answers |
-| GET | `/ready` | `{status, database, redis}`; `503` when a dependency is down |
+| GET | `/ready` | `{status, database, redis}`: `ready`; `degraded` (200) when Redis is down — every use of it degrades; `unavailable` (503) when the database is down |
 
 ## Auth
 

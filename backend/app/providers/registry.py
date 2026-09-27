@@ -15,6 +15,7 @@ from app.providers.embedding.fake import FakeEmbeddingProvider
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.llm.base import LLMProvider
 from app.providers.llm.fake import FakeLLMProvider
+from app.providers.llm.watchdog import StallGuard
 from app.providers.reranker.base import NoopReranker, RerankerProvider
 from app.providers.stt.base import STTProvider
 from app.providers.stt.fake import FakeSTTProvider
@@ -38,10 +39,14 @@ def build_llm(settings: Settings) -> LLMProvider:
         # import-time credential error cannot break unrelated tests.
         from app.providers.llm.anthropic_provider import AnthropicLLMProvider
 
-        return AnthropicLLMProvider(
-            model=settings.llm_model,
-            timeout_seconds=settings.llm_timeout_seconds,
-            refusal_fallback_model=settings.llm_refusal_fallback_model or None,
+        # Guarded: an upstream that goes quiet is given up on, not waited out (StallGuard).
+        return StallGuard(
+            AnthropicLLMProvider(
+                model=settings.llm_model,
+                timeout_seconds=settings.llm_timeout_seconds,
+                refusal_fallback_model=settings.llm_refusal_fallback_model or None,
+            ),
+            stall_seconds=settings.llm_stall_seconds,
         )
     raise UnknownProviderError("llm", name, ["fake", "anthropic"])
 

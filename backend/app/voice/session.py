@@ -35,7 +35,7 @@ from app.agent.orchestrator import ToolActivityEntry
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.telemetry import attributes, epoch_ns, record_stages, tracer
-from app.providers.base import ProviderError
+from app.providers.base import ProviderError, ProviderUnavailableError
 from app.providers.stt.base import (
     FinalTranscript,
     PartialTranscript,
@@ -150,6 +150,14 @@ class VoiceSessionConfig:
     # complete question. Off until the voice suite shows it wins without more cut-offs.
     semantic_endpointing: bool = False
     semantic_silence_ms: int = 250
+    # How long, once the student stops, to wait for the recogniser's final transcript before
+    # giving up on it with "say it again" (docs/DEGRADATION.md). Past any healthy recogniser —
+    # local faster-whisper on CPU included — and short of leaving a student talking to a session
+    # that has stopped listening, which is what an unbounded wait did.
+    stt_final_timeout_ms: int = 10_000
+    # How long synthesis may go without producing audio before the voice is treated as lost and
+    # the rest of the answer continues as text.
+    tts_stall_timeout_ms: int = 5_000
 
 
 @dataclass
@@ -190,6 +198,7 @@ class VoiceSession:
         # detector ("silence", or "semantic" under EXP-003), or the duration cap.
         self.last_end_reason: str | None = None
         self._audio_seq = 0
+        self._voice_lost = False
         self._committed_at: float | None = None
         self._speech_ms = 0
         self._pending_merge_text: str = ""
@@ -452,13 +461,25 @@ class VoiceSession:
         return final or FinalTranscript(text="")
 
     async def _finish_transcription(self) -> FinalTranscript:
-        """End the utterance's audio and wait for its final transcript."""
+        """End the utterance's audio and wait for its final transcript — for a bounded time: this
+        runs on the connection's receive path, so a recogniser that never answers would otherwise
+        stop the session hearing anything at all, the student's next question included."""
         task, frames = self._stt_task, self._stt_frames
         self._stt_task = self._stt_frames = None
         if task is None or frames is None:
             return FinalTranscript(text="")
         frames.put_nowait(None)
-        return await task
+        try:
+            async with asyncio.timeout(self.config.stt_final_timeout_ms / 1000):
+                return await task
+        except TimeoutError:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            raise ProviderUnavailableError(
+                f"no final transcript within {self.config.stt_final_timeout_ms} ms",
+                provider=self.stt.info.name,
+            ) from None
 
     async def _cancel_transcription(self) -> None:
         task = self._stt_task
@@ -514,6 +535,8 @@ class VoiceSession:
         self._ledger = PlaybackLedger(sample_rate=self.config.tts_sample_rate)
         self._chunker.reset()
         self._audio_seq = 0
+        # Tried afresh every turn: a synthesiser that failed may have recovered.
+        self._voice_lost = False
         delivery = _LedgerDelivery(
             ledger=self._ledger,
             pending_text=lambda: self._chunker.pending,
@@ -572,6 +595,9 @@ class VoiceSession:
                 code=code,
                 exc_info=True,
             )
+            # One failed turn must not fail every turn after it on this connection's session.
+            with contextlib.suppress(Exception):
+                await self.conversation.recover()
             if self.machine.can(Trigger.PROVIDER_FAILED):
                 self.machine.fire(Trigger.PROVIDER_FAILED)
                 await self._announce_state()
@@ -621,9 +647,10 @@ class VoiceSession:
 
     async def _speak(self, chunk: Chunk) -> None:
         speech = strip_cited_refs(chunk.text).strip()
-        if not speech:
-            # Nothing audible (a chunk that was only a citation marker), but the span is still
-            # part of the answer: skipping it would leave a hole in the record of what was said.
+        if not speech or self._voice_lost:
+            # Nothing audible (a chunk that was only a citation marker), or no voice left to say
+            # it with — but the span is still part of the answer, already on the student's screen
+            # as `llm.delta`: skipping it would leave a hole in the record of what was said.
             self._ledger.begin_chunk(chunk.raw)
             return
         if not self._marks.has(stage.FIRST_SENTENCE):
@@ -637,16 +664,44 @@ class VoiceSession:
         # Registered before synthesis starts: if the student interrupts mid-chunk, this text must
         # still appear in the record — as heard, partly heard, or unheard.
         self._ledger.begin_chunk(chunk.raw)
-        async for audio in self.tts.synthesize_stream(request):
-            if not self._marks.has(stage.TTS_FIRST_BYTE):
-                self._marks.mark(stage.TTS_FIRST_BYTE)
-            if self.machine.state is TurnState.THINKING:
-                self.machine.fire(Trigger.FIRST_AUDIO_QUEUED)
-                await self._announce_state()
-            await self.transport.send_audio(self.machine.turn_id, self._audio_seq, audio)
-            self._marks.mark(stage.FIRST_AUDIO_SENT)
-            self._audio_seq += 1
-            self._ledger.extend_chunk(len(audio))
+        audio_stream = aiter(self.tts.synthesize_stream(request))
+        try:
+            while True:
+                try:
+                    async with asyncio.timeout(self.config.tts_stall_timeout_ms / 1000):
+                        audio = await anext(audio_stream)
+                except StopAsyncIteration:
+                    break
+                if not self._marks.has(stage.TTS_FIRST_BYTE):
+                    self._marks.mark(stage.TTS_FIRST_BYTE)
+                if self.machine.state is TurnState.THINKING:
+                    self.machine.fire(Trigger.FIRST_AUDIO_QUEUED)
+                    await self._announce_state()
+                await self.transport.send_audio(self.machine.turn_id, self._audio_seq, audio)
+                self._marks.mark(stage.FIRST_AUDIO_SENT)
+                self._audio_seq += 1
+                self._ledger.extend_chunk(len(audio))
+        except (ProviderError, TimeoutError):
+            await self._lose_voice()
+        finally:
+            await audio_stream.aclose()  # type: ignore[attr-defined]
+
+    async def _lose_voice(self) -> None:
+        """The synthesiser failed or went quiet mid-answer. The answer goes on as text — it is
+        already streaming to the student as `llm.delta` — and the turn finishes as it would have,
+        rather than ending in an apology nobody can hear (docs/DEGRADATION.md)."""
+        self._voice_lost = True
+        log.error(
+            "voice.tts_failed",
+            session_id=str(self.session_id),
+            turn_id=self.machine.turn_id,
+            exc_info=True,
+        )
+        await self.transport.send_control(
+            ServerMessage.ERROR,
+            code="tts_failed",
+            message="My voice isn't working right now — the rest of this answer is in text.",
+        )
 
     async def _finish_turn(
         self,
@@ -745,7 +800,7 @@ class VoiceSession:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await task
-        await self.conversation.recover_after_cancel()
+        await self.conversation.recover()
 
     # --- inbound control ---------------------------------------------------
 

@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     # A spoken answer longer than this is a defect, not a feature (see the persona prompt).
     llm_max_output_tokens: int = 1024
     llm_timeout_seconds: float = 30.0
+    # How long a stream may go without a single event before the turn gives up on it with an
+    # apology (app/providers/llm/watchdog.py). Far past a healthy first token, far short of the
+    # SDK's 30 s per read times three attempts.
+    llm_stall_seconds: float = 20.0
     # Server-side rescue when a request is declined on policy grounds, so a decline degrades to a
     # different model instead of hanging a conversation. Empty disables it.
     llm_refusal_fallback_model: str = "claude-opus-4-8"

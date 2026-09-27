@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import pytest
 import structlog
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -24,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.intent import IntentGate
 from app.agent.tools.registry import DEFAULT_REGISTRY
 from app.core.config import Settings
-from app.db.models import Message, MessageRole, Session, Student, User
+from app.db.models import Message, MessageRole, Session
 from app.db.repositories.sessions import MessageRepository
 from app.providers.base import ProviderUnavailableError
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
@@ -105,21 +104,6 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
-
-
-@pytest.fixture
-async def student_and_session(db_session: AsyncSession) -> tuple[uuid.UUID, uuid.UUID]:
-    user = User(email=f"voice-{uuid.uuid4().hex[:8]}@example.com", password_hash="x")
-    db_session.add(user)
-    await db_session.flush()
-    student = Student(user_id=user.id, display_name="Voice Student")
-    db_session.add(student)
-    await db_session.flush()
-    session = Session(student_id=student.id, transport="websocket")
-    db_session.add(session)
-    await db_session.flush()
-    await db_session.commit()
-    return student.id, session.id
 
 
 def _build(

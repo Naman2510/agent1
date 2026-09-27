@@ -38,9 +38,13 @@ async def ready(db: DbDep, client: RedisDep, response: Response) -> ReadinessRes
         log.error("readiness.redis_down", exc_info=True)
         redis_state = "down"
 
-    healthy = db_state == "up" and redis_state == "up"
-    if not healthy:
+    # Only the database makes an instance unready: it is the record of truth, and nothing works
+    # without it. Redis holds nothing that cannot be rebuilt (ARCHITECTURE §13) and every use of it
+    # degrades, so an instance without it still serves — and taking every instance out of rotation
+    # for a Redis outage would turn a degraded service into none (docs/DEGRADATION.md).
+    if db_state == "down":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return ReadinessResponse(
-        status="ready" if healthy else "degraded", database=db_state, redis=redis_state
-    )
+        overall = "unavailable"
+    else:
+        overall = "ready" if redis_state == "up" else "degraded"
+    return ReadinessResponse(status=overall, database=db_state, redis=redis_state)

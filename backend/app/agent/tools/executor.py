@@ -1,8 +1,10 @@
 """Runs one tool call: validate, run under a timeout, log, and return a result the model can see.
 
 Only *expected* failures become a graceful `is_error=True` result — a `ToolExecutionError` a
-handler raised on purpose, an unknown tool name, bad arguments, or a timeout. Anything else is a
-real bug and is left to propagate, the same way `ConversationService` lets an unexpected exception
+handler raised on purpose, an unknown tool name, bad arguments, a timeout, or a `ProviderError`
+from a service the tool depends on (a provider that is down is an operational fact, not a defect,
+and the model can still answer without the tool). Anything else is a real bug and is left to
+propagate, the same way `ConversationService` lets an unexpected exception
 surface rather than dressing it up as a normal outcome: laundering a genuine defect into a polite
 "sorry, couldn't do that" would hide it from everyone who'd otherwise notice and fix it.
 """
@@ -21,6 +23,7 @@ from app.agent.tools.registry import ToolRegistry
 from app.core.telemetry import tracer
 from app.db.models import ToolStatus
 from app.db.repositories.tool_calls import ToolCallRepository
+from app.providers.base import ProviderError
 from app.providers.llm.base import ToolCall, ToolResult
 
 log = structlog.get_logger(__name__)
@@ -28,6 +31,7 @@ log = structlog.get_logger(__name__)
 UNKNOWN_TOOL_MESSAGE = "That tool does not exist."
 NOT_ALLOWED_MESSAGE = "That tool is not available for this kind of request."
 TIMEOUT_MESSAGE = "That took too long, so I couldn't get an answer."
+UNAVAILABLE_MESSAGE = "That isn't available right now."
 
 
 async def execute_tool_call(
@@ -133,6 +137,19 @@ async def _execute(
             duration_ms=duration_ms,
         )
         return ToolResult(tool_use_id=call.id, content=TIMEOUT_MESSAGE, is_error=True)
+    except ProviderError as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        log.warning("tool.provider_unavailable", tool=call.name, provider=exc.provider)
+        await tool_calls.record(
+            session_id=ctx.session_id,
+            turn_index=ctx.turn_index,
+            tool_name=call.name,
+            arguments=call.arguments,
+            status=ToolStatus.ERROR,
+            error=f"{exc.provider} unavailable",
+            duration_ms=duration_ms,
+        )
+        return ToolResult(tool_use_id=call.id, content=UNAVAILABLE_MESSAGE, is_error=True)
 
     duration_ms = int((time.perf_counter() - started) * 1000)
     await tool_calls.record(

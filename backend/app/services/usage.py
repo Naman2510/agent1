@@ -12,6 +12,13 @@ Counters live in Redis because they are incremented many times per minute and ar
 rebuild from `messages.token_usage` if lost (ARCHITECTURE §13). Money is counted in integer
 micro-dollars: accumulating floats in a shared counter drifts, and drift in a spend cap is the
 kind of bug that is discovered on an invoice.
+
+**A Redis outage suspends the controls, never the product** — the rate limiter's rule
+(app/core/rate_limit.py), applied here too. Unreadable, the spend cap and the voice allowance are
+not enforced; unwritable, the counters miss the outage's increments, while each turn's own usage is
+still stored with its message. Every such lapse is logged at warning. Before this, an outage made
+every priced turn end in an error after it had been answered, and kept every student out of voice
+(docs/DEGRADATION.md).
 """
 
 from __future__ import annotations
@@ -93,7 +100,11 @@ class UsageLedger:
         cap = self._settings.monthly_spend_cap_usd
         if cap is None:
             return  # no cap configured — and the app says so at startup rather than implying one
-        spent = await self.monthly_spend_usd(now=now)
+        try:
+            spent = await self.monthly_spend_usd(now=now)
+        except redis.RedisError:
+            log.warning("cost_guard.unavailable", cap_usd=cap, exc_info=True)
+            return
         if spent >= cap:
             log.warning("cost_guard.cap_reached", spent_usd=round(spent, 4), cap_usd=cap)
             raise SpendCapExceededError
@@ -119,7 +130,12 @@ class UsageLedger:
         pipe = self._redis.pipeline()
         pipe.incrby(key, micros)
         pipe.expire(key, _MONTH_TTL_SECONDS)
-        await pipe.execute()
+        try:
+            await pipe.execute()
+        except redis.RedisError:
+            # The turn has been answered and its usage stored with its message; only the
+            # month's counter misses it.
+            log.warning("cost_guard.record_failed", micros=micros, exc_info=True)
 
     # --- voice minutes ------------------------------------------------------
 
@@ -129,22 +145,31 @@ class UsageLedger:
 
     async def check_voice_quota(self, student_id: str, *, now: datetime | None = None) -> None:
         allowance = self._settings.rate_limit_voice_minutes_per_day * 60
-        if await self.voice_seconds_used(student_id, now=now) >= allowance:
+        try:
+            used = await self.voice_seconds_used(student_id, now=now)
+        except redis.RedisError:
+            log.warning("voice_quota.unavailable", exc_info=True)
+            return
+        if used >= allowance:
             raise VoiceQuotaExceededError
 
     async def record_voice_seconds(
         self, student_id: str, seconds: int, *, now: datetime | None = None
     ) -> int:
-        """Add to today's usage and return the new total.
+        """Add to today's usage and return the new total (0 when the counter is unreachable).
 
         Called as audio is consumed rather than once at session end, so an abandoned session still
         counts the audio it actually used.
         """
-        if seconds <= 0:
-            return await self.voice_seconds_used(student_id, now=now)
         key = self._voice_key(student_id, now or datetime.now(UTC))
-        pipe = self._redis.pipeline()
-        pipe.incrby(key, seconds)
-        pipe.expire(key, _DAY_TTL_SECONDS)
-        total, _ = await pipe.execute()
+        try:
+            if seconds <= 0:
+                return await self.voice_seconds_used(student_id, now=now)
+            pipe = self._redis.pipeline()
+            pipe.incrby(key, seconds)
+            pipe.expire(key, _DAY_TTL_SECONDS)
+            total, _ = await pipe.execute()
+        except redis.RedisError:
+            log.warning("voice_quota.record_failed", seconds=seconds, exc_info=True)
+            return 0
         return int(total)

@@ -10,7 +10,8 @@ import structlog
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 log = structlog.get_logger(__name__)
@@ -123,6 +124,27 @@ def register_exception_handlers(app: FastAPI) -> None:
         code = codes.get(exc.status_code, "http_error")
         message = exc.detail if isinstance(exc.detail, str) else "Request failed."
         return JSONResponse(status_code=exc.status_code, content=_body(code, message, request))
+
+    async def _unavailable(request: Request, exc: Exception) -> JSONResponse:
+        # A dependency that cannot be reached right now — the database refusing connections,
+        # restarting, or out of pool slots — is not an internal error: the same request may well
+        # succeed in a moment, and a 503 with Retry-After tells clients and load balancers so
+        # (docs/DEGRADATION.md). The message names nothing: addresses stay in the log.
+        log.error("dependency.unavailable", error_type=type(exc).__name__, exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=_body(
+                "service_unavailable",
+                "The service is temporarily unavailable. Please try again shortly.",
+                request,
+            ),
+            headers={"Retry-After": "5"},
+        )
+
+    # Registered class by class: a handler for a specific class runs in place of the catch-all
+    # below, which (as Starlette's server-error handler) would also re-raise into the server log.
+    for unavailable in (ConnectionError, OperationalError, InterfaceError, PoolTimeoutError):
+        app.add_exception_handler(unavailable, _unavailable)
 
     @app.exception_handler(SQLAlchemyError)
     async def _db(request: Request, exc: SQLAlchemyError) -> JSONResponse:

@@ -18,6 +18,7 @@ from app.providers.embedding.fake import FakeEmbeddingProvider
 from app.providers.llm.anthropic_provider import AnthropicLLMProvider
 from app.providers.llm.base import LLMProvider
 from app.providers.llm.fake import FakeLLMProvider
+from app.providers.llm.watchdog import StallGuard
 from app.providers.registry import (
     UnknownProviderError,
     build_embedding,
@@ -112,6 +113,7 @@ def test_the_registry_passes_the_configured_model_through() -> None:
     provider = build_llm(_settings(llm_provider="anthropic", llm_model="claude-sonnet-5"))
     assert provider.info.model == "claude-sonnet-5"
     assert provider.info.name == "anthropic"
+    assert isinstance(provider, StallGuard), "a real upstream can go quiet; the fake cannot"
 
 
 def test_an_unknown_provider_fails_loudly() -> None:

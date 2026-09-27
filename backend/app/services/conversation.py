@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 import structlog
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.intent import IntentGate
@@ -353,8 +354,13 @@ class ConversationService:
                     exc_info=True,
                 )
                 result.stop_reason = "cancelled"
-                chunks.append(FAILURE_REPLY)
-                yield FAILURE_REPLY, None
+                # After half an answer, a word break first: joined straight on, the apology read —
+                # and was spoken — as "voltages aroundSorry".
+                apology = FAILURE_REPLY
+                if chunks and not chunks[-1][-1:].isspace():
+                    apology = f" {FAILURE_REPLY}"
+                chunks.append(apology)
+                yield apology, None
 
             if delivery is not None:
                 await delivery.settle()
@@ -465,19 +471,26 @@ class ConversationService:
 
         yield "", result
 
-    async def recover_after_cancel(self) -> None:
-        """Roll back a transaction a cancelled turn left on an invalidated connection.
+    async def recover(self) -> None:
+        """Leave the database session usable after a turn that did not finish.
 
-        Database work finishes before a cancellation proceeds (`finish_then_cancel`), so this
-        should find nothing to do. It is the backstop: one missed case must cost one turn's record,
-        not every turn after it on a connection that holds one session for its whole life (D8-04).
+        A voice connection holds one database session for its whole life. A turn cancelled
+        mid-query (D8-04), or one whose connection the server dropped — a restart, a failover, a
+        network blip — leaves a transaction that can only be rolled back, and until it is, every
+        later turn fails with PendingRollbackError: one lost turn became a lost session. Database
+        work finishes before a cancellation proceeds (`finish_then_cancel`), so after a barge-in
+        this should find nothing to do; it is the backstop there, and the fix after a failure. A
+        healthy transaction is left alone, with its work.
         """
         session = self._messages.session
         if not session.in_transaction():
             return
-        connection = await session.connection()
-        if connection.invalidated:
-            log.error("conversation.connection_lost_to_cancellation")
+        try:
+            broken = (await session.connection()).invalidated
+        except SQLAlchemyError:
+            broken = True  # already failed, and waiting for exactly this rollback
+        if broken:
+            log.error("conversation.connection_lost")
             await session.rollback()
 
     async def _persist_assistant_turn(

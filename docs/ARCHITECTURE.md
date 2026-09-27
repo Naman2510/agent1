@@ -158,6 +158,9 @@ stateDiagram-v2
     ERROR --> LISTENING: recovered (spoken apology)
 ```
 
+A lost *voice* is not a provider failure in this sense: when synthesis fails or goes quiet, the
+answer goes on as text and the turn ends as it would have ([DEGRADATION.md](DEGRADATION.md)).
+
 `BARGED_IN` is a real state, not a flag, because cancellation is asynchronous and multiple things
 must complete before new audio may be attributed to a new turn. Transition legality is a unit-test
 target (spec §10): the test matrix asserts every illegal edge raises, and that no path can leave two
@@ -630,7 +633,7 @@ with a bounded wait for clients that stop ACKing.
 | audio (binary) | `[turn_id][seq]` + Int16 LE PCM at `tts_sample_rate` | Playback |
 | `tts.cancel` | `turn_id` | Immediate client flush (§5.2) |
 | `metrics` | `turn_id`, `latency_ms` | Live latency HUD |
-| `error` | `code`, `message` | Safe, non-leaking error surface (`stt_failed`, `turn_failed`, `spend_cap_exceeded`, …) |
+| `error` | `code`, `message` | Safe, non-leaking error surface (`stt_failed`, `turn_failed`, `tts_failed`, `spend_cap_exceeded`, …); only `turn_failed` ends a turn — `tts_failed` says the answer goes on as text ([DEGRADATION.md](DEGRADATION.md)) |
 
 Fencing: the client discards audio frames from a turn it has flushed; the server discards PCM frames
 whose `turn_id` is stale. This makes the interruption race testable and closes the "ghost audio after
@@ -745,8 +748,11 @@ so the dashboard can count active sessions and so a crashed session can be marke
 never read back to make a decision. Without this rule the same state would exist in two places with
 no defined winner, which is a class of bug that is very hard to diagnose later.
 
-Redis is **not** a conversation store; losing it costs a session's live state and nothing else. That
-degradation path is an explicit integration test.
+Redis is **not** a conversation store; losing it costs a session's live state, the short-term
+window (read from Postgres instead) and the accounting counters' increments — never an answer. Until
+Phase 9 that sentence was only a claim: an outage ended every priced turn in an error after it had
+been answered and kept every student out of voice. It is now tested, dependency by dependency, in
+[DEGRADATION.md](DEGRADATION.md).
 
 ---
 

@@ -11,14 +11,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+import structlog
+from opentelemetry import trace
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Document, DocumentChunk
+from app.providers.base import ProviderError
 from app.providers.embedding.base import EmbeddingProvider
 from app.providers.reranker.base import RerankCandidate, RerankerProvider
 from app.rag.fusion import RankedItem, reciprocal_rank_fusion
 from app.rag.tokenize import tokenize
+
+log = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -90,7 +95,14 @@ class HybridRetriever:
     ) -> list[RetrievedChunk]:
         cfg = config or RetrievalConfig()
 
-        vector_ranking = await self.vector_search(query, cfg)
+        try:
+            vector_ranking = await self.vector_search(query, cfg)
+        except ProviderError:
+            # The embedder is down. The lexical arm needs nothing but the database, so retrieval
+            # goes on with half its evidence rather than none (docs/DEGRADATION.md).
+            log.warning("retrieval.vector_arm_unavailable", exc_info=True)
+            trace.get_current_span().set_attribute("rag.degraded", "vector_arm_unavailable")
+            vector_ranking = []
         lexical_ranking = await self.lexical_search(query, cfg)
 
         fused = reciprocal_rank_fusion(
@@ -107,7 +119,12 @@ class HybridRetriever:
         ]
 
         if cfg.use_reranker and self._reranker.reranks:
-            ordered = await self._apply_reranker(query, ordered)
+            try:
+                ordered = await self._apply_reranker(query, ordered)
+            except ProviderError:
+                # Reranking refines an order that already exists; without it, the fused order.
+                log.warning("retrieval.reranker_unavailable", exc_info=True)
+                trace.get_current_span().set_attribute("rag.degraded", "reranker_unavailable")
 
         return ordered
 
