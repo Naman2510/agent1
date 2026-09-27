@@ -11,7 +11,6 @@ behaviour Phase 2 always had, unchanged.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass
@@ -21,6 +20,7 @@ import structlog
 from app.agent.tools.base import ToolContext
 from app.agent.tools.executor import execute_tool_call
 from app.agent.tools.registry import ToolRegistry
+from app.core.cancellation import finish_then_cancel
 from app.providers.llm.base import (
     Effort,
     LLMProvider,
@@ -174,19 +174,19 @@ async def run_agent_turn(
         # go back in one message" is about that message shape, not about concurrent execution —
         # satisfied here by still batching every result from the round into one TurnMessage below.
         #
-        # Each call is still individually shielded: Gate 0 finding C-04, item 3 — cancellation
-        # must not leave a half-applied write. A mutating tool (create_study_plan, generate_quiz,
-        # update_student_progress) could otherwise be interrupted (barge-in) mid-commit. Shielding
-        # lets a call that has already started finish its transaction even if this turn's
-        # cancellation propagates right after it — the turn still ends and the result is
-        # discarded, exactly as C-04 specifies ("cancellation waits or times out, then discards
-        # results"); the write itself completes, and any calls after it simply never start.
+        # Each call finishes before a cancellation proceeds: Gate 0 finding C-04, item 3 —
+        # cancellation must not leave a half-applied write. A mutating tool (create_study_plan,
+        # generate_quiz, update_student_progress) could otherwise be interrupted (barge-in)
+        # mid-commit. The turn still ends and the result is discarded, exactly as C-04 specifies
+        # ("cancellation waits or times out, then discards results"); calls after it never start.
+        # This was `asyncio.shield`, which does not wait: the call carried on in the background
+        # while the cancelled turn wrote its own record on the same session (D8-04).
         # Not yet done: the same finding's idempotency key (`(session, turn, tool, args_hash)`),
         # which would let a *retried* call detect it already ran — recorded as a gap, not silently
         # skipped (see the Phase 6 audit).
         results = []
         for call in round_calls:
-            result = await asyncio.shield(
+            result = await finish_then_cancel(
                 execute_tool_call(
                     call, registry=registry, ctx=tool_ctx, allowed_tool_names=allowed_tool_names
                 )

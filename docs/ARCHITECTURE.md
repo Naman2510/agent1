@@ -319,6 +319,14 @@ student has heard anything, it is a genuine interruption.
 This is a UX correctness rule with a measurable cost (one wasted partial generation), and it is
 testable with a fake clock.
 
+As built (`app/voice/session.py`; unimplemented until Phase 8, D8-03 — the carried text was always
+empty): `stt.final` for the continuation carries the whole question; the cut-off turn is withdrawn
+— only if it asked exactly that question and nothing of its answer was heard — and the merged
+question takes its `turn_index`; its tool calls stay, keyed by that index (§5.7). A continuation
+that comes to nothing (a cough long enough to barge in, a "hmm", an empty transcript) does not cost
+the student the question it interrupted: that question runs again as it was. Only speech merges —
+the stop button and a typed question are decisions, never a continued thought.
+
 ### 5.7 Tool side effects survive cancellation
 
 Cancelling a turn does not undo a tool call that already ran. If `update_student_progress` committed
@@ -330,6 +338,14 @@ mid-flight — cancellation waits for in-flight tool calls to finish or time out
 results. Cancellation kills generation and synthesis, not database writes, so the database is never
 left half-updated. The cost is up to one tool timeout (2.5 s budget) of delay on the cancellation
 path, which is hidden behind the client-side audio flush.
+
+As built: `app/core/cancellation.py`'s `finish_then_cancel` runs each tool call, and each of the
+turn's own database calls, to completion before the cancellation proceeds. Until Phase 8 the tool
+loop used `asyncio.shield`, which does not wait — the call carried on while the cancelled turn wrote
+its record on the same session — and the turn's own queries were not protected at all: a barge-in
+mid-query invalidated the connection, and since a voice connection holds one session for its whole
+life, every later turn failed (D8-04). As a backstop, cancelling a turn rolls back a connection
+found invalidated, so a case missed here costs one turn's record, not the session.
 
 ### 5.8 Echo / self-barge-in
 Without acoustic echo cancellation the microphone hears the assistant and interrupts itself. v1 asks
@@ -607,7 +623,7 @@ with a bounded wait for clients that stop ACKing.
 | `ready` | `sample_rate`, `frame_ms`, `tts_sample_rate` | The audio contract, sent at accept |
 | `state` | `state`, `turn_id` | Drives UI + assertions in e2e tests |
 | `stt.partial` | `text`, `stable_prefix_len`, `language`, `turn_id` | Sent while the student speaks; UI only, explicitly unstable |
-| `stt.final` | `text`, `language`, `confidence`, `turn_id` | Commits the user turn |
+| `stt.final` | `text`, `language`, `confidence`, `turn_id` | Commits the user turn — for a continued thought (§5.6), the whole question |
 | `llm.delta` | `text`, `turn_id` | Live transcript of the mentor |
 | `agent.activity` | `turn_id`, `tools: [{tool_name, ok}]` | Tool transparency (spec §4), sent as the turn finishes |
 | `rag.citations` | `turn_id`, `citations: [{ref, document_title, heading_path, section, page_start, page_end}]` | Source inspection (spec §16) — only sources the answer actually cited |

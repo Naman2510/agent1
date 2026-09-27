@@ -33,6 +33,7 @@ from app.agent.prompts import PROMPT_VERSION, assemble
 from app.agent.tools.base import ToolContext
 from app.agent.tools.registry import ToolRegistry
 from app.core.background import spawn
+from app.core.cancellation import finish_then_cancel
 from app.core.config import Settings
 from app.db.models import MessageRole
 from app.db.repositories.memory import StudentProfileRepository
@@ -52,7 +53,7 @@ from app.providers.llm.base import (
 from app.rag.context import Citation, ContextBlock, extract_cited_refs, resolve_citations
 from app.rag.retrieve import RetrievedChunk
 from app.rag.service import RagService
-from app.services.memory_window import SessionWindowCache
+from app.services.memory_window import SessionWindowCache, without_withdrawn
 from app.services.usage import TurnCost, UsageLedger
 
 log = structlog.get_logger(__name__)
@@ -187,23 +188,48 @@ class ConversationService:
         language: str | None = None,
         marks: dict[str, int] | None = None,
         language_directive: str | None = None,
+        continues: str | None = None,
     ) -> AsyncGenerator[tuple[str, TurnResult | None], None]:
         """Run one turn, yielding `(text_fragment, None)` and finally `("", result)`.
 
         The caller is responsible for delivering fragments; this method is responsible for making
         the stored record match what was delivered.
+
+        `continues` names the question this one carries on: a pause cut it off and its answer was
+        cancelled before a word was heard, and `utterance` is it with its continuation
+        (ARCHITECTURE §5.6). That turn is withdrawn and this one takes its index, so the record
+        holds one question, not a fragment and then the whole of it.
+
+        Database work here runs to completion even if the turn is cancelled meanwhile
+        (`finish_then_cancel`): a query cut off mid-flight leaves the connection unusable.
         """
         # Refuse before spending, not after (Gate 0 finding M-11).
         await self._ledger.check_spend_cap()
 
-        turn_index = await self._messages.next_turn_index(session_id)
+        withdrawn: int | None = None
+        if continues is not None:
+            withdrawn = await finish_then_cancel(
+                self._messages.withdraw_unheard_turn(session_id, question=continues)
+            )
+            if withdrawn is None:
+                # Something of it was heard after all, or it was never stored: a new turn.
+                log.warning("conversation.nothing_to_continue", session_id=str(session_id))
+        replaces = continues if withdrawn is not None else None
+        turn_index = (
+            withdrawn
+            if withdrawn is not None
+            else await finish_then_cancel(self._messages.next_turn_index(session_id))
+        )
         result = TurnResult(turn_index=turn_index)
 
-        history, earlier_turns_summary = await self._recent_context(session_id)
+        history, earlier_turns_summary = await finish_then_cancel(self._recent_context(session_id))
+        if replaces is not None:
+            # The window cache may still hold the cut-off exchange; Postgres no longer does.
+            history = list(without_withdrawn(history, replaces))
 
         memory_digest: str | None = None
         if self._student_profiles is not None:
-            profile = await self._student_profiles.get_or_create(student_id)
+            profile = await finish_then_cancel(self._student_profiles.get_or_create(student_id))
             memory_digest = profile.digest or None
 
         # Fail closed (see __init__): no intent_gate means no tool is offered, not every tool.
@@ -222,15 +248,6 @@ class ConversationService:
             language_directive=language_directive,
         )
 
-        await self._messages.append(
-            session_id=session_id,
-            turn_index=turn_index,
-            seq=0,
-            role=MessageRole.USER,
-            content=utterance,
-            language=language or script_of(utterance),
-        )
-
         started = time.perf_counter()
         first_token_at: float | None = None
         chunks: list[str] = []
@@ -243,6 +260,18 @@ class ConversationService:
         settled = False
 
         try:
+            # Inside the try: once the question is stored, an interruption — even one that lands
+            # while it is being stored — leaves the turn recorded as interrupted, not half-written.
+            await finish_then_cancel(
+                self._messages.append(
+                    session_id=session_id,
+                    turn_index=turn_index,
+                    seq=0,
+                    role=MessageRole.USER,
+                    content=utterance,
+                    language=language or script_of(utterance),
+                )
+            )
             try:
                 if (
                     self._tool_registry is not None
@@ -381,6 +410,7 @@ class ConversationService:
                         session_id,
                         user_message=TurnMessage(role="user", text=utterance),
                         assistant_message=TurnMessage(role="assistant", text=result.text),
+                        replaces=replaces,
                     ),
                     name=f"memory_window.record_turn:{session_id}",
                 )
@@ -408,6 +438,21 @@ class ConversationService:
             )
 
         yield "", result
+
+    async def recover_after_cancel(self) -> None:
+        """Roll back a transaction a cancelled turn left on an invalidated connection.
+
+        Database work finishes before a cancellation proceeds (`finish_then_cancel`), so this
+        should find nothing to do. It is the backstop: one missed case must cost one turn's record,
+        not every turn after it on a connection that holds one session for its whole life (D8-04).
+        """
+        session = self._messages.session
+        if not session.in_transaction():
+            return
+        connection = await session.connection()
+        if connection.invalidated:
+            log.error("conversation.connection_lost_to_cancellation")
+            await session.rollback()
 
     async def _persist_assistant_turn(
         self, *, session_id: uuid.UUID, turn_index: int, result: TurnResult

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import redis.asyncio as redis
@@ -48,6 +49,18 @@ _FOLD_SYSTEM = SystemBlock(
     ),
     cacheable=False,
 )
+
+
+def without_withdrawn(turns: Sequence[TurnMessage], question: str) -> tuple[TurnMessage, ...]:
+    """`turns` without a trailing exchange for `question` — the question, and the empty answer
+    it was cut off with — as a merged continuation replaces it (ARCHITECTURE §5.6)."""
+    kept = list(turns)
+    if kept and kept[-1].role == "assistant" and not kept[-1].text:
+        if len(kept) >= 2 and kept[-2].role == "user" and kept[-2].text == question:
+            del kept[-2:]
+    elif kept and kept[-1].role == "user" and kept[-1].text == question:
+        del kept[-1]
+    return tuple(kept)
 
 
 @dataclass(frozen=True)
@@ -89,11 +102,19 @@ class SessionWindowCache:
             return None
 
     async def record_turn(
-        self, session_id: uuid.UUID, *, user_message: TurnMessage, assistant_message: TurnMessage
+        self,
+        session_id: uuid.UUID,
+        *,
+        user_message: TurnMessage,
+        assistant_message: TurnMessage,
+        replaces: str | None = None,
     ) -> None:
-        """Append this turn, folding whatever falls out of the window into the rolling summary."""
+        """Append this turn, folding whatever falls out of the window into the rolling summary.
+        `replaces` names a question this turn supersedes (a continued thought, §5.6), whose
+        cut-off exchange is dropped rather than kept beside it."""
         window = await self.get(session_id) or SessionWindow(turns=())
-        new_turns = (*window.turns, user_message, assistant_message)
+        turns = window.turns if replaces is None else without_withdrawn(window.turns, replaces)
+        new_turns = (*turns, user_message, assistant_message)
 
         if len(new_turns) > self._capacity:
             overflow_count = len(new_turns) - self._capacity

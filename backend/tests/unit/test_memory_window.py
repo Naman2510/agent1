@@ -14,7 +14,7 @@ import redis.asyncio as redis_async
 from app.providers.base import ProviderUnavailableError
 from app.providers.llm.base import TurnMessage
 from app.providers.llm.fake import FakeLLMProvider, ScriptedTurn
-from app.services.memory_window import SessionWindowCache
+from app.services.memory_window import SessionWindowCache, without_withdrawn
 
 
 def _turn(role: Literal["user", "assistant"], text: str) -> TurnMessage:
@@ -163,3 +163,39 @@ async def test_a_turn_with_an_unrecognised_role_is_dropped_not_fatal(redis_clien
     window = await cache.get(session_id)
     assert window is not None
     assert [t.text for t in window.turns] == ["hi"]
+
+
+# --- a continued thought replaces the exchange it cut off (ARCHITECTURE §5.6) ------------
+
+
+def test_withdrawing_drops_only_the_cut_off_exchange_at_the_end() -> None:
+    earlier = (_turn("user", "What is KVL?"), _turn("assistant", "Loop voltages sum to zero."))
+    cut_off = (_turn("user", "And KCL"), _turn("assistant", ""))
+    assert without_withdrawn((*earlier, *cut_off), "And KCL") == earlier
+    assert without_withdrawn((*earlier, cut_off[0]), "And KCL") == earlier, "reply not yet recorded"
+    # An answer that was heard, or a different question, is not the one being replaced.
+    heard = (_turn("user", "And KCL"), _turn("assistant", "Currents into a node sum to zero."))
+    assert without_withdrawn((*earlier, *heard), "And KCL") == (*earlier, *heard)
+    assert without_withdrawn((*earlier, *cut_off), "What is KVL?") == (*earlier, *cut_off)
+
+
+async def test_a_continued_turn_replaces_its_cut_off_exchange_in_the_window(redis_client) -> None:  # type: ignore[no-untyped-def]
+    cache = SessionWindowCache(redis_client, capacity=20, llm=FakeLLMProvider())
+    session_id = uuid.uuid4()
+    await cache.record_turn(
+        session_id,
+        user_message=_turn("user", "What is Kirchhoff's"),
+        assistant_message=_turn("assistant", ""),
+    )
+    await cache.record_turn(
+        session_id,
+        user_message=_turn("user", "What is Kirchhoff's voltage law?"),
+        assistant_message=_turn("assistant", "Loop voltages sum to zero."),
+        replaces="What is Kirchhoff's",
+    )
+    window = await cache.get(session_id)
+    assert window is not None
+    assert [t.text for t in window.turns] == [
+        "What is Kirchhoff's voltage law?",
+        "Loop voltages sum to zero.",
+    ]

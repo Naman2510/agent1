@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 import structlog
 from sqlalchemy import select
+from sqlalchemy import text as sql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.intent import IntentGate
@@ -1438,3 +1439,279 @@ async def test_a_recogniser_that_fails_mid_sentence_is_reported_and_the_session_
     assert voice.machine.state is TurnState.LISTENING
     assert voice.machine.turn_id == 0, "no turn was spent on a question nobody heard"
     assert await _messages(db_session, session_id) == []
+
+
+# --- a continued thought (ARCHITECTURE §5.6, D8-03) ---------------------------------------
+
+
+class _HeldLLM(FakeLLMProvider):
+    """Holds every answer until released, so a turn is still thinking — nothing generated,
+    nothing heard — when the student carries on speaking."""
+
+    def __init__(self, turns: list[ScriptedTurn]) -> None:
+        super().__init__(turns)
+        self.asked = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def stream(self, request):  # type: ignore[no-untyped-def,override]
+        self.asked.set()
+        await self.release.wait()
+        async for event in super().stream(request):
+            yield event
+
+
+class _SequenceSTT(FakeSTTProvider):
+    """One final transcript per utterance, in order."""
+
+    def __init__(self, finals: list[str]) -> None:
+        super().__init__(transcript=finals[0], language="en")
+        self._finals = list(finals)
+
+    async def transcribe_stream(self, frames, context=None):  # type: ignore[no-untyped-def,override]
+        async for _chunk in frames:
+            pass
+        yield FinalTranscript(text=self._finals.pop(0) if self._finals else "", language_hint="en")
+
+
+# 640 ms of question, a 544 ms pause that commits it, then 640 ms more words.
+CUT_OFF = [0.01] * 2 + [0.95] * 20 + [0.01] * 17 + [0.95] * 20 + [0.01] * 20
+# The same question, then a 288 ms cough: long enough to barge in, too short to be a question.
+COUGH_AFTER = [0.01] * 2 + [0.95] * 20 + [0.01] * 17 + [0.95] * 9 + [0.01] * 20
+ANSWER_KVL = "KVL: the voltages around any closed loop sum to zero."
+
+
+async def _say(
+    voice: VoiceSession,
+    transport: RecordingTransport,
+    timeline: list[float],
+    llm: _HeldLLM,
+    *,
+    on_commit: Any = None,
+) -> None:
+    """Deliver a timeline's worth of audio. Once the first turn is committed, wait until it has
+    asked the mentor — what the ~250 ms of speech it takes to confirm a continuation gives it in
+    real time — then run `on_commit`."""
+    committed = False
+    for seq in range(len(timeline) * 32 // FRAME_MS + 2):
+        await _hear(voice, seq)
+        if not committed and "thinking" in transport.states():
+            committed = True
+            await asyncio.wait_for(llm.asked.wait(), timeout=5)
+            if on_commit is not None:
+                on_commit()
+
+
+async def _stored(db: AsyncSession, session_id: uuid.UUID) -> list[tuple[int, str, str, bool]]:
+    return [
+        (r.turn_index, r.role.value, r.content, r.was_interrupted)
+        for r in await _messages(db, session_id)
+    ]
+
+
+async def _turn_count(db: AsyncSession, session_id: uuid.UUID) -> int:
+    row = await db.get(Session, session_id)
+    assert row is not None
+    await db.refresh(row)
+    return row.turn_count
+
+
+async def test_a_question_cut_off_by_a_pause_is_answered_whole(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """ARCHITECTURE §5.6. A 544 ms pause commits "What is Kirchhoff's"; the student carries on
+    before a word of the answer is heard. One question reaches the mentor and one is stored —
+    not a fragment and then the rest. Until Phase 8 the carried text was always "" (D8-03): the
+    mentor was asked "voltage law?" alone."""
+    student_id, session_id = student_and_session
+    llm = _HeldLLM([ScriptedTurn(text=ANSWER_KVL)])
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=CUT_OFF,
+        llm=llm,
+        stt=_SequenceSTT(["What is Kirchhoff's", "voltage law?"]),
+    )
+    await voice.start()
+    await _say(voice, transport, CUT_OFF, llm)
+    llm.release.set()
+    await voice.wait_for_turn()
+    await db_session.commit()
+
+    whole = "What is Kirchhoff's voltage law?"
+    assert [f["text"] for f in transport.of_type("stt.final")] == ["What is Kirchhoff's", whole]
+    assert [m.text for m in llm.last_request.messages if m.role == "user"] == [whole]
+    assert await _stored(db_session, session_id) == [
+        (0, "user", whole, False),
+        (0, "assistant", ANSWER_KVL, False),
+    ]
+    assert await _turn_count(db_session, session_id) == 1
+    assert voice.machine.state is TurnState.LISTENING
+
+
+async def test_carrying_on_after_the_merge_window_is_a_new_question(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    student_id, session_id = student_and_session
+    clock = FakeClock()
+    llm = _HeldLLM([ScriptedTurn(text=ANSWER_KVL)])
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=CUT_OFF,
+        llm=llm,
+        stt=_SequenceSTT(["What is Kirchhoff's", "voltage law?"]),
+        clock=clock,
+    )
+    await voice.start()
+    await _say(voice, transport, CUT_OFF, llm, on_commit=lambda: clock.advance(2.0))
+    llm.release.set()
+    await voice.wait_for_turn()
+    await db_session.commit()
+
+    assert [f["text"] for f in transport.of_type("stt.final")] == [
+        "What is Kirchhoff's",
+        "voltage law?",
+    ]
+    assert await _stored(db_session, session_id) == [
+        (0, "user", "What is Kirchhoff's", False),
+        (0, "assistant", "", True),
+        (1, "user", "voltage law?", False),
+        (1, "assistant", ANSWER_KVL, False),
+    ]
+    assert await _turn_count(db_session, session_id) == 2
+
+
+async def test_a_cough_while_the_mentor_thinks_does_not_cost_the_question(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """The cough is long enough to count as speech, so it cancels the answer as a continued
+    thought would — then turns out too short to be one. The question runs again as it was."""
+    student_id, session_id = student_and_session
+    llm = _HeldLLM([ScriptedTurn(text=ANSWER_KVL)])
+    question = "What is Kirchhoff's voltage law?"
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=COUGH_AFTER,
+        llm=llm,
+        stt=_SequenceSTT([question, "(cough)"]),
+    )
+    await voice.start()
+    await _say(voice, transport, COUGH_AFTER, llm)
+    assert "barged_in" in transport.states(), "the cough did interrupt the thinking"
+    llm.release.set()
+    await voice.wait_for_turn()
+    await db_session.commit()
+
+    assert await _stored(db_session, session_id) == [
+        (0, "user", question, False),
+        (0, "assistant", ANSWER_KVL, False),
+    ]
+    assert await _turn_count(db_session, session_id) == 1
+    assert voice.machine.state is TurnState.LISTENING
+
+
+async def test_the_stop_button_is_never_taken_for_a_continued_thought(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    student_id, session_id = student_and_session
+    llm = _HeldLLM([ScriptedTurn(text=ANSWER_KVL)])
+    new_question = [0.01] * 2 + [0.95] * 20 + [0.01] * 20
+    voice, _transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=new_question,
+        llm=llm,
+        stt=_SequenceSTT(["Aur ek sawaal hai"]),
+    )
+    await voice.start()
+    await voice.handle_text(text="Samjhao")
+    await asyncio.wait_for(llm.asked.wait(), timeout=5)
+    await voice.handle_user_interrupt(turn_id=voice.machine.turn_id)
+    assert voice.machine.state is TurnState.LISTENING
+
+    for seq in range(len(new_question) * 32 // FRAME_MS + 2):
+        await _hear(voice, seq)
+    llm.release.set()
+    await voice.wait_for_turn()
+    await db_session.commit()
+
+    assert await _stored(db_session, session_id) == [
+        (0, "user", "Samjhao", False),
+        (0, "assistant", "", True),
+        (1, "user", "Aur ek sawaal hai", False),
+        (1, "assistant", ANSWER_KVL, False),
+    ]
+
+
+# --- an interruption mid-query (D8-04) ---------------------------------------------------
+
+
+class _SlowMessages(MessageRepository):
+    """Each write waits on the database first, so a query is on the wire whenever the student
+    interrupts — the case that used to leave the connection unusable."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__(session)
+        self.writing = asyncio.Event()
+
+    async def append(self, **kwargs: Any):  # type: ignore[no-untyped-def,override]
+        self.writing.set()
+        await self.session.execute(sql("SELECT pg_sleep(0.2)"))
+        return await super().append(**kwargs)
+
+
+async def test_an_interruption_mid_query_does_not_break_every_turn_after_it(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """D8-04. A voice connection holds one database session for its whole life. Cancelling a
+    turn mid-query invalidated its connection, and every later turn failed on it with
+    `turn_failed` until the student reconnected."""
+    student_id, session_id = student_and_session
+    messages = _SlowMessages(db_session)
+    transport = RecordingTransport()
+    voice = VoiceSession(
+        student_id=student_id,
+        session_id=session_id,
+        transport=transport,
+        vad=VadGate(ScriptedVoiceDetector([0.01] * 10), VadSettings()),
+        stt=FakeSTTProvider(),
+        tts=FakeTTSProvider(),
+        conversation=ConversationService(
+            llm=FakeLLMProvider([ScriptedTurn(text="Doosra jawab.")]),
+            messages=messages,
+            ledger=UsageLedger(redis_client, settings),
+            settings=settings,
+        ),
+        settings=settings,
+        config=VoiceSessionConfig(ack_grace_ms=0),
+        clock=FakeClock(),
+    )
+    transport.listener = voice
+    await voice.start()
+    await voice.handle_text(text="Pehla sawaal")
+    await asyncio.wait_for(messages.writing.wait(), timeout=5)  # the question is being stored
+
+    await voice.handle_text(text="Doosra sawaal")  # and the student moves on, mid-query
+    await asyncio.wait_for(voice.wait_for_turn(), timeout=10)
+    await db_session.commit()
+
+    assert not transport.of_type("error")
+    assert await _stored(db_session, session_id) == [
+        (0, "user", "Pehla sawaal", False),
+        (0, "assistant", "", True),
+        (1, "user", "Doosra sawaal", False),
+        (1, "assistant", "Doosra jawab.", False),
+    ]

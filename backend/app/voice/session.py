@@ -190,6 +190,8 @@ class VoiceSession:
         self._committed_at: float | None = None
         self._speech_ms = 0
         self._pending_merge_text: str = ""
+        # The question the latest turn answers: what a continued thought is merged into (§5.6).
+        self._last_utterance: str = ""
         self.language_state = LanguageState()
         self._speech_plan: SpeechPlan = select_voice("en", self.tts.voices())
         self._language_directive: str | None = None
@@ -267,7 +269,7 @@ class VoiceSession:
     async def _on_speech_start(self) -> None:
         interrupting = self.machine.is_interruptible
         if interrupting:
-            await self._barge_in()
+            await self._barge_in(by_voice=True)
         elif self.machine.state is TurnState.LISTENING:
             self.machine.fire(Trigger.SPEECH_START)
             await self._announce_state()
@@ -310,9 +312,7 @@ class VoiceSession:
         if spoken_ms < self.config.min_utterance_ms:
             # Too short to be a question. Not an error, and not worth a turn index or a bill.
             await self._cancel_transcription()
-            if self.machine.can(Trigger.UTTERANCE_DISCARDED):
-                self.machine.fire(Trigger.UTTERANCE_DISCARDED)
-                await self._announce_state()
+            await self._discard_utterance()
             return
 
         self._marks.mark(stage.TURN_END)
@@ -327,43 +327,62 @@ class VoiceSession:
                 code="stt_failed",
                 message="Sorry — I didn't catch that. Could you say it again?",
             )
-            if self.machine.can(Trigger.UTTERANCE_DISCARDED):
-                self.machine.fire(Trigger.UTTERANCE_DISCARDED)
-                await self._announce_state()
+            # Asked to say it again, the student repeats the whole question: nothing to resume.
+            self._pending_merge_text = ""
+            await self._discard_utterance()
             return
         self._marks.mark(stage.STT_FINAL)
 
         if not transcript.text.strip() or self._is_backchannel(transcript.text):
-            if self.machine.can(Trigger.UTTERANCE_DISCARDED):
-                self.machine.fire(Trigger.UTTERANCE_DISCARDED)
-                await self._announce_state()
+            await self._discard_utterance()
             return
 
+        utterance, continues = transcript.text, None
+        if self._pending_merge_text:
+            # A continued thought, not a new question (ARCHITECTURE §5.6).
+            continues, self._pending_merge_text = self._pending_merge_text, ""
+            utterance = f"{continues} {utterance}".strip()
+            log.info("voice.utterance_merged", session_id=str(self.session_id))
+
+        # The question the turn answers — for a continued thought, the whole of it.
         await self.transport.send_control(
             ServerMessage.STT_FINAL,
-            text=transcript.text,
+            text=utterance,
             language=transcript.language_hint,
             confidence=transcript.confidence,
             turn_id=self.machine.turn_id,
         )
+        await self._commit_turn(utterance, reason=reason, continues=continues)
 
-        utterance = transcript.text
-        if self._pending_merge_text:
-            # A continued thought, not a new question (ARCHITECTURE §5.6).
-            utterance = f"{self._pending_merge_text} {utterance}".strip()
-            self._pending_merge_text = ""
-            log.info("voice.utterance_merged", session_id=str(self.session_id))
-
+    async def _commit_turn(self, utterance: str, *, reason: str, continues: str | None) -> None:
         decision = self._route_language(utterance)
-        language = decision.language
         self._marks.mark(stage.LANGUAGE_DECIDED)
 
         self.machine.fire(Trigger.TURN_END)
         await self._announce_state()
         self._committed_at = self.clock()
+        self._last_utterance = utterance
         self._turn_task = asyncio.create_task(
-            self._run_turn(utterance=utterance, language=language, reason=reason)
+            self._run_turn(
+                utterance=utterance,
+                language=decision.language,
+                reason=reason,
+                continues=continues,
+            )
         )
+
+    async def _discard_utterance(self) -> None:
+        """Not a question after all — unless it was taken for the continuation of one (§5.6).
+        Then the barge-in it caused has cancelled that question's answer, and a cough or a "hmm"
+        must not cost the student their question: it runs again as it was."""
+        if self._pending_merge_text:
+            utterance, self._pending_merge_text = self._pending_merge_text, ""
+            log.info("voice.cut_off_question_resumed", session_id=str(self.session_id))
+            await self._commit_turn(utterance, reason="resumed", continues=utterance)
+            return
+        if self.machine.can(Trigger.UTTERANCE_DISCARDED):
+            self.machine.fire(Trigger.UTTERANCE_DISCARDED)
+            await self._announce_state()
 
     @staticmethod
     def _is_backchannel(text: str) -> bool:
@@ -450,7 +469,9 @@ class VoiceSession:
 
     # --- the turn ----------------------------------------------------------
 
-    async def _run_turn(self, *, utterance: str, language: str, reason: str) -> None:
+    async def _run_turn(
+        self, *, utterance: str, language: str, reason: str, continues: str | None = None
+    ) -> None:
         self._ledger = PlaybackLedger(sample_rate=self.config.tts_sample_rate)
         self._chunker.reset()
         self._audio_seq = 0
@@ -468,6 +489,7 @@ class VoiceSession:
             language=language,
             marks=self._marks.durations_ms(),
             language_directive=self._language_directive,
+            continues=continues,
         )
         try:
             async for fragment, result in stream:
@@ -621,7 +643,7 @@ class VoiceSession:
 
     # --- barge-in ----------------------------------------------------------
 
-    async def _barge_in(self) -> None:
+    async def _barge_in(self, *, by_voice: bool = False) -> None:
         """Stop talking, and make the record match what was heard.
 
         Inert when the mentor is not producing output: there is nothing to interrupt, and firing
@@ -638,7 +660,8 @@ class VoiceSession:
         await self.transport.send_control(ServerMessage.TTS_CANCEL, turn_id=interrupted_turn)
         self._marks.mark(stage.BARGE_IN_SILENCED)
 
-        merged = self._should_merge()
+        # A stop button or a typed question is a decision, never a continued thought.
+        merged = by_voice and self._should_merge()
         self.machine.fire(Trigger.SPEECH_START)
         await self._announce_state()
 
@@ -649,8 +672,9 @@ class VoiceSession:
         spoken = self._ledger.spoken_prefix()
         if merged:
             # Nothing was heard and the student is still mid-thought: carry their words forward
-            # rather than splitting one question into two turns.
-            self._pending_merge_text = ""
+            # rather than splitting one question into two turns. (Until Phase 8 this set the
+            # carried text to "", so nothing was ever carried: D8-03.)
+            self._pending_merge_text = self._last_utterance
 
         log.info(
             "voice.barge_in",
@@ -680,6 +704,7 @@ class VoiceSession:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await task
+        await self.conversation.recover_after_cancel()
 
     # --- inbound control ---------------------------------------------------
 
@@ -711,6 +736,12 @@ class VoiceSession:
             await self._barge_in()
         if self.machine.state is TurnState.USER_SPEAKING:
             self.machine.fire(Trigger.UTTERANCE_DISCARDED)
+        # The typed question replaces whatever was being said, and anything carried from before.
+        self._pending_merge_text = ""
+        if self._capturing:
+            self._capturing = False
+            self._utterance = bytearray()
+            await self._cancel_transcription()
         if self.machine.state is TurnState.LISTENING:
             self.machine.fire(Trigger.SPEECH_START)
         self._marks = TurnMarks(clock=self.clock)
@@ -722,6 +753,7 @@ class VoiceSession:
         await self._announce_state()
         decision = self._route_language(text)
         self._committed_at = self.clock()
+        self._last_utterance = text
         self._turn_task = asyncio.create_task(
             self._run_turn(utterance=text, language=decision.language, reason="typed")
         )

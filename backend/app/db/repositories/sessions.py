@@ -142,6 +142,54 @@ class MessageRepository:
         )
         return list(reversed(result.scalars().all()))
 
+    @property
+    def session(self) -> AsyncSession:
+        return self._session
+
+    async def withdraw_unheard_turn(self, session_id: uuid.UUID, *, question: str) -> int | None:
+        """Delete the session's latest turn if it asked `question` and its answer was interrupted
+        before any of it was heard, and return its index. Otherwise delete nothing: None.
+
+        For a continued thought (ARCHITECTURE §5.6): a pause cut the question off, its answer was
+        cancelled unheard, and the whole question is about to run again in its place. The turn's
+        tool calls stay: they happened (§5.7), and are keyed by the turn index the re-run reuses.
+        """
+        latest = await self._session.scalar(
+            select(func.max(Message.turn_index)).where(Message.session_id == session_id)
+        )
+        if latest is None:
+            return None
+        rows = (
+            (
+                await self._session.execute(
+                    select(Message).where(
+                        Message.session_id == session_id, Message.turn_index == latest
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        asked = next((m for m in rows if m.role is MessageRole.USER), None)
+        answer = next((m for m in rows if m.role is MessageRole.ASSISTANT), None)
+        if (
+            asked is None
+            or asked.content != question
+            or answer is None
+            or not answer.was_interrupted
+            or answer.content
+        ):
+            return None
+        for row in rows:
+            await self._session.delete(row)
+        await self._session.execute(
+            update(Session)
+            .where(Session.id == session_id)
+            .values(turn_count=Session.turn_count - 1)
+        )
+        await self._session.flush()
+        return int(latest)
+
     async def next_turn_index(self, session_id: uuid.UUID) -> int:
         result = await self._session.execute(
             select(func.coalesce(func.max(Message.turn_index), -1)).where(

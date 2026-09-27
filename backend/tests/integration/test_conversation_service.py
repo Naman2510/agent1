@@ -7,11 +7,14 @@ C-03 — *what is stored is what the user actually received* — while the thing
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import uuid
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy import text as sql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.intent import IntentGate
@@ -290,3 +293,70 @@ async def test_a_real_search_hit_produces_a_real_populated_citation(
     assert len(result.citations) == 1
     assert result.citations[0].document_title == "KVL Notes"
     assert result.citations[0].ref == "[1]"
+
+
+# --- withdrawing a cut-off turn (ARCHITECTURE §5.6) and surviving cancellation (D8-04) ------
+
+
+async def _turn(
+    repo: MessageRepository, session_id: uuid.UUID, index: int, question: str, answer: str
+) -> None:
+    await repo.append(
+        session_id=session_id, turn_index=index, seq=0, role=MessageRole.USER, content=question
+    )
+    await repo.append(
+        session_id=session_id,
+        turn_index=index,
+        seq=1,
+        role=MessageRole.ASSISTANT,
+        content=answer,
+        was_interrupted=not answer,
+    )
+
+
+async def test_only_the_named_question_with_an_unheard_answer_is_withdrawn(
+    db_session: AsyncSession, student_session: uuid.UUID
+) -> None:
+    repo = MessageRepository(db_session)
+    await _turn(repo, student_session, 0, "What is KVL?", "Loop voltages sum to zero.")
+    await _turn(repo, student_session, 1, "And KCL", "")
+
+    assert await repo.withdraw_unheard_turn(student_session, question="And KVL") is None
+    assert await repo.withdraw_unheard_turn(student_session, question="And KCL") == 1
+    rows = await _messages(db_session, student_session)
+    assert [(r.turn_index, r.content) for r in rows] == [
+        (0, "What is KVL?"),
+        (0, "Loop voltages sum to zero."),
+    ]
+    session = await db_session.get(Session, student_session)
+    assert session is not None
+    await db_session.refresh(session)
+    assert session.turn_count == 1
+
+    # An answer that was heard is never withdrawn, whatever the question.
+    assert await repo.withdraw_unheard_turn(student_session, question="What is KVL?") is None
+
+
+async def test_a_connection_lost_to_a_cancelled_query_is_recovered(
+    db_session: AsyncSession, settings: Settings, redis_client, student_session: uuid.UUID
+) -> None:  # type: ignore[no-untyped-def]
+    service = _service(db_session, settings, redis_client, FakeLLMProvider())
+    query = asyncio.create_task(db_session.execute(sql("SELECT pg_sleep(1)")))
+    await asyncio.sleep(0.1)
+    query.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await query
+
+    await service.recover_after_cancel()
+    assert (await db_session.execute(sql("SELECT 1"))).scalar() == 1
+
+
+async def test_recovery_leaves_a_healthy_session_and_its_work_alone(
+    db_session: AsyncSession, settings: Settings, redis_client, student_session: uuid.UUID
+) -> None:  # type: ignore[no-untyped-def]
+    service = _service(db_session, settings, redis_client, FakeLLMProvider())
+    await _turn(MessageRepository(db_session), student_session, 0, "Kept?", "")
+
+    await service.recover_after_cancel()
+    await db_session.commit()
+    assert len(await _messages(db_session, student_session)) == 2
