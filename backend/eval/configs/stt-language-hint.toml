@@ -1,0 +1,14 @@
+# EXP-013's candidate: stt.toml, but told each utterance's language instead of detecting it — one knob.
+suite = "stt"
+tier = "T2"
+
+[recogniser]
+provider = "faster-whisper"
+model = "small"
+compute_type = "int8"
+beam_size = 5
+cpu_threads = 4
+# Whisper samples when a transcript looks wrong; seeded, the same audio always gives the same text.
+seed = 0
+# "hint": the routed language (eval/suites/stt.py HINTS) — each case's own label, an upper bound.
+language = "hint"

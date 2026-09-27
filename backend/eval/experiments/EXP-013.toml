@@ -1,0 +1,28 @@
+# Registered before either run (EVALUATION.md §7). Both configs are tier T2 — the recogniser's
+# weights are downloaded there — so .github/workflows/nightly.yml runs it:
+#   python -m eval.runner --experiment eval/experiments/EXP-013.toml
+slug = "EXP-013"
+tier = "T2"
+title = "The routed language as the recogniser's language"
+hypothesis = """Telling the recogniser each utterance's language — as the session's router has \
+already decided it (ADR-0011) — instead of letting Whisper detect it, cuts word error rate by at \
+least 0.1 without making English worse."""
+baseline = "stt.toml"
+candidate = "stt-language-hint.toml"
+
+prediction = """Hindi improves, because auto-detection never once chose Hindi — but by how much is \
+the open question, since eSpeak's Hindi may be too poor for Whisper to transcribe even when told \
+what it is. English does not move: it was detected as English every time. Romanized Hindi barely \
+moves: it is English-voiced either way. Whatever the result, it is an upper bound: the hint here is \
+each case's true language, and a real router can be wrong on a session's first utterance."""
+
+[decision_rule]
+metric = "wer"
+higher_is_better = false
+min_effect = 0.1
+
+# Not one English utterance may get worse to buy the Hindi gain.
+[[decision_rule.guards]]
+metric = "wer_en"
+higher_is_better = false
+max_loss = 0.0

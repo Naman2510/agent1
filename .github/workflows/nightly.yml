@@ -12,8 +12,9 @@ on:
   push:
     paths:
       - "backend/eval/suites/stt.py"
-      - "backend/eval/configs/stt.toml"
-      - "backend/eval/baselines/stt.json"
+      - "backend/eval/configs/stt*.toml"
+      - "backend/eval/experiments/**"
+      - "backend/eval/baselines/stt*.json"
       - "backend/app/providers/stt/**"
       - "datasets/v1/voice/**"
       - ".github/workflows/nightly.yml"
@@ -46,17 +47,47 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: whisper-${{ hashFiles('backend/eval/configs/stt.toml') }}
+      # Two runners once computed different transcripts from the same audio (PHASE_8_AUDIT
+      # D8-15). The suite pins the arithmetic itself (eval/suites/stt.py NUMERICS); this records
+      # the machine, and which kernels CTranslate2 and MKL chose under those pins.
+      - name: Which machine, and which kernels
+        working-directory: backend
+        run: |
+          set -o pipefail
+          lscpu | grep -E '^(Model name|Flags)' | cut -c1-200 | tee t2-report.txt
+          CT2_VERBOSE=1 python - <<'EOF' 2>&1 | { grep -E 'CPU:|ISA|MKL|backend|WARNING' || true; } | tee -a t2-report.txt
+          import numpy as np
+          from eval.suites import stt
+          stt.pin_numerics()
+          from faster_whisper import WhisperModel
+          model = WhisperModel("small", device="cpu", compute_type="int8", cpu_threads=4)
+          segments, _ = model.transcribe(np.zeros(16000, dtype=np.float32))
+          list(segments)
+          EOF
       - name: Every tier-T2 config, against its baseline once it has one
         working-directory: backend
         run: |
           set -o pipefail
-          if [ -f eval/baselines/stt.json ]; then
-            python -m eval.runner --config eval/configs/*.toml --tier T2 --check-baseline --failures | tee t2-report.txt
-          else
-            # No baseline yet: write one here and print it, to be reviewed and committed.
-            python -m eval.runner --config eval/configs/*.toml --tier T2 --write-baseline --failures | tee t2-report.txt
-            cat eval/baselines/stt.json
-          fi
+          status=0
+          for config in $(grep -l '^tier = "T2"' eval/configs/*.toml); do
+            name=$(basename "$config" .toml)
+            if [ -f "eval/baselines/$name.json" ]; then
+              python -m eval.runner --config "$config" --check-baseline --failures | tee -a t2-report.txt || status=1
+            else
+              # No baseline yet: write one here and print it, to be reviewed and committed.
+              python -m eval.runner --config "$config" --write-baseline --failures | tee -a t2-report.txt || status=1
+              cat "eval/baselines/$name.json"
+            fi
+          done
+          exit $status
+      - name: Every registered tier-T2 experiment, decided by its own rule
+        if: ${{ !cancelled() }}
+        working-directory: backend
+        run: |
+          set -o pipefail
+          for experiment in $(grep -l '^tier = "T2"' eval/experiments/*.toml); do
+            python -m eval.runner --experiment "$experiment" | tee -a t2-experiments.txt
+          done
       - name: Keep the report
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,5 +95,6 @@ jobs:
           name: t2-report
           path: |
             backend/t2-report.txt
-            backend/eval/baselines/stt.json
+            backend/t2-experiments.txt
+            backend/eval/baselines/stt*.json
           if-no-files-found: ignore

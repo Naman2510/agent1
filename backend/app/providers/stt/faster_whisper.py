@@ -8,6 +8,10 @@ detector has no stable prefix to read (semantic endpointing, EXP-003, has nothin
 It needs the `voice-local` extra (`pip install -e '.[voice-local]'`), which the production image
 does not install, and the model weights, which faster-whisper fetches from Hugging Face on first
 use — something some networks block, this project's own development environment among them.
+
+Decoding is faster-whisper's own: beam search, and when the result looks wrong (too repetitive, or
+too unlikely) sampling at rising temperatures. That sampling is unseeded, so the same audio can
+come back as different text on another run; the stt suite seeds it (eval/suites/stt.py).
 """
 
 from __future__ import annotations
@@ -81,9 +85,11 @@ class FasterWhisperSTT(STTProvider):
         audio = np.frombuffer(bytes(pcm), dtype="<i2").astype(np.float32) / 32768.0
         # Off the event loop: a few hundred milliseconds of CPU per utterance would stall every
         # other connection's audio.
-        yield await asyncio.to_thread(self._transcribe, audio)
+        yield await asyncio.to_thread(self.transcribe, audio)
 
-    def _transcribe(self, audio: np.ndarray) -> FinalTranscript:
+    def transcribe(self, audio: np.ndarray) -> FinalTranscript:
+        """One whole utterance (float32, 16 kHz mono), synchronously: what `transcribe_stream` runs
+        off the event loop, and what the stt suite measures."""
         segments, info = self._model.transcribe(
             audio,
             language=self._language,

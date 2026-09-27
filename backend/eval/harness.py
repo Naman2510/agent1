@@ -449,8 +449,10 @@ async def _evaluate_stt(
 
     cases = stt_suite.load_cases(dataset / "voice")
     recognise = stt_suite.faster_whisper_recogniser(config)
-    results = await asyncio.to_thread(stt_suite.run, cases, recognise)
-    summary = stt_suite.summarise(results)
+    language = str(config.get("recogniser", {}).get("language", "auto"))
+    results = await asyncio.to_thread(stt_suite.run, cases, recognise, language=language)
+    # How the arithmetic was pinned is part of what a baseline records (stt.NUMERICS).
+    summary = {**stt_suite.summarise(results), "numerics": stt_suite.numerics()}
     lines = [stt_suite.render(summary, config)]
     wrong = [r for r in results if r.word_edits]
     if show_failures and wrong:
@@ -466,7 +468,8 @@ async def _evaluate_stt(
             input={"voice": r.case.voice},
             expected={"text": r.case.reference},
             actual={"text": r.hypothesis, "language": r.detected_language},
-            metrics={"wer": r.wer, "cer": r.cer},
+            # WER once more under the case's language, so an experiment can guard one language.
+            metrics={"wer": r.wer, "cer": r.cer, f"wer_{r.case.language}": r.wer},
         )
         for r in results
     ]

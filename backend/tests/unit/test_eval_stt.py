@@ -19,7 +19,7 @@ from app.core.config import Settings
 from app.providers.registry import build_stt
 from app.providers.stt import faster_whisper as fw
 from app.providers.stt.base import FinalTranscript
-from eval import runner
+from eval import harness, runner
 from eval.recording import DATASETS
 from eval.suites import stt
 
@@ -149,3 +149,89 @@ def test_the_registry_builds_it_when_configured(
     provider = build_stt(settings.model_copy(update={"stt_provider": "faster-whisper"}))
     assert provider.info.name == "faster-whisper"
     assert loaded == [("small", "int8")]
+
+
+def test_the_hint_is_the_routed_language_in_the_script_its_reference_is_written_in() -> None:
+    assert stt.language_for(_case("x", "en"), "auto") is None
+    assert stt.language_for(_case("x", "hi"), "hint") == "hi"
+    assert stt.language_for(_case("x", "hi-Latn"), "hint") == "en", "romanized: Latin script"
+    assert stt.language_for(_case("x", "hi"), "en") == "en", "a fixed language, for every case"
+
+
+def test_the_run_passes_each_case_its_language() -> None:
+    asked: list[str | None] = []
+
+    def recognise(audio: np.ndarray, language: str | None) -> tuple[str, str | None]:
+        asked.append(language)
+        return "x", language
+
+    stt.run([_case("x", "hi"), _case("x", "en")], recognise, language="hint")
+    assert asked == ["hi", "en"]
+
+
+def test_the_arithmetic_is_pinned_on_x86_and_the_summary_says_either_way(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in stt.NUMERICS:
+        monkeypatch.setenv(name, "left by the caller")  # and restored afterwards
+    monkeypatch.setattr(stt.platform, "machine", lambda: "arm64")
+    stt.pin_numerics()
+    assert set(stt.numerics().values()) == {"left by the caller"}, "nothing to pin it to"
+
+    monkeypatch.setattr(stt.platform, "machine", lambda: "x86_64")
+    stt.pin_numerics()
+    assert stt.numerics() == stt.NUMERICS, "pinned over whatever the environment said"
+
+
+def test_each_utterance_is_heard_by_a_model_of_its_own_seeded_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seeds: list[int] = []
+    made: list[tuple[str, dict[str, Any]]] = []
+    models: list[_Model] = []
+
+    def whisper_model(path: str, **kwargs: Any) -> _Model:
+        made.append((path, kwargs))
+        models.append(_Model())
+        return models[-1]
+
+    monkeypatch.setitem(sys.modules, "ctranslate2", SimpleNamespace(set_random_seed=seeds.append))
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=whisper_model))
+    utils = SimpleNamespace(download_model=lambda size: f"/models/{size}")
+    monkeypatch.setitem(sys.modules, "faster_whisper.utils", utils)
+    for name in stt.NUMERICS:
+        monkeypatch.setenv(name, "")  # restored afterwards; pinning overwrites it
+    config = {"recogniser": {"model": "small", "compute_type": "int8", "cpu_threads": 4, "seed": 7}}
+
+    recognise = stt.faster_whisper_recogniser(config)
+    assert recognise(np.zeros(160, np.float32), None) == ("What is KVL?", "en")
+    assert recognise(np.zeros(160, np.float32), "hi") == ("What is KVL?", "en")
+
+    assert seeds == [7], "seeded once, before any model has sampled"
+    options = {"device": "cpu", "compute_type": "int8", "cpu_threads": 4}
+    assert made == [("/models/small", options)] * 2, "a model of its own for each utterance"
+    [(_, first)], [(_, second)] = (m.calls for m in models)
+    assert (first["language"], second["language"]) == (None, "hi")
+    assert first["beam_size"] == 5 and first["condition_on_previous_text"] is False
+
+
+def test_the_suite_records_each_case_and_how_its_arithmetic_was_pinned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    references = {c.audio.tobytes(): c.reference for c in stt.load_cases(VOICE)}
+
+    def recogniser(config: dict[str, Any]) -> stt.Recognise:
+        return lambda audio, language: (references[audio.tobytes()], language)
+
+    monkeypatch.setattr(stt, "faster_whisper_recogniser", recogniser)
+    for name in stt.NUMERICS:
+        monkeypatch.setenv(name, "as pinned")
+    config = {"suite": "stt", "recogniser": {"language": "hint"}}
+
+    outcome = asyncio.run(harness._evaluate_stt(config, DATASETS / "v1", False, None))
+
+    assert outcome.summary["wer"] == 0.0 and outcome.summary["cases"] == 66
+    assert outcome.summary["numerics"] == dict.fromkeys(stt.NUMERICS, "as pinned")
+    hindi = next(c for c in outcome.cases if c.language == "hi")
+    assert hindi.actual["language"] == "hi", "told the routed language"
+    assert hindi.metrics == {"wer": 0.0, "cer": 0.0, "wer_hi": 0.0}

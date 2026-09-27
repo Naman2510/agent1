@@ -8,5 +8,8 @@ provider = "faster-whisper"
 model = "small"
 compute_type = "int8"
 beam_size = 5
+cpu_threads = 4
+# Whisper samples when a transcript looks wrong; seeded, the same audio always gives the same text.
+seed = 0
 # "auto": Whisper detects the language per utterance, as it must for a student who switches.
 language = "auto"

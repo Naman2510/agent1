@@ -98,8 +98,8 @@ module = ["tests.*", "migrations.*"]
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-# onnxruntime and faster-whisper ship no type information.
-module = ["onnxruntime.*", "faster_whisper.*"]
+# onnxruntime, faster-whisper and CTranslate2 ship no type information.
+module = ["onnxruntime.*", "faster_whisper.*", "ctranslate2.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
