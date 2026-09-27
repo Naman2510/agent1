@@ -6,10 +6,11 @@ one specific behaviour rather than incidental facts about five lecture documents
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Document, DocumentChunk
@@ -164,6 +165,54 @@ async def test_reranking_is_a_noop_by_default_and_preserves_fused_order(
     config = RetrievalConfig(use_reranker=True)
     with_reranker_flag_set = await retriever.retrieve("Kirchhoff voltage law", config)
     assert [r.id for r in without] == [r.id for r in with_reranker_flag_set]
+
+
+async def _lexical_order_of(db_session: AsyncSession, contents: list[str]) -> list[str]:
+    """Store `contents` as chunks in the given order, and return the lexical arm's ranking."""
+    document = Document(
+        title="Ties",
+        subject="Testing",
+        source_path="/ties",
+        source_hash=f"hash-{uuid.uuid4().hex}",
+    )
+    db_session.add(document)
+    await db_session.flush()
+    for index, content in enumerate(contents):
+        db_session.add(
+            DocumentChunk(
+                document_id=document.id,
+                chunk_index=index,
+                content=content,
+                heading_path="Ties",
+                section="Ties",
+            )
+        )
+    await db_session.flush()
+    retriever = HybridRetriever(
+        db_session, embeddings=TfidfSvdEmbeddingProvider(dimensions=256), reranker=NoopReranker()
+    )
+    ranked = await retriever.lexical_search("voltage law", RetrievalConfig())
+    assert len({item.score for item in ranked}) == 1, "the chunks must actually tie"
+    content_of = {
+        str(chunk.id): chunk.content
+        for chunk in (await db_session.execute(select(DocumentChunk))).scalars()
+    }
+    order = [content_of[item.id] for item in ranked]
+    await db_session.rollback()
+    return order
+
+
+async def test_tied_lexical_scores_come_back_in_one_order_however_they_were_stored(
+    db_session: AsyncSession,
+) -> None:
+    """PHASE_8_AUDIT D8-01: ordering by ts_rank_cd alone returned tied chunks in whatever order
+    the rows came back, so the same question could cite different sources from run to run. Ties
+    break on a hash of the text, which does not depend on storage order or on row ids."""
+    contents = [f"voltage law {name}" for name in ("alpha", "bravo", "charlie", "delta")]
+    forwards = await _lexical_order_of(db_session, contents)
+    backwards = await _lexical_order_of(db_session, list(reversed(contents)))
+    by_hash = sorted(contents, key=lambda c: hashlib.md5(c.encode()).hexdigest())  # noqa: S324
+    assert forwards == backwards == by_hash
 
 
 def test_or_tsquery_builds_a_valid_query_for_a_real_natural_language_question() -> None:

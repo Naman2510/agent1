@@ -138,7 +138,12 @@ class HybridRetriever:
         stmt = (
             select(DocumentChunk.id, rank.label("rank"))
             .where(DocumentChunk.content_tsv.op("@@")(tsquery))
-            .order_by(rank.desc())
+            # ts_rank_cd ties often (FC-003), and ordering by rank alone left tied chunks in
+            # whatever order the rows came back: the same question could cite different sources
+            # run to run, and eval numbers drifted between identical runs (PHASE_8_AUDIT D8-01).
+            # Ties now break on a hash of the text — arbitrary, but fixed, and unlike a row id it
+            # survives re-ingesting the same document.
+            .order_by(rank.desc(), func.md5(DocumentChunk.content), DocumentChunk.id)
             .limit(cfg.lexical_k)
         )
         stmt = self._apply_lexical_filters(stmt, cfg.filters)
