@@ -828,7 +828,7 @@
     }
   },
   "info": {
-    "description": "Multilingual conversational AI voice mentor. Phase 1: backend foundation — no voice loop, agent, or RAG yet.",
+    "description": "Multilingual conversational AI voice mentor: typed and spoken turns, grounded in course material, with the tools the mentor can call. The voice socket is described in docs/API.md, which OpenAPI cannot.",
     "title": "VaaniOS API",
     "version": "0.1.0"
   },

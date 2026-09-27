@@ -17,6 +17,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.telemetry import tracer
 from app.db.models import Document, DocumentChunk, IngestStatus
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.reranker.base import RerankerProvider
@@ -185,7 +186,16 @@ class RagService:
             self._session, embeddings=self._embeddings, reranker=self._reranker
         )
         config = RetrievalConfig(filters=filters or {}, use_reranker=use_reranker)
-        chunks = await retriever.retrieve(query, config)
+        # The query itself is the student's words: never an attribute (ARCHITECTURE §14).
+        with tracer.start_as_current_span(
+            "rag.search",
+            attributes={
+                "rag.filters": sorted((filters or {}).keys()),
+                "rag.reranker": use_reranker,
+            },
+        ) as span:
+            chunks = await retriever.retrieve(query, config)
+            span.set_attribute("rag.results", len(chunks))
         return chunks, build_context(chunks, start_index=citation_start_index)
 
 

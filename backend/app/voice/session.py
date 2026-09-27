@@ -26,12 +26,15 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import structlog
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
 
 from app.agent.lang.policy import SpeechPlan, response_directive, select_voice
 from app.agent.lang.router import LanguageDecision, LanguageState, route
 from app.agent.orchestrator import ToolActivityEntry
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.core.telemetry import attributes, epoch_ns, record_stages, tracer
 from app.providers.base import ProviderError
 from app.providers.stt.base import (
     FinalTranscript,
@@ -51,7 +54,7 @@ from app.voice.audio import (
     bytes_to_ms,
 )
 from app.voice.chunker import Chunk, SentenceChunker
-from app.voice.marks import TurnMarks
+from app.voice.marks import STAGES, TurnMarks
 from app.voice.playback import PlaybackLedger
 from app.voice.protocol import ServerMessage
 from app.voice.state import IllegalTransitionError, Trigger, TurnState, TurnStateMachine
@@ -472,6 +475,42 @@ class VoiceSession:
     async def _run_turn(
         self, *, utterance: str, language: str, reason: str, continues: str | None = None
     ) -> None:
+        """One turn, as one trace (ADR-0014): a `voice.turn` span from the end of the student's
+        speech to the end of the turn, current for everything the turn calls, with the stage
+        marks as its events and a child span per stage."""
+        marks, to_ns = self._marks, epoch_ns(self.clock)
+        spoken_end = marks.marks.get(stage.SPEECH_END)
+        span = tracer.start_span(
+            "voice.turn",
+            start_time=to_ns(spoken_end) if spoken_end is not None else None,
+            attributes=attributes(
+                **{
+                    "session.id": str(self.session_id),
+                    "turn.id": self.machine.turn_id,
+                    "turn.end_reason": reason,
+                    "turn.language": language,
+                    "turn.continues_previous": continues is not None,
+                }
+            ),
+        )
+        outcome = "interrupted"
+        try:
+            with trace.use_span(
+                span, end_on_exit=False, record_exception=False, set_status_on_exception=False
+            ):
+                outcome = await self._answer(
+                    utterance=utterance, language=language, continues=continues
+                )
+        finally:
+            span.set_attribute("turn.outcome", outcome)
+            if outcome == "failed":
+                span.set_status(Status(StatusCode.ERROR))
+            record_stages(span, marks.marks, STAGES, to_ns)
+            span.end()
+
+    async def _answer(self, *, utterance: str, language: str, continues: str | None) -> str:
+        """Generate, speak, and settle the turn: "completed", or "failed" once the client has
+        been told. A barge-in cancels it."""
         self._ledger = PlaybackLedger(sample_rate=self.config.tts_sample_rate)
         self._chunker.reset()
         self._audio_seq = 0
@@ -540,9 +579,11 @@ class VoiceSession:
             if self.machine.can(Trigger.RECOVERED):
                 self.machine.fire(Trigger.RECOVERED)
                 await self._announce_state()
+            return "failed"
         finally:
             with contextlib.suppress(Exception):
                 await stream.aclose()
+        return "completed"
 
     async def _settle_playback(self) -> None:
         """Speak what is left, then stay in SPEAKING until the student has heard it.

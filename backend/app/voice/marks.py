@@ -29,7 +29,7 @@ BARGE_IN_DETECTED = "barge_in_detected"
 BARGE_IN_SILENCED = "barge_in_silenced"
 
 # (name, from_mark, to_mark) — the durations reported for a turn.
-_DERIVED: tuple[tuple[str, str, str], ...] = (
+STAGES: tuple[tuple[str, str, str], ...] = (
     ("turn_end_ms", SPEECH_END, TURN_END),
     ("stt_final_ms", TURN_END, STT_FINAL),
     ("language_ms", STT_FINAL, LANGUAGE_DECIDED),
@@ -62,7 +62,7 @@ class TurnMarks:
 
     def durations_ms(self) -> dict[str, int]:
         out: dict[str, int] = {}
-        for label, start, end in _DERIVED:
+        for label, start, end in STAGES:
             if start in self.marks and end in self.marks:
                 delta = self.marks[end] - self.marks[start]
                 if delta >= 0:

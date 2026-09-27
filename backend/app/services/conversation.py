@@ -35,6 +35,7 @@ from app.agent.tools.registry import ToolRegistry
 from app.core.background import spawn
 from app.core.cancellation import finish_then_cancel
 from app.core.config import Settings
+from app.core.telemetry import attributes, tracer
 from app.db.models import MessageRole
 from app.db.repositories.memory import StudentProfileRepository
 from app.db.repositories.sessions import MessageRepository
@@ -206,47 +207,52 @@ class ConversationService:
         # Refuse before spending, not after (Gate 0 finding M-11).
         await self._ledger.check_spend_cap()
 
-        withdrawn: int | None = None
-        if continues is not None:
-            withdrawn = await finish_then_cancel(
-                self._messages.withdraw_unheard_turn(session_id, question=continues)
+        # Everything before generation: history, profile, intent. A span that is current only
+        # here, where nothing is yielded (app/core/telemetry.py).
+        with tracer.start_as_current_span("conversation.prepare"):
+            withdrawn: int | None = None
+            if continues is not None:
+                withdrawn = await finish_then_cancel(
+                    self._messages.withdraw_unheard_turn(session_id, question=continues)
+                )
+                if withdrawn is None:
+                    # Something of it was heard after all, or it was never stored: a new turn.
+                    log.warning("conversation.nothing_to_continue", session_id=str(session_id))
+            replaces = continues if withdrawn is not None else None
+            turn_index = (
+                withdrawn
+                if withdrawn is not None
+                else await finish_then_cancel(self._messages.next_turn_index(session_id))
             )
-            if withdrawn is None:
-                # Something of it was heard after all, or it was never stored: a new turn.
-                log.warning("conversation.nothing_to_continue", session_id=str(session_id))
-        replaces = continues if withdrawn is not None else None
-        turn_index = (
-            withdrawn
-            if withdrawn is not None
-            else await finish_then_cancel(self._messages.next_turn_index(session_id))
-        )
-        result = TurnResult(turn_index=turn_index)
+            result = TurnResult(turn_index=turn_index)
 
-        history, earlier_turns_summary = await finish_then_cancel(self._recent_context(session_id))
-        if replaces is not None:
-            # The window cache may still hold the cut-off exchange; Postgres no longer does.
-            history = list(without_withdrawn(history, replaces))
+            history, earlier_turns_summary = await finish_then_cancel(
+                self._recent_context(session_id)
+            )
+            if replaces is not None:
+                # The window cache may still hold the cut-off exchange; Postgres no longer does.
+                history = list(without_withdrawn(history, replaces))
 
-        memory_digest: str | None = None
-        if self._student_profiles is not None:
-            profile = await finish_then_cancel(self._student_profiles.get_or_create(student_id))
-            memory_digest = profile.digest or None
+            memory_digest: str | None = None
+            if self._student_profiles is not None:
+                profile = await finish_then_cancel(self._student_profiles.get_or_create(student_id))
+                memory_digest = profile.digest or None
 
-        # Fail closed (see __init__): no intent_gate means no tool is offered, not every tool.
-        allowed_tools: frozenset[str] = frozenset()
-        if self._intent_gate is not None and self._tool_registry is not None:
-            intent = await self._intent_gate.classify(utterance)
-            allowed_tools = self._intent_gate.tools_for(intent)
+            # Fail closed (see __init__): no intent_gate means no tool is offered, not every tool.
+            allowed_tools: frozenset[str] = frozenset()
+            if self._intent_gate is not None and self._tool_registry is not None:
+                intent = await self._intent_gate.classify(utterance)
+                allowed_tools = self._intent_gate.tools_for(intent)
 
-        # The directive goes in a non-cacheable block, so it can change per turn without
-        # invalidating the cached prefix (ARCHITECTURE §8.5).
-        prompt = assemble(
-            history=history,
-            utterance=utterance,
-            memory_digest=memory_digest,
-            earlier_turns_summary=earlier_turns_summary,
-            language_directive=language_directive,
-        )
+            # The directive goes in a non-cacheable block, so it can change per turn without
+            # invalidating the cached prefix (ARCHITECTURE §8.5).
+            prompt = assemble(
+                history=history,
+                utterance=utterance,
+                memory_digest=memory_digest,
+                earlier_turns_summary=earlier_turns_summary,
+                language_directive=language_directive,
+            )
 
         started = time.perf_counter()
         first_token_at: float | None = None
@@ -258,6 +264,11 @@ class ConversationService:
         citation_sources: dict[str, RetrievedChunk] = {}
 
         settled = False
+        # Not current: this generator yields while it is open (app/core/telemetry.py).
+        generation = tracer.start_span(
+            "conversation.generate",
+            attributes={"turn.index": turn_index, "llm.model": model},
+        )
 
         try:
             # Inside the try: once the question is stored, an interruption — even one that lands
@@ -373,6 +384,21 @@ class ConversationService:
             result.latency_ms["llm_total_ms"] = int((time.perf_counter() - started) * 1000)
             if first_token_at is not None:
                 result.latency_ms["llm_ttft_ms"] = int((first_token_at - started) * 1000)
+            generation.set_attributes(
+                attributes(
+                    **{
+                        "llm.model": model,
+                        "llm.stop_reason": result.stop_reason,
+                        "llm.input_tokens": usage.input_tokens,
+                        "llm.output_tokens": usage.output_tokens,
+                        "llm.cache_read_tokens": usage.cache_read_input_tokens,
+                        "llm.ttft_ms": result.latency_ms.get("llm_ttft_ms"),
+                        "turn.interrupted": result.interrupted,
+                        "turn.tools": len(result.tool_activity),
+                    }
+                )
+            )
+            generation.end()
             if marks:
                 # Voice turns carry the full nine-stage picture; a text turn has only its own two.
                 result.latency_ms.update(marks)

@@ -762,6 +762,18 @@ chunk IDs, cache hit/miss, provider + model + version, error codes.
 retained WAV for failure analysis), full transcripts at INFO (hashed at INFO, full text only at DEBUG
 in development), auth tokens, provider API keys. See [SECURITY.md](SECURITY.md#5-data-handling).
 
+As built (Phase 8, `app/core/telemetry.py`): a voice turn is one trace — a `voice.turn` span from
+the end of the student's speech to the end of the turn, carrying which rule ended the utterance,
+the outcome (completed, interrupted, failed), the stage marks as events, and a child span per stage
+(`stage turn_end`, `stage ttfa`, …) over exactly its interval. Inside it: `conversation.prepare`
+(history, profile, intent), `conversation.generate` (model, tokens, time to first token, stop
+reason), each `tool <name>` and each `rag.search`. Every HTTP request is a span named by its route
+template, a typed turn's spans inside it. Nothing the student said is ever an attribute — not the
+utterance, the query, or a tool's arguments; a test scans every span for it. Export is off by
+default; `VAANIOS_OTEL_EXPORTER=console` prints spans, `otlp` sends them to any collector
+(`VAANIOS_OTEL_ENDPOINT`). No collector runs in the Compose stack: nothing yet needs one, and a
+service nobody opens is not observability.
+
 Prometheus/Grafana is **deferred**: the admin dashboard (spec §33) reads aggregates from Postgres, so
 a metrics stack would be a second source of truth for the same numbers before there is any operational
 load to justify it. Recorded in [ADR-0014](adr/0014-observability-scope.md).

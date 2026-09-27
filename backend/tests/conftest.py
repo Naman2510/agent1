@@ -7,11 +7,32 @@ keeps tier-T0 CI fast and hermetic (EVALUATION.md §6).
 
 import os
 import uuid
+from collections.abc import Iterator
 
 import fakeredis.aioredis
 import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from app.core.config import Settings
+
+# OpenTelemetry's global provider can be set once per process, so the test session sets it here,
+# before any app does: every span any test produces is recorded, and `spans` reads them.
+_SPANS = InMemorySpanExporter()
+_provider = TracerProvider()
+_provider.add_span_processor(SimpleSpanProcessor(_SPANS))
+trace.set_tracer_provider(_provider)
+
+
+@pytest.fixture
+def spans() -> Iterator[InMemorySpanExporter]:
+    """The spans finished during this test, and only those."""
+    _SPANS.clear()
+    yield _SPANS
+    _SPANS.clear()
+
 
 TEST_DB_URL = os.environ.get(
     "VAANIOS_TEST_DATABASE_URL",

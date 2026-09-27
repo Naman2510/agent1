@@ -15,6 +15,8 @@ from typing import Any
 
 import pytest
 import structlog
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from sqlalchemy import select
 from sqlalchemy import text as sql
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1715,3 +1717,132 @@ async def test_an_interruption_mid_query_does_not_break_every_turn_after_it(
         (1, "user", "Doosra sawaal", False),
         (1, "assistant", "Doosra jawab.", False),
     ]
+
+
+# --- one trace per turn (ADR-0014) --------------------------------------------------------
+
+
+def _by_name(spans: InMemorySpanExporter) -> dict[str, list[ReadableSpan]]:
+    named: dict[str, list[ReadableSpan]] = {}
+    for span in spans.get_finished_spans():
+        named.setdefault(span.name, []).append(span)
+    return named
+
+
+async def test_a_voice_turn_is_one_trace_with_its_stages(
+    db_session: AsyncSession,
+    settings: Settings,
+    redis_client,
+    student_and_session,
+    spans: InMemorySpanExporter,
+) -> None:  # type: ignore[no-untyped-def]
+    student_id, session_id = student_and_session
+    search_call = ToolCall(id="c1", name="search_knowledge", arguments={"query": "KVL"})
+    llm = FakeLLMProvider(
+        [
+            ScriptedTurn(text="question"),  # IntentGate.classify
+            ScriptedTurn(tool_calls=[search_call], stop_reason="tool_use"),
+            ScriptedTurn(text="KVL says loop voltages sum to zero."),
+        ]
+    )
+    voice, _transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=speech_timeline(silence_ms=64, speech_ms=800, trailing_silence_ms=800),
+        llm=llm,
+        tool_registry=DEFAULT_REGISTRY,
+        intent_gate=IntentGate(llm),
+        rag=RagService(db_session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker()),
+    )
+    await voice.start()
+    await _feed(voice, 90)
+    await voice.wait_for_turn()
+
+    named = _by_name(spans)
+    [turn] = named["voice.turn"]
+    assert turn.attributes is not None
+    assert turn.attributes["turn.outcome"] == "completed"
+    assert turn.attributes["turn.end_reason"] == "speech_end"
+    events = [e.name for e in turn.events]
+    for mark in ("speech_end", "turn_end", "stt_final", "llm_first_token", "first_audio_played"):
+        assert mark in events, mark
+    assert {"stage turn_end", "stage stt_final", "stage ttfa", "stage turn_total"} <= set(named)
+
+    # Everything the turn called is inside its trace, under it.
+    trace_id = turn.context.trace_id
+    for name in ("conversation.prepare", "conversation.generate", "tool search_knowledge"):
+        [inner] = named[name]
+        assert inner.context.trace_id == trace_id, name
+        assert inner.parent is not None and inner.parent.span_id == turn.context.span_id, name
+    [generate] = named["conversation.generate"]
+    assert generate.attributes is not None
+    assert generate.attributes["turn.tools"] == 1
+    assert generate.attributes["turn.interrupted"] is False
+
+
+async def test_an_interrupted_turn_is_traced_as_interrupted(
+    db_session: AsyncSession,
+    settings: Settings,
+    redis_client,
+    student_and_session,
+    spans: InMemorySpanExporter,
+) -> None:  # type: ignore[no-untyped-def]
+    student_id, session_id = student_and_session
+    llm = _HeldLLM([ScriptedTurn(text=ANSWER_KVL)])
+    voice, _transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=[0.01] * 10,
+        llm=llm,
+    )
+    await voice.start()
+    await voice.handle_text(text="Samjhao")
+    await asyncio.wait_for(llm.asked.wait(), timeout=5)
+    await voice.handle_user_interrupt(turn_id=voice.machine.turn_id)
+
+    named = _by_name(spans)
+    [turn] = named["voice.turn"]
+    assert turn.attributes is not None
+    assert turn.attributes["turn.outcome"] == "interrupted"
+    assert turn.attributes["turn.end_reason"] == "typed"
+    [generate] = named["conversation.generate"]
+    assert generate.attributes is not None
+    assert generate.attributes["turn.interrupted"] is True
+
+
+async def test_no_span_carries_what_the_student_said(
+    db_session: AsyncSession,
+    settings: Settings,
+    redis_client,
+    student_and_session,
+    spans: InMemorySpanExporter,
+) -> None:  # type: ignore[no-untyped-def]
+    """ARCHITECTURE §14: transcripts stay out of telemetry. Traces go to whatever collector is
+    configured, which is a second place student speech must not leak to."""
+    student_id, session_id = student_and_session
+    said = "Kirchhoff ka voltage law samjhao"
+    voice, _transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=speech_timeline(silence_ms=64, speech_ms=800, trailing_silence_ms=800),
+        transcript=said,
+    )
+    await voice.start()
+    await _feed(voice, 90)
+    await voice.wait_for_turn()
+
+    finished = spans.get_finished_spans()
+    assert finished
+    for span in finished:
+        values = [str(v) for v in (span.attributes or {}).values()]
+        values += [e.name for e in span.events]
+        assert not any("Kirchhoff" in v or "samjhao" in v for v in values), span.name

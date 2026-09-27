@@ -108,6 +108,9 @@ class Settings(BaseSettings):
     log_json: bool = True
     # Full transcripts at INFO would put student speech in every log line (SECURITY.md §5).
     log_transcripts: bool = False
+    # Traces (app/core/telemetry.py): off, printed, or sent to an OpenTelemetry collector.
+    otel_exporter: Literal["none", "console", "otlp"] = "none"
+    otel_endpoint: str = "http://localhost:4318/v1/traces"
 
     @field_validator("cors_origins", mode="before")
     @classmethod

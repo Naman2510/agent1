@@ -23,6 +23,7 @@ from app.core.middleware import RequestContextMiddleware
 from app.core.rate_limit import RateLimiter
 from app.core.redis import create_redis
 from app.core.security import PasswordHasherService
+from app.core.telemetry import configure_tracing
 from app.db.session import create_engine, create_session_factory
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.registry import build_llm, build_reranker
@@ -105,13 +106,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings)
+    configure_tracing(settings)
 
     app = FastAPI(
         title="VaaniOS API",
         version="0.1.0",
         description=(
-            "Multilingual conversational AI voice mentor. Phase 1: backend foundation — "
-            "no voice loop, agent, or RAG yet."
+            "Multilingual conversational AI voice mentor: typed and spoken turns, grounded in "
+            "course material, with the tools the mentor can call. The voice socket is described "
+            "in docs/API.md, which OpenAPI cannot."
         ),
         lifespan=lifespan,
         # Interactive docs are useful in development and are attack surface in production.

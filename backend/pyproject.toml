@@ -27,6 +27,11 @@ dependencies = [
     "numpy>=1.26",
     "pypdf>=5.0",
     "onnxruntime>=1.20",
+    # Tracing (ADR-0014). The exporter is imported only when OTLP export is configured, but the
+    # production image must be able to configure it.
+    "opentelemetry-api>=1.30",
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
 ]
 
 [project.optional-dependencies]

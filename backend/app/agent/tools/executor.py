@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from app.agent.tools.base import ToolContext, ToolExecutionError
 from app.agent.tools.registry import ToolRegistry
+from app.core.telemetry import tracer
 from app.db.models import ToolStatus
 from app.db.repositories.tool_calls import ToolCallRepository
 from app.providers.llm.base import ToolCall, ToolResult
@@ -43,6 +44,24 @@ async def execute_tool_call(
     (ARCHITECTURE §8.2/§8.4). Passing `None` skips the check — used by callers (tests, and any
     future path with no intent gate at all) that mean to offer every tool in `registry`.
     """
+    # Arguments stay out of the span: they can carry the student's words (ARCHITECTURE §14).
+    with tracer.start_as_current_span(
+        f"tool {call.name}", attributes={"tool.name": call.name}
+    ) as span:
+        result = await _execute(
+            call, registry=registry, ctx=ctx, allowed_tool_names=allowed_tool_names
+        )
+        span.set_attribute("tool.ok", not result.is_error)
+        return result
+
+
+async def _execute(
+    call: ToolCall,
+    *,
+    registry: ToolRegistry,
+    ctx: ToolContext,
+    allowed_tool_names: frozenset[str] | None,
+) -> ToolResult:
     tool_calls = ToolCallRepository(ctx.db)
     definition = registry.get(call.name)
 
