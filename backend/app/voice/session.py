@@ -32,6 +32,7 @@ from app.agent.lang.router import LanguageDecision, LanguageState, route
 from app.agent.orchestrator import ToolActivityEntry
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.providers.base import ProviderError
 from app.providers.stt.base import (
     FinalTranscript,
     PartialTranscript,
@@ -142,6 +143,10 @@ class VoiceSessionConfig:
     playback_drain_grace_ms: int = 1500
     max_utterance_ms: int = 30_000
     tts_sample_rate: int = 24_000
+    # EXP-003: end the turn after a shorter pause when the live transcript already reads as a
+    # complete question. Off until the voice suite shows it wins without more cut-offs.
+    semantic_endpointing: bool = False
+    semantic_silence_ms: int = 250
 
 
 @dataclass
@@ -168,7 +173,19 @@ class VoiceSession:
         self._playback_progress = asyncio.Event()
         self._marks = TurnMarks(clock=self.clock)
         self._chunker = SentenceChunker()
-        self._detector = TurnDetector(min_silence_ms=self.vad.settings.min_silence_ms)
+        self._detector = TurnDetector(
+            min_silence_ms=self.vad.settings.min_silence_ms,
+            semantic_endpointing=self.config.semantic_endpointing,
+            semantic_silence_ms=self.config.semantic_silence_ms,
+        )
+        # The recogniser hears an utterance as it is spoken (ARCHITECTURE §4, §5.5): frames go
+        # to it live, and its stable prefix is what the turn detector reads during a pause.
+        self._stt_frames: asyncio.Queue[bytes | None] | None = None
+        self._stt_task: asyncio.Task[FinalTranscript] | None = None
+        self._stable_prefix = ""
+        # Which rule ended the last utterance: the gate's silence ("speech_end"), the turn
+        # detector ("silence", or "semantic" under EXP-003), or the duration cap.
+        self.last_end_reason: str | None = None
         self._audio_seq = 0
         self._committed_at: float | None = None
         self._speech_ms = 0
@@ -191,6 +208,7 @@ class VoiceSession:
         )
 
     async def close(self) -> None:
+        await self._cancel_transcription()
         await self._cancel_turn_task()
         if self.machine.can(Trigger.SESSION_END):
             self.machine.fire(Trigger.SESSION_END)
@@ -210,6 +228,8 @@ class VoiceSession:
         self._preroll.push(frame.pcm)
         if self._capturing:
             self._utterance.extend(frame.pcm)
+            if self._stt_frames is not None:
+                self._stt_frames.put_nowait(frame.pcm)
             if bytes_to_ms(len(self._utterance)) > self.config.max_utterance_ms:
                 # A stuck microphone must not become an unbounded bill.
                 await self._end_utterance(reason="max_duration")
@@ -227,7 +247,16 @@ class VoiceSession:
             await self._on_speech_start()
         elif decision.event is VadEvent.SPEECH_CONTINUE:
             self._speech_ms = decision.run_ms
-            self._detector.on_speech()
+            if decision.pause_ms == 0:
+                self._detector.on_speech()
+            else:
+                # A pause inside speech. The gate alone would wait out its own timeout; the turn
+                # detector may judge the turn over sooner (EXP-003). Until Phase 8 every such
+                # window reset the detector instead, so it was never consulted at all.
+                outcome = self._detector.on_silence(window_ms, stable_prefix=self._stable_prefix)
+                if outcome.ended and self._capturing:
+                    self.vad.end_run()
+                    await self._end_utterance(reason=outcome.reason, speech_ms=decision.run_ms)
         elif decision.event is VadEvent.SPEECH_END:
             await self._end_utterance(reason="speech_end", speech_ms=decision.run_ms)
         elif self._capturing:
@@ -249,7 +278,14 @@ class VoiceSession:
         self._capturing = True
         self._detector.reset()
         # Prepend the pre-roll so the utterance keeps its onset (ARCHITECTURE §5.5).
-        self._utterance = bytearray(self._preroll.drain())
+        onset = self._preroll.drain()
+        self._utterance = bytearray(onset)
+        frames: asyncio.Queue[bytes | None] = asyncio.Queue()
+        if onset:
+            frames.put_nowait(onset)
+        self._stt_frames = frames
+        self._stable_prefix = ""
+        self._stt_task = asyncio.create_task(self._transcribe(frames))
 
     async def _end_utterance(self, *, reason: str, speech_ms: int | None = None) -> None:
         if not self._capturing:
@@ -257,7 +293,6 @@ class VoiceSession:
         self._capturing = False
         self._marks = TurnMarks(clock=self.clock)
         self._marks.mark(stage.SPEECH_END)
-        audio = bytes(self._utterance)
         self._utterance = bytearray()
 
         # Measured from the VAD's confirmed speech run, NOT from the buffered audio: the 500 ms
@@ -265,15 +300,37 @@ class VoiceSession:
         # cough would become a turn.
         spoken_ms = self._speech_ms if speech_ms is None else speech_ms
         self._speech_ms = 0
+        self.last_end_reason = reason
+        log.info(
+            "voice.utterance_ended",
+            session_id=str(self.session_id),
+            reason=reason,
+            speech_ms=spoken_ms,
+        )
         if spoken_ms < self.config.min_utterance_ms:
             # Too short to be a question. Not an error, and not worth a turn index or a bill.
+            await self._cancel_transcription()
             if self.machine.can(Trigger.UTTERANCE_DISCARDED):
                 self.machine.fire(Trigger.UTTERANCE_DISCARDED)
                 await self._announce_state()
             return
 
         self._marks.mark(stage.TURN_END)
-        transcript = await self._transcribe(audio)
+        try:
+            transcript = await self._finish_transcription()
+        except ProviderError:
+            # The recogniser now works while the student speaks, so it can fail mid-sentence.
+            # Say so and listen again, rather than let the exception end the connection.
+            log.error("voice.stt_failed", session_id=str(self.session_id), exc_info=True)
+            await self.transport.send_control(
+                ServerMessage.ERROR,
+                code="stt_failed",
+                message="Sorry — I didn't catch that. Could you say it again?",
+            )
+            if self.machine.can(Trigger.UTTERANCE_DISCARDED):
+                self.machine.fire(Trigger.UTTERANCE_DISCARDED)
+                await self._announce_state()
+            return
         self._marks.mark(stage.STT_FINAL)
 
         if not transcript.text.strip() or self._is_backchannel(transcript.text):
@@ -349,14 +406,18 @@ class VoiceSession:
         )
         return decision
 
-    async def _transcribe(self, audio: bytes) -> FinalTranscript:
-        async def frames() -> AsyncIterator[bytes]:
-            yield audio
+    async def _transcribe(self, frames: asyncio.Queue[bytes | None]) -> FinalTranscript:
+        """Transcribe one utterance from its frames as they arrive; `None` ends it."""
+
+        async def stream() -> AsyncIterator[bytes]:
+            while (chunk := await frames.get()) is not None:
+                yield chunk
 
         final: FinalTranscript | None = None
         context = TranscriptionContext(language_hints=("en", "hi", "ta"))
-        async for event in self.stt.transcribe_stream(frames(), context):
+        async for event in self.stt.transcribe_stream(stream(), context):
             if isinstance(event, PartialTranscript):
+                self._stable_prefix = event.text[: event.stable_prefix_chars]
                 await self.transport.send_control(
                     ServerMessage.STT_PARTIAL,
                     text=event.text,
@@ -367,6 +428,25 @@ class VoiceSession:
             elif isinstance(event, FinalTranscript):
                 final = event
         return final or FinalTranscript(text="")
+
+    async def _finish_transcription(self) -> FinalTranscript:
+        """End the utterance's audio and wait for its final transcript."""
+        task, frames = self._stt_task, self._stt_frames
+        self._stt_task = self._stt_frames = None
+        if task is None or frames is None:
+            return FinalTranscript(text="")
+        frames.put_nowait(None)
+        return await task
+
+    async def _cancel_transcription(self) -> None:
+        task = self._stt_task
+        self._stt_task = self._stt_frames = None
+        if task is None:
+            return
+        task.cancel()
+        # Whatever it was doing — still listening, finished, or failed — no longer matters.
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
 
     # --- the turn ----------------------------------------------------------
 

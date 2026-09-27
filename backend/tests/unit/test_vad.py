@@ -119,6 +119,31 @@ def test_multiple_utterances_in_one_session() -> None:
     assert events.count(VadEvent.SPEECH_END) == 2
 
 
+def test_a_pause_inside_speech_reports_how_long_it_has_lasted() -> None:
+    """What the session's turn detector reads during a pause (D8-02)."""
+    gate = _gate([0.9] * 8 + [0.01] * 5 + [0.9] * 2, min_silence_ms=500)
+    decisions = [gate.push(WINDOW) for _ in range(15)]
+    assert decisions[7].event is VadEvent.SPEECH_START
+    pause = decisions[8:13]
+    assert [d.event for d in pause] == [VadEvent.SPEECH_CONTINUE] * 5
+    assert [d.pause_ms for d in pause] == [32, 64, 96, 128, 160]
+    assert decisions[13].pause_ms == 0, "speech resumed"
+
+
+def test_ending_a_run_early_makes_resumed_speech_a_new_utterance() -> None:
+    """When the turn detector ends a turn before the gate's own timeout, what follows is a new
+    utterance with its own start — not the continuation of one already handed off."""
+    gate = _gate([0.9] * 10 + [0.01] * 8 + [0.9] * 10 + [0.01] * 20)
+    events = _run(gate, 18)
+    assert events.count(VadEvent.SPEECH_START) == 1
+    assert VadEvent.SPEECH_END not in events, "256 ms of pause is inside the gate's run"
+
+    gate.end_run()
+    later = _run(gate, 30)
+    assert later.count(VadEvent.SPEECH_START) == 1
+    assert later.count(VadEvent.SPEECH_END) == 1
+
+
 # --- the real detector ------------------------------------------------------
 
 

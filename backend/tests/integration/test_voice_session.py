@@ -23,17 +23,19 @@ from app.agent.tools.registry import DEFAULT_REGISTRY
 from app.core.config import Settings
 from app.db.models import Message, MessageRole, Session, Student, User
 from app.db.repositories.sessions import MessageRepository
+from app.providers.base import ProviderUnavailableError
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.llm.base import ToolCall
 from app.providers.llm.fake import FakeLLMProvider, ScriptedTurn
 from app.providers.reranker.base import NoopReranker
+from app.providers.stt.base import FinalTranscript, PartialTranscript, STTProvider
 from app.providers.stt.fake import FakeSTTProvider
 from app.providers.tts.fake import FakeTTSProvider
 from app.rag.ingest import DocumentMetadata
 from app.rag.service import RagService
 from app.services.conversation import ConversationService
 from app.services.usage import UsageLedger
-from app.voice.audio import FRAME_BYTES, AudioFrame, bytes_to_ms
+from app.voice.audio import FRAME_BYTES, FRAME_MS, AudioFrame, bytes_to_ms
 from app.voice.protocol import ServerMessage
 from app.voice.session import VoiceSession, VoiceSessionConfig
 from app.voice.state import TurnState
@@ -134,6 +136,7 @@ def _build(
     acking: bool = True,
     tts: FakeTTSProvider | None = None,
     config: VoiceSessionConfig | None = None,
+    stt: STTProvider | None = None,
 ) -> tuple[VoiceSession, RecordingTransport, FakeTTSProvider]:
     transport = RecordingTransport()
     tts = tts or FakeTTSProvider()
@@ -142,7 +145,7 @@ def _build(
         session_id=session_id,
         transport=transport,
         vad=VadGate(ScriptedVoiceDetector(probabilities), VadSettings()),
-        stt=FakeSTTProvider(transcript=transcript),
+        stt=stt or FakeSTTProvider(transcript=transcript),
         tts=tts,
         conversation=ConversationService(
             llm=llm or FakeLLMProvider([ScriptedTurn(text="Loop ka sum zero hota hai.")]),
@@ -877,7 +880,7 @@ async def test_the_utterance_keeps_its_onset_via_the_pre_roll_buffer(
     be longer than the audio that arrived *after* confirmation.
     """
     student_id, session_id = student_and_session
-    stt = FakeSTTProvider(transcript="Wait, stop")
+    stt = _MeasuringSTT(transcript="Wait, stop")
     transport = RecordingTransport()
     voice = VoiceSession(
         student_id=student_id,
@@ -903,12 +906,18 @@ async def test_the_utterance_keeps_its_onset_via_the_pre_roll_buffer(
     )
     transport.listener = voice
     await voice.start()
-    await _feed(voice, 90)
+    after_confirmation = 0
+    for seq in range(90):
+        pcm = AudioFrame(turn_id=voice.machine.turn_id, seq=seq, pcm=SPEECH_FRAME)
+        await voice.handle_audio(pcm)
+        after_confirmation += voice._capturing
     await voice.wait_for_turn()
 
-    # The fake STT counts the frames it received; with a 500 ms pre-roll it must see more audio
-    # than the post-confirmation remainder alone.
-    assert stt.frame_count > 0
+    # Everything after confirmation, and the 500 ms before it. (Until Phase 8 this asserted only
+    # that the recogniser received *something*, which it would have without any pre-roll.)
+    assert stt.utterance_bytes, "the utterance reached the recogniser"
+    heard_ms = bytes_to_ms(stt.utterance_bytes[0])
+    assert heard_ms >= after_confirmation * FRAME_MS + 400
     assert voice.machine.state is TurnState.LISTENING
 
 
@@ -1165,3 +1174,267 @@ async def test_the_selected_voice_follows_the_routed_language(
     await voice.handle_text(text="किरचॉफ का नियम समझाओ")
     await voice.wait_for_turn()
     assert tts.requests[-1].voice.language == "hi", "a Hindi answer must not use the English voice"
+
+
+# --- hearing the question as it is spoken (D8-02) ------------------------------
+
+
+class _LiveSTT(FakeSTTProvider):
+    """A recogniser that answers as it hears, as a streaming ASR does: after every `every` chunks
+    of audio it emits the next scripted partial, all of it stable. Records whether its stream was
+    abandoned before the utterance's audio ended."""
+
+    def __init__(self, partials: list[str], final: str, *, every: int = 5) -> None:
+        super().__init__(transcript=final, language="en")
+        self._script = list(partials)
+        self._every = every
+        self.chunks = 0
+        self.abandoned = False
+
+    async def transcribe_stream(self, frames, context=None):  # type: ignore[no-untyped-def,override]
+        finished = False
+        try:
+            async for _chunk in frames:
+                self.chunks += 1
+                if self._script and self.chunks % self._every == 0:
+                    text = self._script.pop(0)
+                    yield PartialTranscript(
+                        text=text, stable_prefix_chars=len(text), language_hint="en"
+                    )
+            yield FinalTranscript(text=self._transcript, language_hint="en", confidence=0.9)
+            finished = True
+        finally:
+            self.abandoned = not finished
+
+
+async def _hear(voice: VoiceSession, seq: int) -> None:
+    """Deliver one frame as a socket does: the event loop runs before the next one arrives, so
+    the recogniser's task hears each frame as it comes rather than all of them at the end."""
+    await voice.handle_audio(AudioFrame(turn_id=voice.machine.turn_id, seq=seq, pcm=SPEECH_FRAME))
+    for _ in range(4):
+        await asyncio.sleep(0)
+
+
+async def _frames_until_the_turn_ends(
+    voice: VoiceSession, transport: RecordingTransport, *, limit: int = 200
+) -> int:
+    for seq in range(limit):
+        await _hear(voice, seq)
+        if "thinking" in transport.states():
+            return seq + 1
+    raise AssertionError("the turn never ended")
+
+
+async def test_the_student_sees_their_words_while_they_are_still_speaking(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """D8-02. The recogniser used to be handed the utterance only after the turn had ended, so
+    every `stt.partial` arrived once the student had stopped — alongside the final, never while
+    they spoke — and the turn detector never had a transcript to read."""
+    student_id, session_id = student_and_session
+    stt = _LiveSTT(["What is", "What is Kirchhoff's"], final="What is Kirchhoff's voltage law?")
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=speech_timeline(silence_ms=64, speech_ms=1600, trailing_silence_ms=800),
+        stt=stt,
+    )
+    await voice.start()
+    for seq in range(60):  # 1.2 s: speech confirmed at ~0.3 s, and the student still talking
+        await _hear(voice, seq)
+
+    assert voice.machine.state is TurnState.USER_SPEAKING
+    assert [p["text"] for p in transport.of_type("stt.partial")] == [
+        "What is",
+        "What is Kirchhoff's",
+    ]
+    assert not transport.of_type("stt.final")
+
+    for seq in range(60, 120):
+        await _hear(voice, seq)
+    await voice.wait_for_turn()
+
+    types = transport.types()
+    assert types.index("stt.partial") < types.index("stt.final")
+    assert transport.of_type("stt.final")[0]["text"] == "What is Kirchhoff's voltage law?"
+    assert not stt.abandoned
+
+
+# 64 ms of silence, 960 ms of speech, then quiet: the gate would end the run 512 ms into the quiet.
+ONE_QUESTION = speech_timeline(silence_ms=64, speech_ms=960, trailing_silence_ms=1600)
+
+
+async def _turn_end(
+    db_session: AsyncSession,
+    settings: Settings,
+    redis_client: Any,
+    ids: tuple[uuid.UUID, uuid.UUID],
+    *,
+    heard: str,
+    semantic: bool,
+    probabilities: list[float] = ONE_QUESTION,
+) -> tuple[int, str]:
+    """Frames delivered until the turn ended, and the rule that ended it."""
+    stt = _LiveSTT([heard], final=heard)
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=ids[0],
+        session_id=ids[1],
+        probabilities=probabilities,
+        stt=stt,
+        config=VoiceSessionConfig(ack_grace_ms=0, semantic_endpointing=semantic),
+    )
+    await voice.start()
+    frames = await _frames_until_the_turn_ends(voice, transport)
+    reason = voice.last_end_reason
+    await voice.wait_for_turn()
+    await voice.close()
+    assert len(transport.of_type("stt.final")) == 1, "one question, one turn"
+    assert reason is not None
+    return frames, reason
+
+
+async def test_semantic_endpointing_ends_a_complete_question_after_a_shorter_pause(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """EXP-003's candidate, through the session. Before D8-02 the detector was reset on every
+    pause window and never consulted, so switching this on changed nothing at all."""
+    ids = student_and_session
+    question = "What is Kirchhoff's voltage law?"
+
+    baseline, why_baseline = await _turn_end(
+        db_session, settings, redis_client, ids, heard=question, semantic=False
+    )
+    candidate, why_candidate = await _turn_end(
+        db_session, settings, redis_client, ids, heard=question, semantic=True
+    )
+
+    assert why_baseline == "speech_end"
+    assert why_candidate == "semantic"
+    # 250 ms of pause instead of 500, in whole 32 ms windows: 256 ms sooner, give or take a frame.
+    assert 240 <= (baseline - candidate) * FRAME_MS <= 280
+
+
+async def test_semantic_endpointing_waits_the_full_pause_for_an_unfinished_sentence(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    ids = student_and_session
+    baseline, _ = await _turn_end(
+        db_session, settings, redis_client, ids, heard="What is Kirchhoff's", semantic=False
+    )
+    candidate, why = await _turn_end(
+        db_session, settings, redis_client, ids, heard="What is Kirchhoff's", semantic=True
+    )
+    assert candidate == baseline
+    assert why == "speech_end"
+
+
+async def test_a_pause_that_speech_resumes_after_does_not_count_toward_the_next_one(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """A 160 ms breath mid-question, then more words: the detector must start counting afresh
+    at the final pause, or it ends the turn 160 ms early."""
+    ids = student_and_session
+    breath = [0.01] * 2 + [0.95] * 20 + [0.01] * 5 + [0.95] * 20 + [0.01] * 50
+    quiet_from = (2 + 20 + 5 + 20) * 32  # ms of audio before the final pause begins
+    frames, why = await _turn_end(
+        db_session,
+        settings,
+        redis_client,
+        ids,
+        heard="What is Kirchhoff's voltage law?",
+        semantic=True,
+        probabilities=breath,
+    )
+    assert why == "semantic"
+    assert frames * FRAME_MS - quiet_from >= 250
+
+
+async def test_an_utterance_too_short_to_answer_abandons_its_transcription(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """Streaming means the recogniser is already working when the utterance turns out to be a
+    cough; it must be stopped, not left to finish and bill."""
+    student_id, session_id = student_and_session
+    stt = _LiveSTT([], final="hmm")
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        # 288 ms of speech: past the VAD's min_speech_ms, short of min_utterance_ms.
+        probabilities=[0.95] * 9 + [0.01] * 40,
+        stt=stt,
+    )
+    await voice.start()
+    for seq in range(60):
+        await _hear(voice, seq)
+
+    assert stt.chunks > 0, "the recogniser was hearing it live"
+    assert stt.abandoned
+    assert not transport.of_type("stt.final")
+    assert voice.machine.state is TurnState.LISTENING
+
+
+async def test_hanging_up_mid_sentence_abandons_the_transcription(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    student_id, session_id = student_and_session
+    stt = _LiveSTT([], final="unused")
+    voice, _transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=[0.95] * 100,
+        stt=stt,
+    )
+    await voice.start()
+    for seq in range(30):
+        await _hear(voice, seq)
+    assert voice.machine.state is TurnState.USER_SPEAKING
+
+    await voice.close()
+    assert stt.abandoned
+
+
+class _FailingSTT(_LiveSTT):
+    """A recogniser whose connection drops a few chunks into the utterance."""
+
+    async def transcribe_stream(self, frames, context=None):  # type: ignore[no-untyped-def,override]
+        async for _chunk in frames:
+            self.chunks += 1
+            if self.chunks == 3:
+                raise ProviderUnavailableError("connection reset", provider="live-fake")
+        yield FinalTranscript(text="unreachable")  # pragma: no cover
+
+
+async def test_a_recogniser_that_fails_mid_sentence_is_reported_and_the_session_listens_again(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    student_id, session_id = student_and_session
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=ONE_QUESTION,
+        stt=_FailingSTT([], final="unused"),
+    )
+    await voice.start()
+    for seq in range(100):
+        await _hear(voice, seq)
+    await db_session.commit()
+
+    assert [e["code"] for e in transport.of_type("error")] == ["stt_failed"]
+    assert voice.machine.state is TurnState.LISTENING
+    assert voice.machine.turn_id == 0, "no turn was spent on a question nobody heard"
+    assert await _messages(db_session, session_id) == []

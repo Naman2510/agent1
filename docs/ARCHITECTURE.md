@@ -212,6 +212,13 @@ Fixed silence thresholds are the usual reason voice agents feel slow. The design
 
 Layer 2 is a hypothesis, not a feature. It ships only with numbers.
 
+How the two meet (`app/voice/session.py`): the recogniser hears the utterance as it is spoken —
+frames stream to it from the moment speech is confirmed, pre-roll first — so a stable prefix exists
+*during* a pause. On each window of a pause the gate reports how long it has lasted, and the turn
+detector reads the prefix and may end the turn before the gate's own 500 ms timeout; speech that
+resumes resets it. Until Phase 8 (D8-02) the recogniser was called only after the turn had ended and
+the detector was reset on every pause window, so layer 2 could not have taken effect at all.
+
 ---
 
 ## 5. Barge-in (interruption)
@@ -599,7 +606,7 @@ with a bounded wait for clients that stop ACKing.
 |---|---|---|
 | `ready` | `sample_rate`, `frame_ms`, `tts_sample_rate` | The audio contract, sent at accept |
 | `state` | `state`, `turn_id` | Drives UI + assertions in e2e tests |
-| `stt.partial` | `text`, `stable_prefix_len`, `language`, `turn_id` | UI only; explicitly unstable |
+| `stt.partial` | `text`, `stable_prefix_len`, `language`, `turn_id` | Sent while the student speaks; UI only, explicitly unstable |
 | `stt.final` | `text`, `language`, `confidence`, `turn_id` | Commits the user turn |
 | `llm.delta` | `text`, `turn_id` | Live transcript of the mentor |
 | `agent.activity` | `turn_id`, `tools: [{tool_name, ok}]` | Tool transparency (spec §4), sent as the turn finishes |
@@ -607,7 +614,7 @@ with a bounded wait for clients that stop ACKing.
 | audio (binary) | `[turn_id][seq]` + Int16 LE PCM at `tts_sample_rate` | Playback |
 | `tts.cancel` | `turn_id` | Immediate client flush (§5.2) |
 | `metrics` | `turn_id`, `latency_ms` | Live latency HUD |
-| `error` | `code`, `message` | Safe, non-leaking error surface |
+| `error` | `code`, `message` | Safe, non-leaking error surface (`stt_failed`, `turn_failed`, `spend_cap_exceeded`, …) |
 
 Fencing: the client discards audio frames from a turn it has flushed; the server discards PCM frames
 whose `turn_id` is stale. This makes the interruption race testable and closes the "ghost audio after
