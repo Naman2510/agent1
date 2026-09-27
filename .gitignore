@@ -32,6 +32,10 @@ models/
 *.webm
 *.ogg
 !datasets/**/fixtures/*.wav
+# The synthetic voice dataset (eSpeak NG; datasets/v1/voice/README.md). Recordings of people stay
+# ignored everywhere.
+!datasets/v1/voice/parts/*.wav
+!datasets/v1/voice/noise/*.wav
 
 # Experiment tracking / eval output
 mlruns/

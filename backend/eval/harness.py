@@ -16,6 +16,7 @@ from eval.suites import agent as agent_suite
 from eval.suites import injection as injection_suite
 from eval.suites import lid as lid_suite
 from eval.suites import retrieval as retrieval_suite
+from eval.suites import voice as voice_suite
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -386,6 +387,53 @@ async def _evaluate_agent(
     return SuiteOutcome(summary=s, cases=records, report=report.render(), ok=ok)
 
 
+# --- voice -------------------------------------------------------------------------
+
+# Every question in the dataset is followed by 1.5 s of quiet (scripts/make_voice_dataset.py): a
+# question no turn followed within it is a miss, scored as that whole wait.
+VOICE_MISS_PENALTY_MS = 1500
+
+
+def _voice_files(dataset: Path) -> list[Path]:
+    return voice_suite.dataset_files(dataset / "voice")
+
+
+async def _evaluate_voice(
+    config: dict[str, Any], dataset: Path, show_failures: bool, settings: Settings | None
+) -> SuiteOutcome:
+    cases = voice_suite.load_cases(dataset / "voice")
+    results = await voice_suite.run(cases, config)
+    summary = voice_suite.summarise(results, miss_penalty_ms=VOICE_MISS_PENALTY_MS)
+    lines = [voice_suite.render(summary, config)]
+    failures = [r for r in results if not r.passed]
+    if show_failures and failures:
+        lines += ["", f"failures ({len(failures)})"]
+        for r in failures:
+            lines.append(
+                f"  {r.case.id:20s} speech {list(r.case.speech)} turns at {list(r.turns_ms)}"
+                f" ({', '.join(r.end_reasons) or 'none'}) | {r.case.text}"
+            )
+    records = [
+        CaseRecord(
+            case_id=r.case.id,
+            passed=r.passed,
+            language=r.case.language,
+            input={"kind": r.case.kind, "text": r.case.text, "pauses_ms": list(r.case.pauses_ms)},
+            expected={"speech_ms": [list(span) for span in r.case.speech], "turns": 1}
+            if r.is_question
+            else {"turns": 0},
+            actual={
+                "captures_ms": list(r.captures_ms),
+                "turns_ms": list(r.turns_ms),
+                "end_reasons": list(r.end_reasons),
+            },
+            metrics=r.metrics(miss_penalty_ms=VOICE_MISS_PENALTY_MS),
+        )
+        for r in results
+    ]
+    return SuiteOutcome(summary=summary, cases=records, report="\n".join(lines), ok=True)
+
+
 SUITES: dict[str, Suite] = {
     "lid": Suite(
         "lid",
@@ -408,6 +456,14 @@ SUITES: dict[str, Suite] = {
         True,
         _agent_files,
         _evaluate_agent,
+    ),
+    "voice": Suite(
+        "voice",
+        "the voice front end — Silero VAD, turn detector, session — on synthetic speech, in "
+        "audio time; recogniser and conversation are stand-ins, so no provider latency",
+        False,
+        _voice_files,
+        _evaluate_voice,
     ),
     "injection": Suite(
         "injection",

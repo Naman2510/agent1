@@ -1,0 +1,22 @@
+# Registered before either run (EVALUATION.md §7). Run with:
+#   python -m eval.runner --experiment eval/experiments/EXP-008.toml --record
+slug = "EXP-008"
+title = "Heading-path prefixing"
+hypothesis = """Prefixing each chunk's embedded text with its document title and heading path \
+raises nDCG@10 on the retrieval set by at least 0.02."""
+# The variable is the prefix: the baseline is without it, the candidate is what ships.
+baseline = "retrieval-no-heading-prefix.toml"
+candidate = "retrieval.toml"
+
+prediction = """A small gain, probably too small to separate from noise on 22 queries over 19 \
+chunks: inconclusive."""
+
+[decision_rule]
+metric = "ndcg@10"
+higher_is_better = true
+min_effect = 0.02
+
+[[decision_rule.guards]]
+metric = "recall@10"
+higher_is_better = true
+max_loss = 0.0

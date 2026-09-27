@@ -158,7 +158,7 @@ class VoiceSession:
     stt: STTProvider
     tts: TTSProvider
     conversation: ConversationService
-    settings: Settings
+    settings: Settings | None = None  # not read here; the voice suite runs without any
     config: VoiceSessionConfig = field(default_factory=VoiceSessionConfig)
     clock: Callable[[], float] = time.perf_counter
 

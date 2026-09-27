@@ -232,6 +232,8 @@ async def run_experiment(
 
     print(f"experiment       {experiment['slug']} — {experiment['title']}")
     print(f"hypothesis       {experiment['hypothesis']}")
+    if "prediction" in experiment:
+        print(f"predicted        {experiment['prediction']}")
     print(f"variable         {changed[0]}: {baseline_name} → {candidate_name}")
     print()
 
@@ -278,7 +280,18 @@ async def run_experiment(
     return 0
 
 
+def _quiet_application_logs() -> None:
+    """The report is the output. The application's own INFO lines (a voice turn logs several)
+    would bury it; warnings and errors still show."""
+    import logging
+
+    import structlog
+
+    structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))
+
+
 def main() -> int:
+    _quiet_application_logs()
     parser = argparse.ArgumentParser(description="Run a VaaniOS evaluation suite.")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--suite", choices=sorted(SUITES), help="run a suite's default config")

@@ -1,0 +1,19 @@
+# EXP-003's candidate: voice.toml with semantic endpointing switched on — one knob.
+suite = "voice"
+
+[vad]
+enter_threshold = 0.5
+exit_threshold = 0.35
+min_speech_ms = 250
+min_silence_ms = 500
+
+[session]
+pre_roll_ms = 500
+min_utterance_ms = 400
+merge_window_ms = 1200
+semantic_endpointing = true
+semantic_silence_ms = 250
+
+# A stand-in for a streaming recogniser: perfect words, each stable this long after it is spoken.
+[recogniser]
+stable_lag_ms = 300

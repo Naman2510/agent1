@@ -249,3 +249,19 @@ def test_a_baseline_is_not_compared_across_changed_data_or_config(
     other = replace(spec, config={"suite": "lid", "x": 1})
     assert recording.check_baseline(other, outcome)[0] == 2
     assert recording.check_baseline(replace(spec, config_name="nameless"), outcome)[0] == 2
+
+
+def test_a_metric_is_compared_only_over_the_cases_that_have_it() -> None:
+    """A noise clip has no turn-end latency; it must neither break the comparison nor count."""
+    rule = DecisionRule(
+        "endpoint_ms",
+        higher_is_better=False,
+        min_effect=50.0,
+        guards=(Guard("cut_off", higher_is_better=False, max_loss=0.0),),
+    )
+    baseline = {f"q{i}": {"endpoint_ms": 500.0, "cut_off": 0.0} for i in range(10)}
+    candidate = {f"q{i}": {"endpoint_ms": 300.0, "cut_off": 0.0} for i in range(10)}
+    baseline["noise"] = candidate["noise"] = {"false_turn": 0.0}
+    decision, comparison = decide(rule, baseline, candidate)
+    assert decision == "adopt"
+    assert comparison["cases"] == 10

@@ -80,10 +80,19 @@ def decide(
     candidate_cases: Mapping[str, Mapping[str, float]],
 ) -> tuple[str, dict[str, Any]]:
     """The decision and the comparison behind it. Cases are keyed by id; each maps metric name
-    to value. Only cases present in both runs are compared."""
-    shared = sorted(baseline_cases.keys() & candidate_cases.keys())
+    to value. A metric is compared over the cases that have it in both runs — a noise clip has
+    no turn-end latency — and only those."""
+
+    def having(metric: str) -> list[str]:
+        return sorted(
+            c
+            for c in baseline_cases.keys() & candidate_cases.keys()
+            if metric in baseline_cases[c] and metric in candidate_cases[c]
+        )
+
+    shared = having(rule.metric)
     if not shared:
-        return "inconclusive", {"reason": "the runs share no cases", "cases": 0}
+        return "inconclusive", {"reason": "the runs share no cases with the metric", "cases": 0}
 
     def paired(metric: str, higher_is_better: bool) -> list[float]:
         return [
@@ -92,7 +101,7 @@ def decide(
                 float(candidate_cases[c][metric]),
                 higher_is_better,
             )
-            for c in shared
+            for c in having(metric)
         ]
 
     gains = paired(rule.metric, rule.higher_is_better)
@@ -114,7 +123,7 @@ def decide(
     guard_failed = False
     for guard in rule.guards:
         guard_gains = paired(guard.metric, guard.higher_is_better)
-        loss = -sum(guard_gains) / len(guard_gains)
+        loss = -sum(guard_gains) / len(guard_gains) if guard_gains else 0.0
         failed = loss > guard.max_loss
         guard_failed = guard_failed or failed
         comparison["guards"][guard.metric] = {
