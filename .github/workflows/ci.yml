@@ -121,7 +121,7 @@ jobs:
           VAANIOS_JWT_SECRET: ci-secret-that-is-at-least-32-characters
         run: |
           alembic upgrade head
-          python -m eval.runner --config eval/configs/*.toml --check-baseline
+          python -m eval.runner --config eval/configs/*.toml --tier T1 --check-baseline
 
       - name: Migrations are reversible and match the models
         working-directory: backend

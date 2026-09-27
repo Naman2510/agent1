@@ -300,6 +300,11 @@ def main() -> int:
     mode.add_argument("--experiment", type=Path, help="run and decide a registered experiment")
     parser.add_argument("--dataset", default="v1")
     parser.add_argument(
+        "--tier",
+        choices=["T1", "T2", "T3"],
+        help="run only the given configs of this CI tier (a config's `tier`, T1 when it has none)",
+    )
+    parser.add_argument(
         "--record", action="store_true", help="keep the run in PostgreSQL and MLflow"
     )
     parser.add_argument("--failures", action="store_true", help="print every failing case")
@@ -328,7 +333,15 @@ def main() -> int:
                 run_experiment(experiment, args.dataset, settings, record=args.record)
             )
         paths = args.config or [default_config_path(args.suite)]
-        specs = [build_spec(*load_config(path), args.dataset) for path in paths]
+        loaded = [load_config(path) for path in paths]
+        if args.tier is not None:
+            # EVALUATION.md §6: T1 runs on every push with nothing to download; T2 needs local
+            # models fetched first; T3 needs a paid credential.
+            for name, config in loaded:
+                if config.get("tier", "T1") != args.tier:
+                    print(f"skipped          {name} (tier {config.get('tier', 'T1')})")
+            loaded = [(n, c) for n, c in loaded if c.get("tier", "T1") == args.tier]
+        specs = [build_spec(name, config, args.dataset) for name, config in loaded]
         needed = args.record or any(SUITES[spec.suite].needs_database for spec in specs)
         settings = load_settings() if needed else None
         return asyncio.run(

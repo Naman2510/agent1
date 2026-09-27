@@ -1,0 +1,40 @@
+name: Live model checks (tier T3)
+
+# EVALUATION.md §6, tier T3: paid calls, started by hand. Today that is the Claude adapter's live
+# smoke test (backend/scripts/smoke_llm.py); the live agent and response suites do not exist yet.
+# Without the ANTHROPIC_API_KEY secret it skips, and says so in the run's summary — it never
+# passes by quietly doing nothing.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  llm:
+    name: The Claude adapter against the real API
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: No credential, no run
+        if: env.ANTHROPIC_API_KEY == ''
+        run: |
+          echo "### Skipped: no ANTHROPIC_API_KEY secret" >> "$GITHUB_STEP_SUMMARY"
+          echo "Nothing was checked against the live API." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v4
+        if: env.ANTHROPIC_API_KEY != ''
+      - uses: actions/setup-python@v5
+        if: env.ANTHROPIC_API_KEY != ''
+        with:
+          python-version: "3.11"
+      - name: Install
+        if: env.ANTHROPIC_API_KEY != ''
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Smoke test the adapter
+        if: env.ANTHROPIC_API_KEY != ''
+        working-directory: backend
+        run: python scripts/smoke_llm.py

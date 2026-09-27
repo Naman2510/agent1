@@ -16,6 +16,7 @@ from eval.suites import agent as agent_suite
 from eval.suites import injection as injection_suite
 from eval.suites import lid as lid_suite
 from eval.suites import retrieval as retrieval_suite
+from eval.suites import stt as stt_suite
 from eval.suites import voice as voice_suite
 
 if TYPE_CHECKING:
@@ -434,6 +435,44 @@ async def _evaluate_voice(
     return SuiteOutcome(summary=summary, cases=records, report="\n".join(lines), ok=True)
 
 
+# --- stt ---------------------------------------------------------------------------
+
+
+def _stt_files(dataset: Path) -> list[Path]:
+    return stt_suite.dataset_files(dataset / "voice")
+
+
+async def _evaluate_stt(
+    config: dict[str, Any], dataset: Path, show_failures: bool, settings: Settings | None
+) -> SuiteOutcome:
+    import asyncio
+
+    cases = stt_suite.load_cases(dataset / "voice")
+    recognise = stt_suite.faster_whisper_recogniser(config)
+    results = await asyncio.to_thread(stt_suite.run, cases, recognise)
+    summary = stt_suite.summarise(results)
+    lines = [stt_suite.render(summary, config)]
+    wrong = [r for r in results if r.word_edits]
+    if show_failures and wrong:
+        lines += ["", f"not word-for-word ({len(wrong)})"]
+        for r in wrong:
+            lines.append(f"  {r.case.id:24s} WER {r.wer:.2f} | {r.case.reference}")
+            lines.append(f"  {'':24s} heard   | {r.hypothesis}")
+    records = [
+        CaseRecord(
+            case_id=r.case.id,
+            passed=r.word_edits == 0,
+            language=r.case.language,
+            input={"voice": r.case.voice},
+            expected={"text": r.case.reference},
+            actual={"text": r.hypothesis, "language": r.detected_language},
+            metrics={"wer": r.wer, "cer": r.cer},
+        )
+        for r in results
+    ]
+    return SuiteOutcome(summary=summary, cases=records, report="\n".join(lines), ok=True)
+
+
 SUITES: dict[str, Suite] = {
     "lid": Suite(
         "lid",
@@ -456,6 +495,14 @@ SUITES: dict[str, Suite] = {
         True,
         _agent_files,
         _evaluate_agent,
+    ),
+    "stt": Suite(
+        "stt",
+        "a local recogniser (faster-whisper) on the voice dataset's synthetic speech, against the "
+        "texts it was synthesised from — a comparison between recognisers, not of human speech",
+        False,
+        _stt_files,
+        _evaluate_stt,
     ),
     "voice": Suite(
         "voice",

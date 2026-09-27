@@ -71,7 +71,10 @@ class Settings(BaseSettings):
     # money and latency regardless of what would fit.
     llm_history_turns: int = 20
 
-    stt_provider: Literal["fake"] = "fake"  # real adapters: Phase 3
+    # faster-whisper: local recognition for evaluation and development (needs the voice-local
+    # extra and its weights); the managed streaming recogniser ADR-0002 plans does not exist yet.
+    stt_provider: Literal["fake", "faster-whisper"] = "fake"
+    stt_model: str = "small"
     tts_provider: Literal["fake"] = "fake"  # real adapters: Phase 3
     # tfidf_svd is what actually ships (ADR-0006's amendment — multilingual-e5-base needs
     # HuggingFace Hub, unreachable from this sandbox); it is the default so search_knowledge

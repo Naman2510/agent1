@@ -120,6 +120,11 @@ class ConfigError(ValueError):
     pass
 
 
+class SuiteUnavailableError(ConfigError):
+    """The suite cannot run here: a package or model it needs is not available. Said plainly,
+    with what it needs, rather than as a traceback from deep inside a download."""
+
+
 def load_config(path: Path) -> tuple[str, dict[str, Any]]:
     """A run config: a TOML file naming its suite, with every knob the suite reads.
 

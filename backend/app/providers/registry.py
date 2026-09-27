@@ -49,9 +49,14 @@ def build_llm(settings: Settings) -> LLMProvider:
 def build_stt(settings: Settings) -> STTProvider:
     if settings.stt_provider == "fake":
         return FakeSTTProvider()
-    # Real adapters land in Phase 3 with the voice loop. Failing loudly here is better than
-    # silently serving a fake in something that looks like production.
-    raise UnknownProviderError("stt", settings.stt_provider, ["fake"])
+    if settings.stt_provider == "faster-whisper":
+        # Imported here: the production image does not install it (ADR-0015).
+        from app.providers.stt.faster_whisper import FasterWhisperSTT
+
+        return FasterWhisperSTT(settings.stt_model)
+    # Failing loudly is better than silently serving a fake in something that looks like
+    # production.
+    raise UnknownProviderError("stt", settings.stt_provider, ["fake", "faster-whisper"])
 
 
 def build_tts(settings: Settings) -> TTSProvider:

@@ -98,6 +98,17 @@ reasoning per case) and are written up as
 
 ## 3. STT evaluation
 
+**Status (Phase 8): the suite exists; its numbers come from CI.** `python -m eval.runner --suite
+stt` runs faster-whisper (`small`, int8, language auto-detected) over the 66 spoken parts of the
+synthetic voice dataset, against the sentences they were synthesised from: WER and CER pooled
+over words, per language, and how often the detected language matches the written one. Its
+weights come from Hugging Face, which this project's development environment cannot reach, so it
+runs in tier T2 (`.github/workflows/nightly.yml`), where they can be downloaded. What it measures
+is a recogniser hearing eSpeak — useful for comparing recognisers and settings, not a statement
+about anyone's voice. Its normalisation today is case, apostrophes and punctuation only: no
+numeral expansion, no spelling-variant map (below), so the romanized-Hindi column is mostly the
+distance between two spellings.
+
 ### 3.1 Metrics, and where they lie
 
 | Metric | Definition | Known invalidity |
@@ -346,13 +357,19 @@ for this and none will be invented.
 |---|---|---|---|
 | T0 | every push | unit + integration + e2e with all providers faked | none |
 | T1 | every push | every committed eval config reproduces its baseline: `lid`, `retrieval` and its ablations, `agent`, `injection`, `voice` and EXP-003's candidate | none (local models; scripted LLM) |
-| T2 | nightly + pre-release | `stt` (local model), full `retrieval` | none |
-| T3 | manual / release gate | `agent`, `response`, `voice`, `e2e` live | paid |
+| T2 | nightly, on demand, and when what it measures changes | `stt`: faster-whisper, weights downloaded first (`nightly.yml`) | none (model download) |
+| T3 | by hand | today, the Claude adapter's live smoke test (`live.yml`, skipped — and saying so — without an `ANTHROPIC_API_KEY` secret); live `agent`, `response`, `voice` and `e2e` suites do not exist yet | paid |
 
 T0's e2e is the Playwright suite in `frontend/e2e/` (Phase 7): a real browser against the whole
 stack, with the real VAD and a microphone playing recorded speech, and every model provider faked.
 CI runs it against the Docker Compose stack. It is a test tier, not the `e2e` *eval* suite of §1,
 which would score live conversations and does not exist yet.
+
+A config names its tier (`tier = "T2"`; T1 when it says nothing), and `python -m eval.runner
+--config eval/configs/*.toml --tier T1` runs exactly that tier's configs, naming the ones it
+skips. T2 and T3 are workflows of their own. GitHub schedules and dispatches a workflow only from
+the default branch, so until this work is merged T2 runs on pushes that change what it measures,
+and T3 cannot be started at all.
 
 T0 mocks at the **provider interface** (`LLMProvider`, `STTProvider`, …), never by patching HTTP, so
 tests exercise real orchestration logic. Determinism comes from: recorded provider fixtures, a fake
