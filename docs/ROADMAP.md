@@ -1,7 +1,8 @@
 # Roadmap, Phases, and Audit Gates
 
-**Status:** Phase 7 complete. Phases 0–7 have passed their audit gates; Phase 8 (evaluation,
-experiments, observability) is next.
+**Status:** Phases 0–8 have passed their audit gates; Phase 9 (failure analysis and hardening) is in
+progress: the degradation matrix (docs/DEGRADATION.md) and 14 failure cases are done; load behaviour
+and the security checklist are not.
 
 The specification (§43) mandates phased delivery with an audit gate between phases. Phases 1+ below
 are reconstructed from spec §1–42; **the original specification was truncated part-way through the
@@ -156,6 +157,21 @@ All six suites runnable from one entrypoint, MLflow tracking, OpenTelemetry trac
 and the first genuine experiments (EXP-001, EXP-003, EXP-007) written up with decisions.
 **Gate 8:** every suite reproducible from a recorded config; at least one experiment concluded
 `reject` or `inconclusive` — a project where every experiment "worked" is not being run honestly.
+
+Delivered 2026-09-27: every evaluation run is recorded — config, dataset digest, git SHA, every case
+— in PostgreSQL and MLflow, reproducible from that record alone, and every committed config is
+checked against its baseline in CI (ten on every push; the two `stt` configs in tier T2, with their
+downloaded model, on every push that changes what they measure — and nightly once merged).
+Two new suites: `voice`, the production voice session on synthetic speech in audio time, and
+`stt`, faster-whisper on the same speech. EXP-003 (semantic endpointing) was **rejected** — 227 ms
+faster, and three more students cut off — and EXP-008 (heading-path prefixing) **inconclusive**;
+EXP-001 and EXP-007 are blocked on data and say what they need. One trace per voice turn
+(OpenTelemetry), CI tiers T1–T3, and the dashboard's evaluation and experiment views. Gate 8 passed —
+[`PHASE_8_AUDIT.md`](PHASE_8_AUDIT.md). Building the evaluations surfaced 15 defects, two Critical:
+the turn detector was never consulted, so the experiment could not have taken effect (D8-02), and an
+interruption landing mid-query broke every later turn of a voice session (D8-04). Of the six planned
+suites, `response` and `e2e` do not exist (they need a live model, M8-03), and every number is on
+self-authored or synthetic data (M8-02).
 
 ### Phase 9 — Failure analysis & hardening
 At least eight documented failure cases with root causes and fixes, load behaviour under concurrent

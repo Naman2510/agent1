@@ -51,7 +51,9 @@ hints.
 
 ## Experiment
 
-None yet. It would be the next T2 experiment; each T2 config now costs about 13 minutes of CI.
+Not run. EXP-002 (EVALUATION.md §7), registered in Phase 0 as "contextual vocabulary biasing
+reduces technical-term errors", is this experiment; it is the next T2 one, at about 13 minutes of CI
+per config.
 
 ## Result
 

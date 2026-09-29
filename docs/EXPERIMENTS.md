@@ -20,6 +20,7 @@ image, or if any guard fails; **inconclusive** otherwise.
 |---|---|---|
 | [EXP-003](#exp-003--semantic-endpointing-rejected) | Does ending the turn early on a complete-looking transcript cut latency without cutting students off? | **rejected** |
 | [EXP-008](#exp-008--heading-path-prefixing-inconclusive) | Does prefixing chunks with their heading path improve ranking? | **inconclusive** |
+| [EXP-013](#exp-013--the-routed-language-as-the-recognisers-language-inconclusive) | Does telling the recogniser the routed language beat letting it detect one? | **inconclusive** |
 | [EXP-001](#exp-001--managed-indic-asr-vs-local-faster-whisper-blocked) | Does a managed Indic ASR beat local faster-whisper on Hinglish? | blocked |
 | [EXP-007](#exp-007--hybrid-vs-vector-only-on-hindi-and-tamil-queries-blocked) | Does hybrid retrieval beat vector-only on Hindi/Tamil queries? | blocked |
 | [EXP-012](#exp-012--semantic-endpointing-only-on-a-question-registered) | Does requiring a question, not just a sentence end, keep EXP-003's gain without the cut-offs? | registered |
@@ -123,12 +124,61 @@ prefix stays, as shipped, but without a claim that it helps: the record now says
 way", which is what the evidence supports. A corpus of real lecture material with headings written
 by someone else would be the fair test.
 
+## EXP-013 — The routed language as the recogniser's language: inconclusive
+
+**Hypothesis.** Telling the recogniser each utterance's language — as the session's router has
+already decided it (ADR-0011) — instead of letting Whisper detect it, cuts word error rate by at
+least 0.1 without making English worse.
+
+**Variable.** `recogniser.language`, `auto` → `hint` (the case's own label: `en` for English and
+for romanized Hindi, which Whisper writes in Latin script only when told English; `hi` for
+Devanagari). An upper bound: a real router can be wrong on a session's first utterance.
+
+**Rule.** Adopt if per-case WER falls by at least 0.1 with the interval below zero; guard: English
+WER may not rise at all (`wer_en`, maximum loss 0).
+
+**Prediction** (committed with the rule, bdcad75): Hindi improves, "but by how much is the open
+question, since eSpeak's Hindi may be too poor for Whisper to transcribe even when told what it
+is"; English does not move; romanized Hindi barely moves.
+
+**Runs.** Suite `stt`, dataset v1 (sha256 `1084397f02d7…`), faster-whisper `small` int8, beam 5,
+seeded, arithmetic pinned (FC-006), CI tier T2 at f94fccd on an AMD EPYC 7763. Both runs are held to
+committed baselines (`stt.json`, `stt-language-hint.json`); the candidate's reproduced exactly the
+baseline an earlier run had written on another machine. T2 has no database, so neither run is in
+`evaluation_runs`: the record is the baselines and the run's log.
+
+| | Auto-detected | Told the routed language |
+|---|---|---|
+| WER, pooled — all / English / Hindi / romanized | 0.447 / 0.123 / 1.425 / 0.941 | **0.377** / 0.123 / **0.957** / 0.941 |
+| CER — Hindi | 1.198 | 0.633 |
+| Language detected as written — Hindi | 0 of 11 | 11 of 11 |
+| Word for word — all | 30 of 66 | 30 of 66 |
+
+**Decision: inconclusive.** Per-case WER 0.489 → 0.416: a mean gain of +0.073 (95% CI [+0.027,
++0.127]), 8 cases better and none worse — a real improvement, below the registered 0.1. The guard
+held: every English case came back word for word the same, as did every romanized one. All eight
+gains are Hindi; the other three Hindi cases stayed at WER 1.
+
+**Prediction against result.** Right on every direction, and on the open question: told it is
+Hindi, `small` writes Devanagari, and phonetically close — `इस सर्किट में` → `इस्टागिट में`, `अब अगला
+उदाहरण बताइए।` → `अब आब लव बादव बबाई` — but still wrong nearly word for word. The auto-detected
+Hindi is gone: no more `It's a cock-a-doodle-doo.` for `किरचॉफ का करंट नियम`.
+
+**What it means.** Detection was the first failure, and the hint removes it; the acoustics are the
+second, and nothing here changes them. The rule averaged over all 66 cases, of which Hindi is 11,
+so an all-case gain of 0.1 needed Hindi to improve by about 0.6 per case; it improved by about 0.44.
+That was a registration choice, made before the result and kept after it: the verdict stands. Not
+adopted as a change — and nothing to adopt yet in the product, whose local recogniser is for
+evaluation and whose real-time recogniser (ADR-0002) does not exist.
+
+**Next.** The fair test is a recogniser that has heard Hindi (EXP-001) on Hindi a person spoke —
+both blocked on data this project does not have (DATASET.md).
+
 ## EXP-001 — Managed Indic ASR vs local faster-whisper: blocked
 
-Not run; nothing is concluded. It needs three things that do not exist: the `stt` suite (human
-speech with reference transcripts — none consented yet, DATASET.md), faster-whisper's weights (this
-development environment's network policy blocks huggingface.co; GitHub's runners can reach it, and
-CI tier T2 is where the local model will run), and a managed ASR credential.
+Not run; nothing is concluded. The `stt` suite and the local model it compares against now exist
+(CI tier T2), but it needs two things that do not: human speech with reference transcripts (none
+consented yet, DATASET.md) and a managed ASR credential.
 
 ## EXP-007 — Hybrid vs vector-only on Hindi and Tamil queries: blocked
 

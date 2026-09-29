@@ -1,6 +1,6 @@
 # FC-006 — A speech-recognition baseline no other machine could reproduce
 
-**Status:** fixed at the cause; cross-runner confirmation pending (below)
+**Status:** fixed — reproduced exactly on a second runner; across CPU vendors not yet shown
 **Found:** 2026-09-27 · **Phase:** 8 (PHASE_8_AUDIT D8-15) · **Component:** evaluation (stt)
 **Severity:** major — a baseline that does not reproduce cannot catch a regression
 **Case IDs:** the whole `stt` suite, dataset v1
@@ -64,11 +64,14 @@ Two mechanisms, both measured locally on a Whisper-shaped CTranslate2 model with
 ## Result
 
 T2's first pinned run (bdcad75) ran on an AMD EPYC 7763: CTranslate2 chose AVX2 and MKL for every
-product, with no MKL warning. The cost: 12 min 46 s for one config, against about four minutes
-unpinned — which led T2 to run each config once rather than twice (f94fccd). The baseline it wrote
-(`stt-language-hint.json`) is committed; whether another runner reproduces it — in particular an
-Intel one — is the next run's check, and this section will record it.
+product, with no MKL warning, and wrote `stt-language-hint`'s baseline. The next (f94fccd) ran on
+another runner — also an AMD EPYC 7763 — and reproduced it exactly, every metric. So the sampling
+fix is shown: before it, two runs could not agree even in principle. The pins are not yet shown
+doing their job across vendors: both runners were the same CPU model, and whether an Intel runner
+gives the same numbers waits for the first one T2 is given. The cost: 12 min 46 s per config,
+against about four minutes unpinned — which led T2 to run each config once rather than twice
+(f94fccd).
 
-If it does not, the fallback is MKL's COMPATIBLE mode (slower, but documented as vendor-independent),
-and failing that a stated tolerance — which would be recorded here as the limit of what the
-baseline can catch.
+If an Intel runner disagrees, the fallback is MKL's COMPATIBLE mode (slower, but documented as
+vendor-independent), and failing that a stated tolerance — which would be recorded here as the
+limit of what the baseline can catch.

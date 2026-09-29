@@ -1,6 +1,7 @@
 # FC-005 — Hindi speech is never heard as Hindi, and comes back as invented English
 
-**Status:** open — EXP-013 measures the first fix (below); nothing is shipped yet
+**Status:** open — EXP-013 measured the first fix: it removes the detection failure, not the
+acoustic one (inconclusive under its rule); nothing is shipped
 **Found:** 2026-09-27 · **Phase:** 8 · **Component:** stt
 **Severity:** major (for the local recogniser; the real-time path has no Hindi recogniser at all yet)
 **Case IDs:** the 11 `*-hi-*` spoken parts of dataset v1's voice slice
@@ -65,20 +66,22 @@ recorded Hindi rather than eSpeak's (DATASET.md: no consented recordings yet).
 ## Experiment
 
 EXP-013 — `stt.toml` (auto) → `stt-language-hint.toml` (hint), registered before either run at
-bdcad75. Candidate, measured in T2 at bdcad75 (pinned arithmetic, seeded sampling — FC-006):
+bdcad75, run in T2 at f94fccd with arithmetic pinned and sampling seeded (FC-006):
 
-| | auto (first run, unpinned) | hint (pinned) |
+| | auto | hint |
 |---|---|---|
-| Hindi WER / CER | 1.383 / 1.294 | 0.957 / 0.633 |
+| Hindi WER / CER | 1.425 / 1.198 | 0.957 / 0.633 |
 | Hindi detected as written | 0 of 11 | 11 of 11 |
-| English WER | 0.127 | 0.123 |
+| English WER | 0.123 | 0.123, every case word for word the same |
 
 Told it is Hindi, `small` writes Devanagari, and phonetically close: `इस सर्किट में` → `इस्टागिट में`,
-`अब अगला उदाहरण बताइए।` → `अब आब लव बादव बबाई`. Still wrong nearly word for word — eSpeak's Hindi
-is hard to hear even in the right language.
+`अब अगला उदाहरण बताइए।` → `अब आब लव बादव बबाई`. Still wrong nearly word for word.
 
 ## Result
 
-Pending: the baseline side (`stt.toml` under the same pins) and the registered decision come from
-the next T2 run. The unpinned first run is not a fair comparison — FC-006 — and is shown only to
-describe the failure.
+**Inconclusive** by the registered rule: per-case WER 0.489 → 0.416 over all 66 cases (+0.073, 95%
+CI [+0.027, +0.127]; 8 better, 0 worse) — real, but short of the 0.1 registered, because Hindi is 11
+of the 66. The detection failure is fixed by the hint; the acoustic failure is not touched by it,
+and is what remains of this case. It stays open until a recogniser that has heard Hindi (EXP-001)
+is measured on Hindi a person spoke — both blocked on data (DATASET.md). EXPERIMENTS.md has the
+full write-up.

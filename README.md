@@ -10,16 +10,18 @@ voice pipeline rather than a thin wrapper around an LLM API.
 
 | | |
 |---|---|
-| **Current phase** | Phase 7 complete — the web app: voice sessions, history, admin dashboard |
-| **Implementation** | 725 backend tests (97% line coverage), 35 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. No real ASR or TTS provider exists yet, and the Claude adapter has never run against the live API. |
-| **Benchmarks** | Four suites have run, each on a small self-authored dataset with its biases documented: language identification (0.9205 signal accuracy), retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893, 22 cases), agent tool gating (14/14 allowlist coverage, against a scripted model) and prompt injection (19/19 attempted mutating calls blocked). Latency is unmeasured. |
-| **Last updated** | 2026-09-26 |
+| **Current phase** | Phase 9 in progress — failure analysis and hardening. Phases 0–8 have passed their gates; Phase 9's degradation matrix and 14 failure cases are done, load and the security checklist are not |
+| **Implementation** | 841 backend tests (97% line coverage), 40 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) exists for evaluation; no TTS provider does, and the Claude adapter has never run against the live API. |
+| **Benchmarks** | Six suites have run, each recorded, reproducible from its record, and checked in CI, on small self-authored or synthetic datasets with their biases documented: language identification (0.9205 signal accuracy), retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893, 22 cases), agent tool gating (14/14 allowlist coverage, against a scripted model), prompt injection (19/19 attempted mutating calls blocked), the voice front end (a turn ends 575 ms after speech, in audio time, on synthetic speech) and recognition (English WER 0.123; synthetic Hindi not recognised as Hindi at all). Three experiments decided: EXP-003 rejected, EXP-008 and EXP-013 inconclusive. Full-stack latency is unmeasured. |
+| **Last updated** | 2026-09-29 |
 
-> **Latency is not measured yet.** Latency figures in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-> are *budgets* (design targets), not results. The quality numbers above come from recorded runs
-> of the eval suites, reported in [`docs/EVALUATION.md`](docs/EVALUATION.md) beside the command that
-> reproduces them and the dataset's biases; metrics there without a reported run are definitions,
-> not scores. `evaluation_runs` tracking arrives with Phase 8. See [Honesty rules](#honesty-rules).
+> **Full-stack latency is not measured yet.** Latency figures in
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) are *budgets* (design targets), not results; the one
+> measured timing is the voice front end's, in audio time on synthetic speech. Every number above is
+> a recorded run (`evaluation_runs`, MLflow), reported in [`docs/EVALUATION.md`](docs/EVALUATION.md)
+> beside the command that reproduces it and the dataset's biases; metrics there without a reported
+> run are definitions, not scores. Experiments are in [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md).
+> See [Honesty rules](#honesty-rules).
 
 ---
 
@@ -83,12 +85,13 @@ Full diagrams, the turn state machine, the barge-in protocol, and the latency bu
 **Frontend** Next.js 16 · React 19 · TypeScript · Tailwind 4 · Web Audio API (AudioWorklet)
 **Backend** Python 3.11 · FastAPI · Pydantic v2 · asyncio · WebSockets
 **Data** PostgreSQL 16 + pgvector · Redis 7 · SQLAlchemy 2 · Alembic
-**Voice** Silero VAD v6.2 · STT and TTS behind interfaces — only deterministic fakes exist so far
-(managed streaming providers are the plan, [ADR-0002](docs/adr/0002-stt-provider-strategy.md))
+**Voice** Silero VAD v6.2 · STT and TTS behind interfaces — faster-whisper for evaluation and local
+development, deterministic fakes otherwise (managed streaming providers are the plan,
+[ADR-0002](docs/adr/0002-stt-provider-strategy.md))
 **AI** Claude (`claude-opus-5`) via the Anthropic Python SDK · TF-IDF/SVD embeddings, standing in for
 multilingual-e5 ([ADR-0006](docs/adr/0006-embedding-model.md)) · reranker interface, off by default
-**Tests/Infra** pytest · Vitest · Playwright · Docker Compose · GitHub Actions — MLflow and
-OpenTelemetry arrive with Phase 8
+**Tests/Infra** pytest · Vitest · Playwright · Docker Compose · GitHub Actions (tiers T1–T3) · MLflow
+(evaluation runs) · OpenTelemetry (one trace per voice turn)
 
 Every model-facing component sits behind an interface (`STTProvider`, `TTSProvider`, `LLMProvider`,
 `EmbeddingProvider`, `RerankerProvider`, `VectorStore`) so that A/B comparison is a config change,
@@ -143,6 +146,22 @@ it used, kept in the session's history. Everything runs today against the determ
 TTS and LLM, so the words heard and spoken are placeholders: see [What is not
 verified](#what-works-today) below.
 
+**Phase 8 — evaluation, experiments, observability**
+- Every evaluation run is recorded — config, dataset digest, git SHA, every case — and runs again
+  from that record alone: `python -m eval.runner --reproduce RUN_ID`. CI re-runs every committed
+  config against its baseline on every push, on a machine that did not record it
+- The voice suite: the production voice session, with the real VAD, fed synthetic speech 20 ms at
+  a time and measured in audio time — when a question is heard, when its turn ends, whether the
+  student is cut off, whether noise becomes a turn. The recognition suite: faster-whisper, nightly
+- Experiments registered with their decision rule and a written prediction before either run:
+  semantic endpointing **rejected** (227 ms faster, but it cut off students who open with a
+  sentence), heading-path prefixing **inconclusive** ([EXPERIMENTS.md](docs/EXPERIMENTS.md))
+- One OpenTelemetry trace per voice turn, with its stages, and nothing the student said in it
+- The admin dashboard's evaluation runs, experiments and failing cases
+- Found on the way, and fixed: the turn detector was never consulted; a question cut off by a pause
+  was answered by halves; an interruption landing mid-query broke every later turn. Fourteen
+  defects in all, in [PHASE_8_AUDIT.md](docs/PHASE_8_AUDIT.md)
+
 **Phase 7 — the web app**
 - The voice session: live state and captions, Stop / Mute / Hang up, a typed fallback, the tools
   the mentor called, the sources it cited, and per-stage latency. The microphone is captured by an
@@ -172,7 +191,8 @@ verified](#what-works-today) below.
 **Phase 5 — RAG**
 - Structure-aware Markdown/PDF ingestion: headings define chunk boundaries, and each chunk's full
   heading path (`Unit 5 > Chapter 12 > 12.2 Displacement current`) is prefixed onto the text before
-  embedding — a cheap retrieval win, and what makes citations human-readable
+  embedding, and makes citations human-readable. Whether it helps retrieval, this corpus could not
+  show (EXP-008: inconclusive)
 - Hybrid retrieval — real pgvector HNSW cosine search fused with PostgreSQL full-text search via
   **Reciprocal Rank Fusion**, both arms independently testable for ablation
 - **A real, working embedder** (TF-IDF + truncated SVD) substituting for the originally-planned
@@ -244,10 +264,12 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
 
 **What is not verified.** These are the honest boundary of this project today:
 
-1. **No real ASR or TTS.** The voice loop is complete and *provider-less* — every mechanism is
-   tested and no word has been transcribed or synthesised by a real model. `build_stt`/`build_tts`
-   raise for anything but the fake, deliberately, so nothing can silently serve a fake in
-   production. ([M3-03](docs/PHASE_3_AUDIT.md))
+1. **No real TTS, and only a local recogniser.** No word has been synthesised by a real model. A
+   real recogniser exists — faster-whisper, for evaluation and local development
+   (`VAANIOS_STT_PROVIDER=faster-whisper`) — and has only ever heard synthetic speech: it runs in CI,
+   because its weights cannot be downloaded where this was built. The managed streaming recogniser
+   the real-time path needs does not exist. `build_stt`/`build_tts` raise for anything they do not
+   know, so nothing can silently serve a fake in production. ([M8-01](docs/PHASE_8_AUDIT.md))
 2. **The Claude adapter has never run against the live API** — no credential where it was built.
    Every parameter it sends was checked against the installed SDK's signatures;
    `backend/scripts/smoke_llm.py` is the live check. ([M2-01](docs/PHASE_2_AUDIT.md))
@@ -273,17 +295,21 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
 
 ## Evaluation approach
 
-Six independently runnable suites, so a regression can be attributed to a stage rather than to "the
-system":
+Independently runnable suites, so a regression can be attributed to a stage rather than to "the
+system". Six run today; two more need a live model ([M8-03](docs/PHASE_8_AUDIT.md)):
 
 ```
-stt · retrieval · agent-tools · response-quality · voice-latency · end-to-end
+lid · stt · retrieval · agent · injection · voice          (planned: response · e2e)
 ```
 
-Each suite consumes a versioned dataset, writes a row to `evaluation_runs`, and logs to MLflow with
-the git SHA. Changes that affect AI behaviour must ship as an experiment (baseline vs. candidate,
-one variable changed) recorded in `experiments`. Methodology, including the known weaknesses of WER
-for Tamil and romanized Hinglish and the self-preference bias of LLM judges, is in
+`python -m eval.runner --suite <name>` runs one over its versioned dataset; `--record` keeps the run
+— config, dataset digest, git SHA, every case — in `evaluation_runs` and MLflow, and `--reproduce
+RUN_ID` runs it again from that record alone. CI checks every committed config against its baseline
+on every push (the recogniser nightly, with its downloaded model). Changes that affect AI behaviour
+ship as an experiment: two configs differing in one knob, and a decision rule and a prediction
+registered before either run, decided and recorded in `experiments`
+([EXPERIMENTS.md](docs/EXPERIMENTS.md)). Methodology, including the known weaknesses of WER for
+Tamil and romanized Hinglish and the self-preference bias of LLM judges, is in
 [`docs/EVALUATION.md`](docs/EVALUATION.md).
 
 ## Honesty rules
@@ -305,8 +331,9 @@ These are architectural facts, not TODOs that will quietly disappear:
   TTS are not achievable on CPU; the real-time path therefore depends on managed providers, and
   local models are used for offline evaluation and deterministic CI. See
   [ADR-0002](docs/adr/0002-stt-provider-strategy.md), [ADR-0003](docs/adr/0003-tts-provider-strategy.md).
-- **Whisper is not a streaming model.** Partial transcripts come from a chunked pseudo-streaming
-  policy (LocalAgreement) and are unstable by construction. See [ADR-0002](docs/adr/0002-stt-provider-strategy.md).
+- **Whisper is not a streaming model.** The local adapter transcribes each utterance once, when it
+  ends, so it sends no partial transcripts; a chunked pseudo-streaming policy (LocalAgreement) would
+  give unstable ones, and is not built. See [ADR-0002](docs/adr/0002-stt-provider-strategy.md).
 - **Lexical retrieval is weak for Devanagari and Tamil script** because PostgreSQL ships no stemmer
   for either. See [ADR-0005](docs/adr/0005-vector-store-pgvector.md), [M-02 in the audit](docs/PHASE_0_AUDIT.md).
 - **The lexical retrieval arm has no IDF weighting.** PostgreSQL's `ts_rank_cd` is cover-density
