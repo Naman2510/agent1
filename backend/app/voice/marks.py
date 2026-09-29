@@ -49,13 +49,13 @@ class TurnMarks:
     clock: Callable[[], float] = time.perf_counter
     marks: dict[str, float] = field(default_factory=dict)
 
-    def mark(self, name: str) -> None:
-        """Record a boundary. The first occurrence wins.
+    def mark(self, name: str, *, ago_ms: int = 0) -> None:
+        """Record a boundary, now or `ago_ms` before now. The first occurrence wins.
 
         Deliberate: a turn's `llm_first_token` is the *first* token, and a retry or a second
         content block must not overwrite it and flatter the measurement.
         """
-        self.marks.setdefault(name, self.clock())
+        self.marks.setdefault(name, self.clock() - ago_ms / 1000)
 
     def has(self, name: str) -> bool:
         return name in self.marks

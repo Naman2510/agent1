@@ -385,6 +385,31 @@ async def test_metrics_include_time_to_first_audio_once_the_client_acks(
     assert marks["ttfa_ms"] >= 0
 
 
+async def test_the_turn_end_wait_is_measured_from_when_the_student_stopped(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """Speech end was stamped when the gate *decided* the utterance was over, so every turn
+    reported `turn_end_ms` 0, and TTFA without the endpointing wait. On a clock that never moves,
+    the wait is now exactly the silence the gate counted: 16 windows of 32 ms."""
+    student_id, session_id = student_and_session
+    voice, transport, _tts = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=speech_timeline(silence_ms=64, speech_ms=800, trailing_silence_ms=800),
+        clock=FakeClock(),
+    )
+    await voice.start()
+    await _feed(voice, 90)
+    await voice.wait_for_turn()
+
+    marks = transport.of_type("metrics")[-1]["latency_ms"]
+    assert marks["turn_end_ms"] == 512
+    assert marks["ttfa_ms"] >= marks["turn_end_ms"], "the student's wait includes it"
+
+
 # --- barge-in ---------------------------------------------------------------
 #
 # These interrupt a turn that is genuinely *in flight*. Interrupting after the turn has finished

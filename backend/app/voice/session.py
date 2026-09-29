@@ -270,13 +270,19 @@ class VoiceSession:
                 outcome = self._detector.on_silence(window_ms, stable_prefix=self._stable_prefix)
                 if outcome.ended and self._capturing:
                     self.vad.end_run()
-                    await self._end_utterance(reason=outcome.reason, speech_ms=decision.run_ms)
+                    await self._end_utterance(
+                        reason=outcome.reason, speech_ms=decision.run_ms, pause_ms=decision.pause_ms
+                    )
         elif decision.event is VadEvent.SPEECH_END:
-            await self._end_utterance(reason="speech_end", speech_ms=decision.run_ms)
+            await self._end_utterance(
+                reason="speech_end", speech_ms=decision.run_ms, pause_ms=decision.pause_ms
+            )
         elif self._capturing:
             outcome = self._detector.on_silence(window_ms)
             if outcome.ended:
-                await self._end_utterance(reason=outcome.reason, speech_ms=self._speech_ms)
+                await self._end_utterance(
+                    reason=outcome.reason, speech_ms=self._speech_ms, pause_ms=outcome.waited_ms
+                )
 
     async def _on_speech_start(self) -> None:
         interrupting = self.machine.is_interruptible
@@ -301,12 +307,17 @@ class VoiceSession:
         self._stable_prefix = ""
         self._stt_task = asyncio.create_task(self._transcribe(frames))
 
-    async def _end_utterance(self, *, reason: str, speech_ms: int | None = None) -> None:
+    async def _end_utterance(
+        self, *, reason: str, speech_ms: int | None = None, pause_ms: int = 0
+    ) -> None:
         if not self._capturing:
             return
         self._capturing = False
         self._marks = TurnMarks(clock=self.clock)
-        self._marks.mark(stage.SPEECH_END)
+        # When the student stopped speaking: the pause that ended the utterance ago, not now.
+        # Stamped at the decision, every turn reported `turn_end_ms` 0 and a TTFA short by the
+        # whole endpointing wait — the half second ARCHITECTURE §9 says dominates.
+        self._marks.mark(stage.SPEECH_END, ago_ms=pause_ms)
         self._utterance = bytearray()
 
         # Measured from the VAD's confirmed speech run, NOT from the buffered audio: the 500 ms

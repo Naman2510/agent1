@@ -42,8 +42,9 @@ class VadDecision:
     # Duration of the run that has just ended, for speech_end; of speech so far, otherwise.
     run_ms: int = 0
     # How long speech has been below the exit threshold inside a confirmed run: a pause that is
-    # not yet the end of the run. Zero on a window that was speech. The session asks its turn
-    # detector about these windows, which may end the turn before the gate's own timeout.
+    # not yet the end of the run (the session asks its turn detector about these windows, which may
+    # end the turn before the gate's own timeout), or, on speech_end, the silence that ended it.
+    # Zero on a window that was speech.
     pause_ms: int = 0
 
 
@@ -140,6 +141,7 @@ class VadGate:
             return VadDecision(event, probability, self._speech_ms, pause_ms=self._silence_ms)
 
         spoken = self._speech_ms
+        silence = self._silence_ms
         announced = self._announced
         self._in_speech = False
         self._speech_ms = 0
@@ -148,7 +150,8 @@ class VadGate:
         if not announced:
             # The run never qualified as speech: no start was emitted, so emit no end.
             return VadDecision(VadEvent.SILENCE, probability, spoken)
-        return VadDecision(VadEvent.SPEECH_END, probability, spoken)
+        # With the silence that ended it: the speech itself stopped that long ago.
+        return VadDecision(VadEvent.SPEECH_END, probability, spoken, pause_ms=silence)
 
 
 # The trailing samples of the previous window that Silero (v5 onward) prepends to each one, at
