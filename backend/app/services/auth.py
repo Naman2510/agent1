@@ -50,7 +50,7 @@ class AuthService:
     async def register(
         self, *, email: str, password: str, display_name: str, semester: int | None
     ) -> tuple[User, Student]:
-        password_hash = self._hasher.hash(password)
+        password_hash = await self._hasher.hash_async(password)
         try:
             user = await self._users.create(email=email, password_hash=password_hash)
             student = await self._students.create(
@@ -73,15 +73,16 @@ class AuthService:
         user = await self._users.get_by_email(email)
         if user is None:
             # Hash anyway so a missing account and a wrong password take comparable time.
-            self._hasher.hash(password)
+            await self._hasher.hash_async(password)
             raise InvalidCredentialsError
-        if not self._hasher.verify(user.password_hash, password):
+        if not await self._hasher.verify_async(user.password_hash, password):
             raise InvalidCredentialsError
         if not user.is_active:
             raise AuthenticationError("This account is disabled.")
 
         if self._hasher.needs_rehash(user.password_hash):
-            await self._users.update_password_hash(user.id, self._hasher.hash(password))
+            rehashed = await self._hasher.hash_async(password)
+            await self._users.update_password_hash(user.id, rehashed)
 
         student = await self._students.get_by_user_id(user.id)
         return await self._issue_pair(

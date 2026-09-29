@@ -5,6 +5,7 @@ tokens. Refresh tokens are opaque random strings — never JWTs — so that revo
 fact rather than a claim we have to trust.
 """
 
+import asyncio
 import hashlib
 import secrets
 import uuid
@@ -38,6 +39,16 @@ class PasswordHasherService:
             return self._hasher.verify(password_hash, password)
         except (VerifyMismatchError, VerificationError, InvalidHashError):
             return False
+
+    # Argon2 is deliberately slow — about 20 ms of CPU per call at the production cost — and on
+    # the event loop that is 20 ms in which no voice session on this worker hears or says anything.
+    # argon2-cffi releases the GIL, so on a thread it costs the loop nothing.
+
+    async def hash_async(self, password: str) -> str:
+        return await asyncio.to_thread(self.hash, password)
+
+    async def verify_async(self, password_hash: str, password: str) -> bool:
+        return await asyncio.to_thread(self.verify, password_hash, password)
 
     def needs_rehash(self, password_hash: str) -> bool:
         try:

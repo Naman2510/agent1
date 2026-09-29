@@ -114,3 +114,30 @@ def test_refresh_tokens_are_opaque_high_entropy_and_stored_hashed() -> None:
     assert raw_a.count(".") == 0, "opaque, not a JWT: revocation must be a database fact"
     assert hash_a == hash_refresh_token(raw_a)
     assert raw_a not in hash_a
+
+
+async def test_hashing_leaves_the_event_loop_free(settings: Settings) -> None:
+    """At the production cost a hash is ~20 ms of CPU. On the event loop, each login stalled every
+    voice session on the worker for that long; on a thread, the loop keeps running beside it."""
+    import asyncio
+
+    hasher = PasswordHasherService(
+        settings.model_copy(
+            update={"argon2_time_cost": 3, "argon2_memory_cost_kib": 65536, "argon2_parallelism": 1}
+        )
+    )
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.001)
+            ticks += 1
+
+    ticker = asyncio.create_task(tick())
+    await asyncio.sleep(0)
+    digest = await hasher.hash_async("correct-horse-battery-staple")
+    assert await hasher.verify_async(digest, "correct-horse-battery-staple")
+    assert not await hasher.verify_async(digest, "wrong")
+    ticker.cancel()
+    assert ticks >= 10, f"the loop ran {ticks} times while hashing three times"
