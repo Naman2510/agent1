@@ -15,6 +15,7 @@ on:
       - "backend/eval/configs/stt*.toml"
       - "backend/eval/experiments/**"
       - "backend/eval/baselines/stt*.json"
+      - "backend/constraints.txt"
       - "backend/app/providers/stt/**"
       - "datasets/v1/voice/**"
       - ".github/workflows/nightly.yml"
@@ -36,12 +37,14 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/constraints.txt
       - name: Install
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[eval,voice-local]"
+          pip install -c constraints.txt -e ".[eval,voice-local]"
       - name: Cache the recogniser's weights
         uses: actions/cache@v4
         with:
