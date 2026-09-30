@@ -171,8 +171,9 @@ M9-04). The first run under that check (ac725cb) was given a third model, an AMD
 AVX-512, and differed with every pin in place, so the check was needed. Both AVX-512 runners had
 the same English WER. That led to two more CPU-dependent steps in the recogniser's input, measured
 locally: numpy's kernels and OpenBLAS's kernels and thread count, in faster-whisper's feature
-extraction. They are pinned too, from the process's start. FC-006 is accepted as a limitation on
-these terms.
+extraction. They are pinned too, from the process's start. On the 7763 they select what it
+chooses unpinned, which the next run there showed, with both baselines matching exactly. FC-006 is
+accepted as a limitation on these terms.
 
 **D9-22 — CI's results were not read for a day.** *Major (process).* Four pushes went out while
 CI was red: first on D9-19, then, behind it, on D9-20 and on the personal-data scan matching its
@@ -204,11 +205,11 @@ M8-03.
 
 **M9-04 — The recogniser's baselines across CPU models.** *Accepted, with T2 changed to match.*
 The pins now cover every CPU-dependent step found (D9-21): CTranslate2, MKL, oneDNN, numpy and
-OpenBLAS. They were not enough: an AMD EPYC 9V74 differed with the oneDNN pin in place, and the
-libraries' own documentation promises no more. The numpy and OpenBLAS pins came after that run.
-MKL's COMPATIBLE mode would cover MKL, at about five times the cost, and not oneDNN. A tolerance
+OpenBLAS. Before the last two were added, an AMD EPYC 9V74 differed with every other pin in place.
+Whether all five are enough there, or on Intel, is unseen, and the libraries' own documentation
+promises no more. MKL's COMPATIBLE mode would cover MKL, at about five times the cost, and not oneDNN. A tolerance
 wide enough for the runs seen (Hindi WER moved by up to 0.17) would hide a regression. So the stt
-baselines are the AMD EPYC 7763's, the CPU of three of the five T2 runners that logged theirs, and
+baselines are the AMD EPYC 7763's, the CPU of four of the six T2 runners that logged theirs, and
 are enforced exactly there. On any other CPU model a run is compared and reported, not enforced.
 The next Intel or AVX-512 runner shows whether the pins are now enough, without turning T2 red
 either way. FC-006.

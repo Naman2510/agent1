@@ -146,7 +146,7 @@ every other model as evidence rather than a verdict:
   machines. If it differs, the result is exit code 3: the differences are listed, and T2 raises a
   warning instead of failing. A regression and the hardware cannot be told apart there. A failure
   anywhere else in the same run is never hidden behind a code 3 (`recording.worst`).
-- **The numbers in EVALUATION.md and EXPERIMENTS.md are the AMD EPYC 7763's.** Three of the five
+- **The numbers in EVALUATION.md and EXPERIMENTS.md are the AMD EPYC 7763's.** Four of the six
   T2 runs that logged their CPU were given that model, so it is the one an exact check is most
   likely to get.
 
@@ -191,7 +191,9 @@ suite can pin anything, so T2 starts the process with them (`STARTUP_PINS`):
 suite's. Each is what the EPYC 7763 chose unpinned: it has no AVX-512, and numpy ignores disabling
 what a CPU lacks; OpenBLAS gives a Zen CPU its Haswell kernels; its runner has four vCPUs. So the
 baselines keep their numbers, amended again. T2 now logs numpy's and OpenBLAS's choices with and
-without the pins, so the next run on the 7763 will show whether the pins changed anything there.
+without the pins. The next run (eb67b97) was on the 7763. Unpinned, numpy dispatched to `X86_V3`
+only and OpenBLAS chose its Haswell kernels on 4 threads, the same as pinned. Both baselines
+matched to the last digit, with the new pins recorded, and so did EXP-013 (+0.0725).
 
 **Not yet shown:** whether the AVX-512 runners now agree with the 7763. MKL still runs its
 automatic path on AMD and its AVX2 mode on Intel, and oneDNN still promises nothing across
