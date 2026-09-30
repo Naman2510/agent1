@@ -109,13 +109,15 @@ the arithmetic followed the CPU. Now each utterance is decoded by a seeded model
 arithmetic is pinned (and recorded in the summary, with the CPU model), and every T2 run checks
 both configs' baselines (`backend/eval/baselines/stt*.json`). On the AMD EPYC 7763 that computed
 them they reproduce to the last digit: the language-hint one on two more runners, the other on
-one. The first Intel runner (Xeon Platinum 8573C, AVX-512) reproduced neither: English WER 0.127
-against 0.123, Hindi 1.255 against 1.425. One cause is pinned since (oneDNN inside CTranslate2
-chose AVX-512 convolution kernels there), but neither library promises the same numbers across
-CPU models: MKL honours its reproducible AVX2 mode on Intel CPUs only, and oneDNN promises
-identical results only on identical hardware. So a baseline is enforced on the CPU model that
-computed it and compared on any other, where a difference is reported, not failed (FC-006). The
-numbers below are the AMD EPYC 7763's. What it measures is a recogniser hearing eSpeak — useful
+one. Two other CPU models reproduced neither. The first Intel runner (Xeon Platinum 8573C,
+AVX-512) got English WER 0.127 against 0.123 and Hindi 1.255 against 1.425. An AMD EPYC 9V74 with
+AVX-512 got English 0.127 and Hindi 1.447, with every pin then in place. The pins now cover
+CTranslate2, MKL and oneDNN (from inside the suite), and numpy and OpenBLAS, which compute the
+features (from the process's start: T2 sets them). Neither MKL nor oneDNN promises the same
+numbers across CPU models: MKL honours its reproducible AVX2 mode on Intel CPUs only, and oneDNN
+promises identical results only on identical hardware. So a baseline is enforced on the CPU model
+that computed it and compared on any other, where a difference is reported, not failed (FC-006).
+The numbers below are the AMD EPYC 7763's. What it measures is a recogniser hearing eSpeak — useful
 for comparing recognisers and settings, not a statement about anyone's voice. Its normalisation today is case, apostrophes and punctuation only: no numeral
 expansion, no spelling-variant map (below).
 

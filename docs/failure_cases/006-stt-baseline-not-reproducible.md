@@ -1,9 +1,9 @@
 # FC-006 — A speech-recognition baseline no other machine could reproduce
 
 **Status:** fixed on one CPU model, and accepted as a limitation across CPU models. Runs on the
-AMD EPYC 7763 agree to the last digit (three for one config, two for the other). Across CPU models
-neither library in the arithmetic promises the same numbers, so a baseline computed on another
-model is compared, not enforced (below). Whether an Intel runner now agrees is still unseen.
+AMD EPYC 7763 agree to the last digit (three for one config, two for the other). Two other CPU
+models have differed, one of them with every pin in place, and neither library in the arithmetic
+promises more. So a baseline computed on another model is compared, not enforced (below).
 **Found:** 2026-09-27 · **Phase:** 8 (PHASE_8_AUDIT D8-15) · **Component:** evaluation (stt)
 **Severity:** major — a baseline that does not reproduce cannot catch a regression
 **Case IDs:** the whole `stt` suite, dataset v1
@@ -146,7 +146,7 @@ every other model as evidence rather than a verdict:
   machines. If it differs, the result is exit code 3: the differences are listed, and T2 raises a
   warning instead of failing. A regression and the hardware cannot be told apart there. A failure
   anywhere else in the same run is never hidden behind a code 3 (`recording.worst`).
-- **The numbers in EVALUATION.md and EXPERIMENTS.md are the AMD EPYC 7763's.** Three of the four
+- **The numbers in EVALUATION.md and EXPERIMENTS.md are the AMD EPYC 7763's.** Three of the five
   T2 runs that logged their CPU were given that model, so it is the one an exact check is most
   likely to get.
 
@@ -154,3 +154,45 @@ The next T2 run on an Intel runner will show whether the cap was the only cause.
 check passes and says it matched on both machines; if not, it warns with the differences. Either
 way T2 no longer turns red because of the CPU it happens to be given, and it still catches a
 changed transcript on the CPU the baselines came from.
+
+## A third CPU model, and two more steps that follow the CPU (Phase 9)
+
+The first run with the new check (ac725cb) was given a third CPU model: an AMD EPYC 9V74, a Zen 4
+with AVX-512. Every pin was in place, and oneDNN again ran `brgconv:avx2`. Both baselines differed,
+and the check did what it was built for: it listed the differences, exited 3, and T2 warned
+instead of failing.
+
+```
+                         EPYC 7763 (baseline)   Xeon 8573C (4b3159a)   EPYC 9V74 (ac725cb)
+stt              en WER  0.1227                 0.1273                 0.1273
+                 hi WER  1.4255                 1.2553                 1.4468
+                 all WER 0.4465                 0.4245                 0.4497
+stt-language-hint hi WER 0.9574                 0.9362                 1.0
+EXP-013 gain             +0.073                 +0.047                 +0.067
+```
+
+So the pins do not make two CPU models agree, even two from one vendor. EXP-013's decision was
+the same on all three (inconclusive), with the gain between +0.047 and +0.073.
+
+The two AVX-512 machines gave the same English WER, which points at a step that uses AVX-512
+wherever it exists and that no pin reached. The recogniser's input is such a step. faster-whisper
+computes the log-mel features in numpy, before CTranslate2 sees anything. Measured on an AVX-512
+Xeon over 12 of the dataset's clips, each of these changed the features:
+
+- numpy's own kernels (`np.abs`, `np.log10`): it dispatches to AVX-512 where it finds it;
+- OpenBLAS, which runs the mel filterbank's matrix product: SkylakeX kernels on AVX-512, and its
+  thread count, since one thread and four gave different features.
+
+Four settings gave four different feature hashes. Forcing OpenBLAS's `Zen` core type gave its
+`Haswell` kernels, with the same features as `Haswell`. These are read when numpy loads, before the
+suite can pin anything, so T2 starts the process with them (`STARTUP_PINS`):
+`NPY_DISABLE_CPU_FEATURES=X86_V4,AVX512_ICL,AVX512_SPR`, `OPENBLAS_CORETYPE=Haswell` and
+`OPENBLAS_NUM_THREADS=4`. The summary records them, and a test holds the workflow's values to the
+suite's. Each is what the EPYC 7763 chose unpinned: it has no AVX-512, and numpy ignores disabling
+what a CPU lacks; OpenBLAS gives a Zen CPU its Haswell kernels; its runner has four vCPUs. So the
+baselines keep their numbers, amended again. T2 now logs numpy's and OpenBLAS's choices with and
+without the pins, so the next run on the 7763 will show whether the pins changed anything there.
+
+**Not yet shown:** whether the AVX-512 runners now agree with the 7763. MKL still runs its
+automatic path on AMD and its AVX2 mode on Intel, and oneDNN still promises nothing across
+hardware. So the check stays as it is: exact on the baselines' CPU model, compared on the rest.

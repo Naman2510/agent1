@@ -150,7 +150,9 @@ runner reproduced neither baseline, and the comparison came out +0.047 (95% CI [
 against +0.073 here, with the same decision. Its arithmetic differed from the AMD runner's (FC-006),
 so the gain's size depends on the machine, within a range that does not change the decision. The
 next run on an AMD EPYC 7763 (d7f415e), with oneDNN's kernels pinned too, reproduced +0.0725,
-[+0.0265, +0.1271], 8 better and 0 worse, exactly.
+[+0.0265, +0.1271], 8 better and 0 worse, exactly. On a third CPU model, an AMD EPYC 9V74
+(ac725cb), it came out +0.0669, [+0.0076, +0.1679], 5 better and 0 worse. The decision was the same
+on all three models.
 
 | | Auto-detected | Told the routed language |
 |---|---|---|

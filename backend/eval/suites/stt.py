@@ -167,17 +167,32 @@ NUMERICS = {
     "ONEDNN_MAX_CPU_ISA": "AVX2",
 }
 
+# The recogniser's input is computed before any of that: faster-whisper's log-mel features, in
+# numpy, whose own code (np.abs, np.log10) and whose OpenBLAS (the mel filterbank's product) each
+# pick their kernels by CPU, and OpenBLAS splits the product by thread count. On an AVX-512 Xeon,
+# each of these changed the features (FC-006). They are read when numpy loads, before this module
+# runs, so they are set by whoever starts the process (CI tier T2 does), and recorded as they
+# were. Each is what the AMD EPYC 7763 that computed the baselines chose by itself: it has no
+# AVX-512 (numpy ignores disabling what a CPU lacks), OpenBLAS gives a Zen CPU its Haswell
+# kernels, and it has four vCPUs.
+STARTUP_PINS = {
+    "NPY_DISABLE_CPU_FEATURES": "X86_V4,AVX512_ICL,AVX512_SPR",
+    "OPENBLAS_CORETYPE": "Haswell",
+    "OPENBLAS_NUM_THREADS": "4",
+}
+
 
 def pin_numerics() -> None:
     """Pin the arithmetic (NUMERICS) on x86-64; elsewhere there is nothing to pin it to, and the
-    run's summary says so (`numerics`)."""
+    run's summary says so (`numerics`). STARTUP_PINS cannot be pinned from here: set now, they
+    would be recorded without having taken effect."""
     if platform.machine().lower() in {"x86_64", "amd64"}:
         os.environ.update(NUMERICS)
 
 
 def numerics() -> dict[str, str | None]:
     """The pins in effect, for the summary: a baseline says how its numbers were computed."""
-    return {name: os.environ.get(name) for name in NUMERICS}
+    return {name: os.environ.get(name) for name in (*NUMERICS, *STARTUP_PINS)}
 
 
 def machine(cpuinfo: Path = Path("/proc/cpuinfo")) -> str:

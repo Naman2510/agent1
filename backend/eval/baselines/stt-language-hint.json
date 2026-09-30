@@ -1,7 +1,8 @@
 {
   "amended": [
     "Phase 9: ONEDNN_MAX_CPU_ISA=AVX2 added to the recorded pins. On the AMD EPYC 7763 that recorded this baseline, which has no AVX-512, oneDNN's kernels were AVX2 already, so the metrics stand as recorded; the next T2 run checks that (FC-006).",
-    "Phase 9: the machine added to the summary, as every run now records it. This baseline was computed on an AMD EPYC 7763 64-Core Processor, as the T2 log of the run that recorded it shows; a third run on that CPU model, with the oneDNN pin (d7f415e), reproduced it exactly. A run on another CPU model is compared with it, not held to it (FC-006)."
+    "Phase 9: the machine added to the summary, as every run now records it. This baseline was computed on an AMD EPYC 7763 64-Core Processor, as the T2 log of the run that recorded it shows; a third run on that CPU model, with the oneDNN pin (d7f415e), reproduced it exactly. A run on another CPU model is compared with it, not held to it (FC-006).",
+    "Phase 9: numpy's and OpenBLAS's pins added to the recorded pins (STARTUP_PINS, FC-006). On the AMD EPYC 7763 that computed this baseline each selects what it selected unpinned: it has no AVX-512 for numpy to dispatch to, and numpy ignores disabling what a CPU lacks; OpenBLAS gives a Zen CPU its Haswell kernels; and its runner has four vCPUs, OpenBLAS's default thread count. So the metrics stand as recorded. T2 now logs both choices with and without the pins, and the next run on that CPU model checks this."
   ],
   "config": {
     "recogniser": {
@@ -57,7 +58,10 @@
       "CT2_FORCE_CPU_ISA": "AVX2",
       "CT2_USE_MKL": "1",
       "MKL_CBWR": "AVX2",
-      "ONEDNN_MAX_CPU_ISA": "AVX2"
+      "NPY_DISABLE_CPU_FEATURES": "X86_V4,AVX512_ICL,AVX512_SPR",
+      "ONEDNN_MAX_CPU_ISA": "AVX2",
+      "OPENBLAS_CORETYPE": "Haswell",
+      "OPENBLAS_NUM_THREADS": "4"
     },
     "wer": 0.3774
   }

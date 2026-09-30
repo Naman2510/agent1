@@ -31,6 +31,13 @@ jobs:
   stt:
     name: Speech recognition, local model (stt)
     runs-on: ubuntu-latest
+    # numpy and OpenBLAS pick their kernels, and OpenBLAS its threads, when they load, before the
+    # suite can pin anything: so the process starts with them (eval/suites/stt.py STARTUP_PINS,
+    # which a test holds to these). Each is what the AMD EPYC 7763 behind the baselines chose itself.
+    env:
+      NPY_DISABLE_CPU_FEATURES: "X86_V4,AVX512_ICL,AVX512_SPR"
+      OPENBLAS_CORETYPE: "Haswell"
+      OPENBLAS_NUM_THREADS: "4"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,12 +59,16 @@ jobs:
           key: whisper-${{ hashFiles('backend/eval/configs/stt.toml') }}
       # Two runners once computed different transcripts from the same audio (PHASE_8_AUDIT
       # D8-15). The suite pins the arithmetic itself (eval/suites/stt.py NUMERICS); this records
-      # the machine, and which kernels CTranslate2 and MKL chose under those pins.
+      # the machine, and which kernels numpy, OpenBLAS, CTranslate2 and MKL chose under the pins.
       - name: Which machine, and which kernels
         working-directory: backend
         run: |
           set -o pipefail
-          lscpu | grep -E '^(Model name|Flags)' | cut -c1-200 | tee t2-report.txt
+          lscpu | grep -E '^(Model name|CPU\(s\)|Flags)' | cut -c1-200 | tee t2-report.txt
+          # What numpy and OpenBLAS choose on this machine without the job's pins, and with them.
+          probe='import numpy._core._multiarray_umath as m, threadpoolctl; print("numpy dispatch", [t for t in m.__cpu_dispatch__ if m.__cpu_features__.get(t)], "OpenBLAS", [(i.get("architecture"), i.get("num_threads")) for i in threadpoolctl.threadpool_info() if i.get("internal_api") == "openblas"])'
+          echo "unpinned: $(env -u NPY_DISABLE_CPU_FEATURES -u OPENBLAS_CORETYPE -u OPENBLAS_NUM_THREADS python -c "$probe")" | tee -a t2-report.txt
+          echo "pinned:   $(python -c "$probe")" | tee -a t2-report.txt
           # oneDNN (inside CTranslate2) runs the encoder's convolutions and names the kernel it used.
           CT2_VERBOSE=1 ONEDNN_VERBOSE=1 python - <<'EOF' 2>&1 | { grep -E 'CPU:|ISA|MKL|backend|WARNING|onednn_verbose,(info,cpu,isa|exec,cpu,convolution)' || true; } | cut -c1-160 | sort -u | tee -a t2-report.txt
           import numpy as np

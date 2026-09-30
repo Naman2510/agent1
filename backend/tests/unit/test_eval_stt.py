@@ -172,7 +172,7 @@ def test_the_run_passes_each_case_its_language() -> None:
 def test_the_arithmetic_is_pinned_on_x86_and_the_summary_says_either_way(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    for name in stt.NUMERICS:
+    for name in (*stt.NUMERICS, *stt.STARTUP_PINS):
         monkeypatch.setenv(name, "left by the caller")  # and restored afterwards
     monkeypatch.setattr(stt.platform, "machine", lambda: "arm64")
     stt.pin_numerics()
@@ -180,7 +180,29 @@ def test_the_arithmetic_is_pinned_on_x86_and_the_summary_says_either_way(
 
     monkeypatch.setattr(stt.platform, "machine", lambda: "x86_64")
     stt.pin_numerics()
-    assert stt.numerics() == stt.NUMERICS, "pinned over whatever the environment said"
+    assert stt.numerics() == {
+        **stt.NUMERICS,
+        **dict.fromkeys(stt.STARTUP_PINS, "left by the caller"),
+    }, "pinned over whatever the environment said, except what only takes effect at startup"
+
+
+def test_what_takes_effect_only_at_startup_is_recorded_as_the_process_began(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """numpy and OpenBLAS read these when they load; set later, they would change nothing, and a
+    baseline recording them would describe arithmetic that never ran (FC-006)."""
+    for name in stt.STARTUP_PINS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(stt.platform, "machine", lambda: "x86_64")
+    stt.pin_numerics()
+    assert {name: stt.numerics()[name] for name in stt.STARTUP_PINS} == dict.fromkeys(
+        stt.STARTUP_PINS
+    )
+
+    # T2 starts the process with the pins the suite records.
+    nightly = (Path(__file__).parents[3] / ".github" / "workflows" / "nightly.yml").read_text()
+    for name, value in stt.STARTUP_PINS.items():
+        assert f'{name}: "{value}"' in nightly, name
 
 
 def test_a_run_names_the_cpu_model_it_was_computed_on(
@@ -243,14 +265,15 @@ def test_the_suite_records_each_case_and_how_its_arithmetic_was_pinned(
 
     monkeypatch.setattr(stt, "faster_whisper_recogniser", recogniser)
     monkeypatch.setattr(stt, "machine", lambda: "the CI runner's CPU")
-    for name in stt.NUMERICS:
+    for name in (*stt.NUMERICS, *stt.STARTUP_PINS):
         monkeypatch.setenv(name, "as pinned")
     config = {"suite": "stt", "recogniser": {"language": "hint"}}
 
     outcome = asyncio.run(harness._evaluate_stt(config, DATASETS / "v1", False, None))
 
     assert outcome.summary["wer"] == 0.0 and outcome.summary["cases"] == 66
-    assert outcome.summary["numerics"] == dict.fromkeys(stt.NUMERICS, "as pinned")
+    pins = (*stt.NUMERICS, *stt.STARTUP_PINS)
+    assert outcome.summary["numerics"] == dict.fromkeys(pins, "as pinned")
     assert outcome.summary["machine"] == "the CI runner's CPU"
     assert "machine     the CI runner's CPU" in outcome.report
     hindi = next(c for c in outcome.cases if c.language == "hi")

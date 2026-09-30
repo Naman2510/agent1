@@ -162,13 +162,17 @@ neither baseline written on the AMD EPYC 7763, with the same library versions an
 reported kernels. English WER was 0.1273 against 0.1227, and EXP-013's gain +0.047 against +0.073,
 with the same decision. One cause was found: oneDNN, inside CTranslate2, runs the encoder's
 convolutions with kernels of its own choosing, AVX-512 on that machine. It is now pinned to AVX2,
-and the next run (d7f415e, on the AMD model again) matched both baselines exactly. Whether the pin
-is enough on Intel is not yet shown, and neither library promises it would be. MKL honours its reproducible
-AVX2 mode on Intel CPUs only, and runs its automatic path on AMD. oneDNN promises identical results
-only on identical hardware. So a run now records its CPU model, and a baseline is enforced on the
-model that computed it and compared on any other: a difference there is reported with both
-machines named, and T2 warns instead of failing (§3, M9-04). FC-006 is accepted as a limitation on
-those terms.
+and the next run (d7f415e, on the AMD model again) matched both baselines exactly. Neither library
+promises more. MKL honours its reproducible AVX2 mode on Intel CPUs only, and runs its automatic
+path on AMD. oneDNN promises identical results only on identical hardware. So a run now records its
+CPU model, and a baseline is enforced on the model that computed it and compared on any other: a
+difference there is reported with both machines named, and T2 warns instead of failing (§3,
+M9-04). The first run under that check (ac725cb) was given a third model, an AMD EPYC 9V74 with
+AVX-512, and differed with every pin in place, so the check was needed. Both AVX-512 runners had
+the same English WER. That led to two more CPU-dependent steps in the recogniser's input, measured
+locally: numpy's kernels and OpenBLAS's kernels and thread count, in faster-whisper's feature
+extraction. They are pinned too, from the process's start. FC-006 is accepted as a limitation on
+these terms.
 
 **D9-22 — CI's results were not read for a day.** *Major (process).* Four pushes went out while
 CI was red: first on D9-19, then, behind it, on D9-20 and on the personal-data scan matching its
@@ -198,14 +202,16 @@ for:* any claim about real students. *Scheduled:* the consented human slice (DAT
 **M9-03 — The `response` and `e2e` suites and a calibrated judge do not exist.** Carried from
 M8-03.
 
-**M9-04 — The recogniser's baselines across CPU vendors.** *Accepted, with T2 changed to match.*
-D9-21's pin removes the one difference measured. Whether it was the only one is still unseen, and
-the libraries' own documentation says it need not be (D9-21). MKL's COMPATIBLE mode would cover
-MKL, at about five times the cost, and not oneDNN. A tolerance wide enough for the Intel run
-(Hindi WER moved by 0.17) would hide a regression. So the stt baselines are the AMD EPYC 7763's,
-the CPU of three of the four T2 runners that logged theirs, and are enforced exactly there. On any
-other CPU model a run is compared and reported, not enforced. The next Intel runner shows whether the
-pin was enough, without turning T2 red either way. FC-006.
+**M9-04 — The recogniser's baselines across CPU models.** *Accepted, with T2 changed to match.*
+The pins now cover every CPU-dependent step found (D9-21): CTranslate2, MKL, oneDNN, numpy and
+OpenBLAS. They were not enough: an AMD EPYC 9V74 differed with the oneDNN pin in place, and the
+libraries' own documentation promises no more. The numpy and OpenBLAS pins came after that run.
+MKL's COMPATIBLE mode would cover MKL, at about five times the cost, and not oneDNN. A tolerance
+wide enough for the runs seen (Hindi WER moved by up to 0.17) would hide a regression. So the stt
+baselines are the AMD EPYC 7763's, the CPU of three of the five T2 runners that logged theirs, and
+are enforced exactly there. On any other CPU model a run is compared and reported, not enforced.
+The next Intel or AVX-512 runner shows whether the pins are now enough, without turning T2 red
+either way. FC-006.
 
 **M9-05 — Capacity past one process is designed, not measured.** One process serves about 50
 students. Beyond that the design is more processes behind session-sticky routing (ARCHITECTURE
@@ -260,16 +266,16 @@ CI.
 (D9-13 and D9-15), and one was a denial of service by a single client (D9-16).
 
 **Testing strategy.** Every code fix has a test that fails without it, checked by reverting the
-fix. The exception is D9-21's pin, whose evidence is the local probe and the unchanged AMD run
-after it; on Intel it is still to come. The check that replaced enforcing across CPU models has
-tests that fail when it is reverted. Two tests were made to fail fast instead of hanging when their fix is reverted.
-What CI caught (D9-19 to D9-21) was not a gap in the tests but in the environment they ran in:
-newer dependencies, and another CPU.
+fix. The exception is D9-21's pins, whose evidence is measurement: local probes of the encoder and
+of the features, and T2's runs. The check that replaced enforcing across CPU models has tests that
+fail when it is reverted, and a test holds T2's startup pins to the suite's. Two tests were made to
+fail fast instead of hanging when their fix is reverted. What CI caught (D9-19 to D9-21) was not a
+gap in the tests but in the environment they ran in: newer dependencies, and other CPUs.
 
 **Evaluation strategy.** The recogniser's reproducibility is recorded as it stands: exact on one
 CPU model, and compared, not enforced, across CPU models, which is as far as its libraries promise
-(M9-04). EXP-013's two runs are both recorded: the decision is
-the same, and the size of the gain depends on the machine.
+(M9-04). EXP-013 has run on three CPU models: the decision is the same on each, and the size of
+the gain depends on the machine (+0.047 to +0.073).
 
 ---
 
