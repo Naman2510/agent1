@@ -94,3 +94,29 @@ async def test_a_retrieval_is_a_span_without_the_query_in_it(
     assert span.attributes is not None
     assert span.attributes["rag.results"] == len(chunks)
     assert not any("loop" in str(v) for v in span.attributes.values())
+
+
+def test_fastapi_s_own_telemetry_stays_off_whatever_the_environment(
+    settings, _migrated_schema, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """FastAPI (0.142 on) instruments itself, and given the standard OTEL_* variables it adds OTLP
+    exporters of its own, whose logs record exception messages and validation failures — what
+    SECURITY.md §5 keeps out of telemetry. With those variables set, starting the application must
+    configure nothing: no logs, no metrics (and, in the tests above, no second server span)."""
+    import fakeredis.aioredis
+    from fastapi.testclient import TestClient
+    from opentelemetry import _logs, metrics
+
+    import app.main as main_module
+    from app.main import create_app
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setattr(
+        main_module,
+        "create_redis",
+        lambda _settings: fakeredis.aioredis.FakeRedis(decode_responses=True),
+    )
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/v1/health").status_code == 200
+    assert "Proxy" in type(_logs.get_logger_provider()).__name__
+    assert "Proxy" in type(metrics.get_meter_provider()).__name__

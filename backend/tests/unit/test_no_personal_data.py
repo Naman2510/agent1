@@ -64,11 +64,12 @@ def test_the_repository_holds_no_personal_data() -> None:
 
 def test_the_scan_would_notice_each_kind() -> None:
     """The patterns themselves: an empty result means nothing was there, not a blind scanner."""
+    # Built from pieces, so that this file does not itself hold what it scans for.
     samples = {
-        "email": "student.name@gmail.com",
-        "mobile number": "+91 98765 43210",
-        "Aadhaar": "2345 6789 0123",
-        "PAN": "ABCPE1234F",
+        "email": "someone" + "@" + "gmail.com",
+        "mobile number": "+91 98765" + " 43210",
+        "Aadhaar": "2345 6789" + " 0123",
+        "PAN": "ABCPE" + "1234F",
     }
     for kind, sample in samples.items():
         pattern = EMAIL if kind == "email" else PATTERNS[kind]

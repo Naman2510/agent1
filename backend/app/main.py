@@ -121,6 +121,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url=None if settings.is_production else "/docs",
         redoc_url=None,
         openapi_url=None if settings.is_production else "/openapi.json",
+        # FastAPI's own OpenTelemetry (0.142 on), off: tracing here is this application's
+        # (app/core/middleware.py, ADR-0014). Left on, it added a second server span to every
+        # request, and — given the standard OTEL_* variables — exporters of its own, whose logs
+        # record exception messages and validation failures: what SECURITY.md §5 keeps out.
+        telemetry={
+            "tracing": False,
+            "metrics": False,
+            "logs": False,
+            "operation_spans": False,
+            "auto_configure": False,
+        },
     )
     app.state.settings = settings
 
