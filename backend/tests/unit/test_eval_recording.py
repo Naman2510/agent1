@@ -136,6 +136,12 @@ def test_an_experiment_holds_each_run_to_its_baseline_writing_the_missing_ones(
     (baselines / "candidate.json").write_text(json.dumps(record))
     assert run() == 1
 
+    # A difference only the hardware explains (3) is reported, and never outranks a failure.
+    for codes, expected in (([1, 3], 1), ([3, 1], 1), ([3, 0], 3), ([0, 0], 0)):
+        answers = iter(codes)
+        monkeypatch.setattr(runner, "apply_baseline", lambda *args, a=answers: next(a))
+        assert run() == expected, codes
+
 
 # --- MLflow --------------------------------------------------------------------
 
@@ -273,6 +279,44 @@ def test_a_run_reproduces_its_committed_baseline_or_names_what_moved(
     code, lines = recording.check_baseline(spec, moved)
     assert code == 1
     assert "by.en" in lines[0]
+
+
+def test_a_baseline_from_another_cpu_model_is_compared_but_not_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stt suite's libraries promise the same numbers only on the same CPU model (FC-006)."""
+    from eval import recording
+
+    monkeypatch.setattr(recording, "BASELINES", tmp_path)
+    spec, outcome = _baseline_run({"wer": 0.4465, "machine": "AMD EPYC 7763"})
+    recording.write_baseline(spec, outcome, run_id=None)
+
+    _, moved = _baseline_run({"wer": 0.4182, "machine": "AMD EPYC 7763"})
+    assert recording.check_baseline(spec, moved)[0] == 1, "the same CPU model: held exactly"
+
+    _, same = _baseline_run({"wer": 0.4465, "machine": "Intel Xeon 8573C"})
+    code, lines = recording.check_baseline(spec, same)
+    assert code == 0, "another CPU model that agrees has reproduced it"
+    assert "on Intel Xeon 8573C as on AMD EPYC 7763" in lines[0]
+
+    _, elsewhere = _baseline_run({"wer": 0.4245, "machine": "Intel Xeon 8573C"})
+    code, lines = recording.check_baseline(spec, elsewhere)
+    assert code == 3, "differing on another CPU model is reported, not failed"
+    assert "AMD EPYC 7763" in lines[0] and "Intel Xeon 8573C" in lines[0]
+    assert not any(": machine was" in line for line in lines), "the machine is not a difference"
+    assert "wer was 0.4465" in lines[1] and "is 0.4245 now" in lines[1]
+
+    _, unrecorded = _baseline_run({"wer": 0.4465})
+    assert recording.check_baseline(spec, unrecorded)[0] == 1, "a machine that went unrecorded"
+
+
+def test_a_failure_is_never_hidden_behind_a_difference_the_hardware_explains() -> None:
+    from eval.recording import worst
+
+    assert worst(0, 3) == 3
+    assert worst(3, 1) == worst(1, 3) == 1
+    assert worst(3, 2) == worst(2, 1) == 2
+    assert worst(0) == 0
 
 
 def test_a_baseline_is_not_compared_across_changed_data_or_config(

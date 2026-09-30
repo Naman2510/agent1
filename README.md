@@ -11,7 +11,7 @@ voice pipeline rather than a thin wrapper around an LLM API.
 | | |
 |---|---|
 | **Current phase** | Roadmap complete: Phases 0–10 have passed their gates. Phase 10 decided not to fine-tune the intent classifier until its prompted baseline is measured ([ADR-0017](docs/adr/0017-intent-classifier-not-fine-tuned.md)). What is not true yet is listed in [PHASE_10_AUDIT.md](docs/PHASE_10_AUDIT.md) §3: above all, no real model has run in the loop |
-| **Implementation** | 862 backend tests (97% line coverage), 42 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) exists for evaluation; no TTS provider does, and the Claude adapter has never run against the live API. |
+| **Implementation** | 865 backend tests (97% line coverage), 42 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) exists for evaluation; no TTS provider does, and the Claude adapter has never run against the live API. |
 | **Benchmarks** | Six suites have run, each recorded, reproducible from its record, and checked in CI, on small self-authored or synthetic datasets with their biases documented: language identification (0.9205 signal accuracy), retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893, 22 cases), agent tool gating (14/14 allowlist coverage, against a scripted model), prompt injection (19/19 attempted mutating calls blocked), the voice front end (a turn ends 575 ms after speech, in audio time, on synthetic speech) and recognition (English WER 0.123; synthetic Hindi not recognised as Hindi at all). Three experiments decided: EXP-003 rejected, EXP-008 and EXP-013 inconclusive. Full-stack latency is unmeasured. |
 | **Last updated** | 2026-09-30 |
 
@@ -126,7 +126,7 @@ cd backend
 pip install -c constraints.txt -e ".[dev,rag,eval]"   # the versions CI tests
 export VAANIOS_TEST_DATABASE_URL=postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
 bash scripts/fetch_models.sh    # Silero VAD weights (not committed)
-pytest -q                       # 862 tests
+pytest -q                       # 865 tests
 pytest -q tests/unit            # 592 of them need no database at all
 python scripts/bench_voice.py   # pipeline overhead, with real numbers
 ruff check . && mypy
@@ -148,8 +148,8 @@ verified](#what-works-today) below.
 
 **Phase 9 — failure analysis and hardening**
 - 17 failure cases, each with the input, the output verbatim and the mechanism
-  ([docs/failure_cases](docs/failure_cases/README.md)). Ten are fixed, three accepted as
-  limitations, and four open with their next step
+  ([docs/failure_cases](docs/failure_cases/README.md)). Ten are fixed, four accepted as
+  limitations, and three open with their next step
 - Every dependency taken down in a test, with what the student gets
   ([DEGRADATION.md](docs/DEGRADATION.md)): a model that stalls is given up on after 20 s with an
   apology, a lost voice finishes the answer in text, and a Redis outage costs the counters, not the

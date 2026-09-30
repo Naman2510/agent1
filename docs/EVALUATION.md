@@ -106,12 +106,16 @@ Hugging Face, which this project's development environment cannot reach, so it r
 (`.github/workflows/nightly.yml`), where they can be downloaded. Its first baseline did not
 reproduce on another runner (FC-006, PHASE_8_AUDIT D8-15): Whisper's fallback sampled unseeded, and
 the arithmetic followed the CPU. Now each utterance is decoded by a seeded model of its own, the
-arithmetic is pinned (and recorded in the summary), and every T2 run checks both configs'
-baselines (`backend/eval/baselines/stt*.json`). The language-hint one has reproduced exactly on a
-second runner of the same CPU model (AMD EPYC 7763). The first Intel runner (Xeon Platinum 8573C,
-AVX-512) reproduced neither baseline: English WER 0.127 against 0.123, Hindi 1.255 against 1.425.
-One cause is pinned since: oneDNN inside CTranslate2 chose AVX-512 convolution kernels there (FC-006).
-Until an Intel run agrees, the numbers below are the AMD runner's. What it measures is a
+arithmetic is pinned (and recorded in the summary, with the CPU model), and every T2 run checks
+both configs' baselines (`backend/eval/baselines/stt*.json`). On the AMD EPYC 7763 that computed
+them they reproduce to the last digit: the language-hint one on two more runners, the other on
+one. The first Intel runner (Xeon Platinum 8573C, AVX-512) reproduced neither: English WER 0.127
+against 0.123, Hindi 1.255 against 1.425. One cause is pinned since (oneDNN inside CTranslate2
+chose AVX-512 convolution kernels there), but neither library promises the same numbers across
+CPU models: MKL honours its reproducible AVX2 mode on Intel CPUs only, and oneDNN promises
+identical results only on identical hardware. So a baseline is enforced on the CPU model that
+computed it and compared on any other, where a difference is reported, not failed (FC-006). The
+numbers below are the AMD EPYC 7763's. What it measures is a
 recogniser hearing eSpeak — useful for comparing recognisers and settings, not a statement about
 anyone's voice. Its normalisation today is case, apostrophes and punctuation only: no numeral
 expansion, no spelling-variant map (below).
@@ -384,7 +388,7 @@ for this and none will be invented.
 |---|---|---|---|
 | T0 | every push | unit + integration + e2e with all providers faked | none |
 | T1 | every push | every committed eval config reproduces its baseline: `lid`, `retrieval` and its ablations, `agent`, `injection`, `voice` and EXP-003's candidate | none (local models; scripted LLM) |
-| T2 | nightly, on demand, and when what it measures changes | `stt`: faster-whisper, weights downloaded first (`nightly.yml`) | none (model download) |
+| T2 | nightly, on demand, and when what it measures changes | `stt`: faster-whisper, weights downloaded first (`nightly.yml`); exact on the baselines' CPU model, compared on others (FC-006) | none (model download) |
 | T3 | by hand | today, the Claude adapter's live smoke test (`live.yml`, skipped — and saying so — without an `ANTHROPIC_API_KEY` secret); live `agent`, `response`, `voice` and `e2e` suites do not exist yet | paid |
 
 T0's e2e is the Playwright suite in `frontend/e2e/` (Phase 7): a real browser against the whole

@@ -70,20 +70,33 @@ jobs:
           EOF
       # Each config runs once. An experiment's two configs are held to their baselines inside the
       # experiment's own runs; any other T2 config runs on its own. A config with no baseline yet
-      # has one written and printed, to be reviewed and committed.
+      # has one written and printed, to be reviewed and committed. Exit 3 means a run differed
+      # from a baseline computed on another CPU model: nothing promises the same numbers across
+      # CPU models (FC-006), so it is a warning with the differences in the report, not a failure.
       - name: Every tier-T2 experiment and config, each run against its baseline
         working-directory: backend
         run: |
           set -o pipefail
           status=0
+          held() {
+            case "$1" in
+              0) ;;
+              3) echo "::warning title=Not held to its baseline::$2 ran on a CPU model other than its baseline's and differed; see the report (FC-006)" ;;
+              *) status=1 ;;
+            esac
+          }
           covered=""
           for experiment in $(grep -l '^tier = "T2"' eval/experiments/*.toml); do
-            python -m eval.runner --experiment "$experiment" --ensure-baseline --failures | tee -a t2-report.txt || status=1
+            code=0
+            python -m eval.runner --experiment "$experiment" --ensure-baseline --failures | tee -a t2-report.txt || code=$?
+            held "$code" "$experiment"
             covered="$covered $(python -c 'import sys, tomllib; e = tomllib.load(open(sys.argv[1], "rb")); print(e["baseline"], e["candidate"])' "$experiment")"
           done
           for config in $(grep -l '^tier = "T2"' eval/configs/*.toml); do
             case " $covered " in *" $(basename "$config") "*) continue ;; esac
-            python -m eval.runner --config "$config" --ensure-baseline --failures | tee -a t2-report.txt || status=1
+            code=0
+            python -m eval.runner --config "$config" --ensure-baseline --failures | tee -a t2-report.txt || code=$?
+            held "$code" "$config"
           done
           exit $status
       - name: Keep the report

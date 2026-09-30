@@ -1,5 +1,8 @@
 {
-  "amended": "Phase 9: ONEDNN_MAX_CPU_ISA=AVX2 added to the recorded pins. On the AMD EPYC 7763 that recorded this baseline, which has no AVX-512, oneDNN's kernels were AVX2 already, so the metrics stand as recorded; the next T2 run checks that (FC-006).",
+  "amended": [
+    "Phase 9: ONEDNN_MAX_CPU_ISA=AVX2 added to the recorded pins. On the AMD EPYC 7763 that recorded this baseline, which has no AVX-512, oneDNN's kernels were AVX2 already, so the metrics stand as recorded; the next T2 run checks that (FC-006).",
+    "Phase 9: the machine added to the summary, as every run now records it. This baseline was computed on an AMD EPYC 7763 64-Core Processor, as the T2 log of the run that recorded it shows; a second run on that CPU model, with the oneDNN pin (d7f415e), reproduced it exactly. A run on another CPU model is compared with it, not held to it (FC-006)."
+  ],
   "config": {
     "recogniser": {
       "beam_size": 5,
@@ -49,6 +52,7 @@
     "cer": 0.2733,
     "exact": 30,
     "language_detected_as_written": 44,
+    "machine": "AMD EPYC 7763 64-Core Processor",
     "numerics": {
       "CT2_FORCE_CPU_ISA": "AVX2",
       "CT2_USE_MKL": "1",

@@ -1,8 +1,10 @@
 # Failure Cases
 
-**Status:** 17 cases (Phase 9 requires at least eight): 10 fixed, 3 accepted as limitations with
-the reason recorded, 4 open. FC-006 was reopened in Phase 9, when the first Intel runner did not
-reproduce the recogniser's baselines.
+**Status:** 17 cases (Phase 9 requires at least eight): 10 fixed, 4 accepted as limitations with
+the reason recorded, 3 open. FC-006 was reopened in Phase 9, when the first Intel runner did not
+reproduce the recogniser's baselines. It is now accepted as a limitation: the recogniser's
+libraries promise the same numbers only on the same CPU model, so a baseline is enforced there and
+compared elsewhere.
 
 | Case | What failed | Category | Status |
 |---|---|---|---|
@@ -11,7 +13,7 @@ reproduce the recogniser's baselines.
 | [FC-003](003-lexical-arm-lacks-idf-weighting.md) | The lexical arm ranks a common word like a rare one | retrieval | accepted-limitation |
 | [FC-004](004-cross-lingual-retrieval-degrades-to-zero-signal.md) | A query with no shared vocabulary got a fake ranking | retrieval | fixed |
 | [FC-005](005-hindi-speech-never-heard-as-hindi.md) | Hindi speech never heard as Hindi; invented English instead | STT, language detection, hallucination | open (EXP-013) |
-| [FC-006](006-stt-baseline-not-reproducible.md) | A recogniser baseline no other machine reproduced | evaluation | open: exact on one CPU model; an Intel runner diverged, one cause pinned |
+| [FC-006](006-stt-baseline-not-reproducible.md) | A recogniser baseline no other machine reproduced | evaluation | accepted-limitation: exact on one CPU model, compared on others |
 | [FC-007](007-redis-outage-broke-answered-turns.md) | A Redis outage broke answered turns and blocked voice | degradation | fixed |
 | [FC-008](008-a-stalled-model-means-silence.md) | A stalled model kept a voice student in silence | latency spike | fixed |
 | [FC-009](009-recogniser-that-never-finishes-freezes-the-session.md) | A recogniser that never finished froze the session | STT | fixed |

@@ -179,7 +179,7 @@ sessions, graceful degradation when each provider fails, and the security checkl
 **Gate 9:** every checklist item either done or explicitly accepted with a reason.
 
 Delivered 2026-09-30:
-- **Failure cases:** 17 documented cases (`docs/failure_cases/`): 10 fixed, 3 accepted, 4 open,
+- **Failure cases:** 17 documented cases (`docs/failure_cases/`): 10 fixed, 4 accepted, 3 open,
   each open one with its next step.
 - **Degradation:** every dependency taken down in a test (`docs/DEGRADATION.md`). Nine failure
   modes were broken when first tested and are now fixed. The worst: a Redis outage stopped the
@@ -194,10 +194,12 @@ Delivered 2026-09-30:
   security headers and found the voice allowance enforced only at connect and no limit on audio
   rate.
 
-Gate 9 passed ([`PHASE_9_AUDIT.md`](PHASE_9_AUDIT.md)): 22 defects, three of them Critical. Four
-were caught by CI in the phase's own work, after CI's results had gone unread for a day. One of
-those is fixed only in part: the recogniser's baselines did not reproduce on the first Intel runner.
-One cause is pinned since, and whether it was the only one waits on the next Intel run (FC-006).
+Gate 9 passed ([`PHASE_9_AUDIT.md`](PHASE_9_AUDIT.md)): 22 defects, three of them Critical.
+Three were caught by CI in the phase's own work, after CI's results had gone unread for a day. One
+of those is fixed only as far as its libraries allow: the recogniser's baselines did not reproduce
+on the first Intel runner. One cause is pinned since. Neither library promises the same numbers
+across CPU models, so a baseline is now enforced on the CPU model that computed it and compared on
+others (FC-006).
 Dependencies are now pinned (`backend/constraints.txt`).
 
 ### Phase 10 — Optional fine-tuning (only if justified)

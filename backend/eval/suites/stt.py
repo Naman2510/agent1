@@ -149,13 +149,17 @@ def language_for(case: SttCase, setting: str) -> str | None:
 
 
 # CTranslate2 picks its kernels, and Intel MKL its code path, from the CPU it finds, so two CI
-# runners computed different transcripts from the same audio (PHASE_8_AUDIT D8-15). These pin one
-# path for every x86-64 machine with AVX2: CTranslate2's own kernels, MKL for every matrix product
-# (by default it is used only on Intel CPUs), and MKL's reproducible mode. And oneDNN, which
-# CTranslate2 carries inside it for the encoder's convolutions and which picks its own kernels:
-# on the first Intel runner, an AVX-512 machine, it chose AVX-512 ones where the AMD runners,
-# which have no AVX-512, used AVX2, and neither baseline reproduced (FC-006). They must be set
-# before any of the libraries starts, so they are set here, over whatever the environment said.
+# runners computed different transcripts from the same audio (PHASE_8_AUDIT D8-15). These pin
+# what can be pinned: CTranslate2's own kernels at AVX2, MKL for every matrix product (by default
+# it is used only on Intel CPUs), MKL's reproducible mode at AVX2, and oneDNN, which CTranslate2
+# carries inside it for the encoder's convolutions, capped at AVX2 (on the first Intel runner it
+# chose AVX-512 kernels, and neither baseline reproduced: FC-006). They must be set before any of
+# the libraries starts, so they are set here, over whatever the environment said.
+#
+# They make runs on one CPU model agree, and nothing promises more. MKL honours the AVX2 mode on
+# Intel CPUs only, and on any other runs its automatic path instead; oneDNN promises identical
+# results only on identical hardware. So a run records its machine, and a baseline computed on
+# another CPU model is compared, not enforced (recording.check_baseline).
 NUMERICS = {
     "CT2_FORCE_CPU_ISA": "AVX2",
     "CT2_USE_MKL": "1",
@@ -174,6 +178,19 @@ def pin_numerics() -> None:
 def numerics() -> dict[str, str | None]:
     """The pins in effect, for the summary: a baseline says how its numbers were computed."""
     return {name: os.environ.get(name) for name in NUMERICS}
+
+
+def machine(cpuinfo: Path = Path("/proc/cpuinfo")) -> str:
+    """The CPU model the numbers were computed on, for the summary: the pins make one CPU model
+    agree with itself, not with others (NUMERICS)."""
+    try:
+        for line in cpuinfo.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition(":")
+            if key.strip() == "model name":
+                return " ".join(value.split())
+    except OSError:
+        pass
+    return platform.processor() or platform.machine() or "unknown"
 
 
 def faster_whisper_recogniser(config: dict[str, Any]) -> Recognise:
@@ -256,6 +273,7 @@ def render(summary: dict[str, Any], config: dict[str, Any]) -> str:
         f" language {settings.get('language', 'auto')}, seed {settings.get('seed', 0)})",
         "numerics    "
         + (" ".join(f"{k}={v or 'unset'}" for k, v in pins.items()) or "not recorded"),
+        f"machine     {summary.get('machine') or 'not recorded'}",
         "speech      eSpeak NG, synthetic — not a measurement of anyone's voice",
         "",
         "language   cases    WER    CER  exact  language detected as written",

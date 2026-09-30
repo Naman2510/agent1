@@ -42,6 +42,7 @@ from eval.recording import (
     leaf_paths,
     load_config,
     log_to_mlflow,
+    worst,
     write_baseline,
 )
 
@@ -180,8 +181,8 @@ async def run_configs(
             outcome, run_id = await execute(
                 spec, settings, record=record, show_failures=show_failures, store=store
             )
-            status = max(status, 0 if outcome.ok else 1)
-            status = max(status, apply_baseline(spec, outcome, run_id, baseline))
+            status = worst(status, 0 if outcome.ok else 1)
+            status = worst(status, apply_baseline(spec, outcome, run_id, baseline))
             print()
     finally:
         if store is not None:
@@ -272,13 +273,13 @@ async def run_experiment(
         base_outcome, base_id = await execute(
             base_spec, settings, record=record, show_failures=show_failures, store=store
         )
-        status = max(status, apply_baseline(base_spec, base_outcome, base_id, baseline_mode))
+        status = worst(status, apply_baseline(base_spec, base_outcome, base_id, baseline_mode))
         print()
         cand_spec = build_spec(candidate_name, candidate, dataset)
         cand_outcome, cand_id = await execute(
             cand_spec, settings, record=record, show_failures=show_failures, store=store
         )
-        status = max(status, apply_baseline(cand_spec, cand_outcome, cand_id, baseline_mode))
+        status = worst(status, apply_baseline(cand_spec, cand_outcome, cand_id, baseline_mode))
         decision, comparison = decide(rule, _per_case(base_outcome), _per_case(cand_outcome))
         rationale = describe(rule, comparison)
         print()
@@ -350,7 +351,8 @@ def main() -> int:
     baselines.add_argument(
         "--check-baseline",
         action="store_true",
-        help="fail unless each run reproduces its config's committed baseline",
+        help="fail unless each run reproduces its config's committed baseline (exit 3: it "
+        "differed from one computed on another CPU model, which is reported, not failed)",
     )
     baselines.add_argument(
         "--ensure-baseline",

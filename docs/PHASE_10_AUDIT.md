@@ -58,7 +58,7 @@ Phases 0 to 10 have passed their gates. What that does and does not mean, from t
   before they ran.
 - Graceful degradation for every dependency, load measured on one process, and the security
   checklist reconciled item by item.
-- 862 backend tests, 42 frontend unit tests, and 14 end-to-end tests in a real browser against the
+- 865 backend tests, 42 frontend unit tests, and 14 end-to-end tests in a real browser against the
   Compose stack.
 
 **Not true yet, and said so wherever it matters:**
@@ -68,7 +68,8 @@ Phases 0 to 10 have passed their gates. What that does and does not mean, from t
 - **Every dataset is self-authored or synthetic.** Nothing has been measured on a real student's
   voice or question (M9-02).
 - **Two of the six planned evaluation suites** (`response`, `e2e`) do not exist (M9-03).
-- **The recogniser's baselines have been shown to reproduce on one CPU model only** (M9-04, FC-006).
+- **The recogniser's baselines are exact on one CPU model only** (AMD EPYC 7763), and compared,
+  not enforced, on others: its libraries promise no more (M9-04, FC-006).
 - **Past about 50 connected voice students** the design is more processes, and that is not
   measured (M9-05).
 - **Tamil** was deferred at the MVP decision and is not built.

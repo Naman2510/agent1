@@ -451,8 +451,12 @@ async def _evaluate_stt(
     recognise = stt_suite.faster_whisper_recogniser(config)
     language = str(config.get("recogniser", {}).get("language", "auto"))
     results = await asyncio.to_thread(stt_suite.run, cases, recognise, language=language)
-    # How the arithmetic was pinned is part of what a baseline records (stt.NUMERICS).
-    summary = {**stt_suite.summarise(results), "numerics": stt_suite.numerics()}
+    # How the arithmetic was pinned, and on what, is part of what a baseline records (stt.NUMERICS).
+    summary = {
+        **stt_suite.summarise(results),
+        "numerics": stt_suite.numerics(),
+        "machine": stt_suite.machine(),
+    }
     lines = [stt_suite.render(summary, config)]
     wrong = [r for r in results if r.word_edits]
     if show_failures and wrong:

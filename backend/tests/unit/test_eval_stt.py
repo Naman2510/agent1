@@ -183,6 +183,24 @@ def test_the_arithmetic_is_pinned_on_x86_and_the_summary_says_either_way(
     assert stt.numerics() == stt.NUMERICS, "pinned over whatever the environment said"
 
 
+def test_a_run_names_the_cpu_model_it_was_computed_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pins make one CPU model agree with itself, and nothing promises more (FC-006)."""
+    cpuinfo = tmp_path / "cpuinfo"
+    cpuinfo.write_text(
+        "processor\t: 0\nvendor_id\t: AuthenticAMD\n"
+        "model name\t: AMD EPYC 7763 64-Core Processor                \n"
+        "processor\t: 1\nmodel name\t: AMD EPYC 7763 64-Core Processor\n"
+    )
+    assert stt.machine(cpuinfo) == "AMD EPYC 7763 64-Core Processor"
+
+    monkeypatch.setattr(stt.platform, "processor", lambda: "arm")
+    assert stt.machine(tmp_path / "absent") == "arm", "no /proc/cpuinfo: the platform's name"
+    cpuinfo.write_text("processor\t: 0\nCPU implementer\t: 0x41\n")
+    assert stt.machine(cpuinfo) == "arm", "and no model name in it either"
+
+
 def test_each_utterance_is_heard_by_a_model_of_its_own_seeded_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -224,6 +242,7 @@ def test_the_suite_records_each_case_and_how_its_arithmetic_was_pinned(
         return lambda audio, language: (references[audio.tobytes()], language)
 
     monkeypatch.setattr(stt, "faster_whisper_recogniser", recogniser)
+    monkeypatch.setattr(stt, "machine", lambda: "the CI runner's CPU")
     for name in stt.NUMERICS:
         monkeypatch.setenv(name, "as pinned")
     config = {"suite": "stt", "recogniser": {"language": "hint"}}
@@ -232,6 +251,8 @@ def test_the_suite_records_each_case_and_how_its_arithmetic_was_pinned(
 
     assert outcome.summary["wer"] == 0.0 and outcome.summary["cases"] == 66
     assert outcome.summary["numerics"] == dict.fromkeys(stt.NUMERICS, "as pinned")
+    assert outcome.summary["machine"] == "the CI runner's CPU"
+    assert "machine     the CI runner's CPU" in outcome.report
     hindi = next(c for c in outcome.cases if c.language == "hi")
     assert hindi.actual["language"] == "hi", "told the routed language"
     assert hindi.metrics == {"wer": 0.0, "cer": 0.0, "wer_hi": 0.0}

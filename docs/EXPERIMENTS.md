@@ -148,7 +148,9 @@ baseline an earlier run had written on another machine. T2 has no database, so n
 `evaluation_runs`: the record is the baselines and the run's log. A later T2 run on an Intel
 runner reproduced neither baseline, and the comparison came out +0.047 (95% CI [+0.009, +0.098]),
 against +0.073 here, with the same decision. Its arithmetic differed from the AMD runner's (FC-006),
-so the gain's size depends on the machine, within a range that does not change the decision.
+so the gain's size depends on the machine, within a range that does not change the decision. The
+next run on an AMD EPYC 7763 (d7f415e), with oneDNN's kernels pinned too, reproduced +0.0725,
+[+0.0265, +0.1271], 8 better and 0 worse, exactly.
 
 | | Auto-detected | Told the routed language |
 |---|---|---|

@@ -196,7 +196,13 @@ def write_baseline(spec: RunSpec, outcome: SuiteOutcome, run_id: uuid.UUID | Non
 
 def check_baseline(spec: RunSpec, outcome: SuiteOutcome) -> tuple[int, list[str]]:
     """0 when the run reproduces its committed baseline; 1 when a metric differs; 2 when the
-    comparison is not meaningful — no baseline, or the config or data changed since."""
+    comparison is not meaningful — no baseline, or the config or data changed since; 3 when a
+    metric differs but the baseline was computed on another CPU model.
+
+    A suite whose arithmetic depends on the CPU records the machine in its summary (the stt suite:
+    its libraries promise the same numbers only on the same CPU model, FC-006). On another model
+    the run is still compared: agreeing is 0, and differing is reported with both machines named,
+    not failed, since there a regression and the hardware cannot be told apart."""
     path = baseline_path(spec.config_name)
     if not path.exists():
         return 2, [f"no baseline for {spec.config_name} ({path})"]
@@ -205,17 +211,43 @@ def check_baseline(spec: RunSpec, outcome: SuiteOutcome) -> tuple[int, list[str]
         return 2, [f"{spec.config_name}: the config changed since its baseline was recorded"]
     if baseline["dataset_digest"] != spec.dataset_digest:
         return 2, [f"{spec.config_name}: dataset {spec.dataset_version} changed since its baseline"]
+    computed_on, running_on = baseline["summary"].get("machine"), outcome.summary.get("machine")
+    elsewhere = None not in (computed_on, running_on) and computed_on != running_on
     before, after = leaf_paths(baseline["summary"]), leaf_paths(outcome.summary)
-    differences = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
-    if differences:
-        return 1, [
-            f"{spec.config_name}: {key} was {json.dumps(before.get(key))} at "
-            f"{baseline['git_sha']}, is {json.dumps(after.get(key))} now"
-            for key in differences
-        ]
-    return 0, [
-        f"{spec.config_name}: every metric matches the baseline recorded at {baseline['git_sha']}"
+    compared = before.keys() | after.keys()
+    if elsewhere:
+        compared -= {"machine"}
+    differences = sorted(k for k in compared if before.get(k) != after.get(k))
+    moved = [
+        f"{spec.config_name}: {key} was {json.dumps(before.get(key))} at "
+        f"{baseline['git_sha']}, is {json.dumps(after.get(key))} now"
+        for key in differences
     ]
+    if differences and elsewhere:
+        return 3, [
+            f"{spec.config_name}: not held to its baseline, which was computed on {computed_on}; "
+            f"this is {running_on}, and nothing promises the same numbers across CPU models "
+            "(FC-006). What differed:",
+            *moved,
+        ]
+    if differences:
+        return 1, moved
+    where = f", on {running_on} as on {computed_on}" if elsewhere else ""
+    return 0, [
+        f"{spec.config_name}: every metric matches the baseline recorded at "
+        f"{baseline['git_sha']}{where}"
+    ]
+
+
+# Exit codes from least to most serious: reproduced; differed from a baseline computed on another
+# CPU model (reported, not failed); differed; could not be compared at all.
+_SEVERITY = {0: 0, 3: 1, 1: 2, 2: 3}
+
+
+def worst(*codes: int) -> int:
+    """The most serious of several runs' codes: a failure is never hidden behind a difference
+    that only the hardware explains."""
+    return max(codes, key=_SEVERITY.__getitem__)
 
 
 # --- MLflow -----------------------------------------------------------------
