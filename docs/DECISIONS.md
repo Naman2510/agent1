@@ -24,6 +24,7 @@ an explicit **revisit trigger**, so a decision can be reopened by evidence rathe
 | [0014](adr/0014-observability-scope.md) | Structured logs + OTel; Prometheus/Grafana deferred | Accepted |
 | [0015](adr/0015-monorepo-and-eval-placement.md) | Monorepo, eval harness inside the backend package | Accepted |
 | [0016](adr/0016-provider-abstraction-boundaries.md) | Six provider interfaces and where the boundary sits | Accepted |
+| [0017](adr/0017-intent-classifier-not-fine-tuned.md) | The intent classifier is not fine-tuned until its prompted baseline is measured | Accepted (Phase 10) |
 
 ## Answers to the questions spec §40 asks directly
 
@@ -44,4 +45,4 @@ Recording these prevents them from being made by accident:
 - Which LLM tier serves the voice path (EXP-004).
 - Whether the reranker is on in the voice path (EXP-007).
 - Whether semantic endpointing ships (EXP-003).
-- Whether the intent classifier is fine-tuned (EXP-010) — and "no" is an acceptable answer.
+- Whether the intent classifier is ever fine-tuned (EXP-010). "Not now" is decided (ADR-0017); what would reopen it is written there.

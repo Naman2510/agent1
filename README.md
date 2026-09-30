@@ -10,10 +10,10 @@ voice pipeline rather than a thin wrapper around an LLM API.
 
 | | |
 |---|---|
-| **Current phase** | Phase 9 in progress — failure analysis and hardening. Phases 0–8 have passed their gates; Phase 9's degradation matrix and 14 failure cases are done, load and the security checklist are not |
-| **Implementation** | 841 backend tests (97% line coverage), 40 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) exists for evaluation; no TTS provider does, and the Claude adapter has never run against the live API. |
+| **Current phase** | Roadmap complete: Phases 0–10 have passed their gates. Phase 10 decided not to fine-tune the intent classifier until its prompted baseline is measured ([ADR-0017](docs/adr/0017-intent-classifier-not-fine-tuned.md)). What is not true yet is listed in [PHASE_10_AUDIT.md](docs/PHASE_10_AUDIT.md) §3: above all, no real model has run in the loop |
+| **Implementation** | 862 backend tests (97% line coverage), 42 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) exists for evaluation; no TTS provider does, and the Claude adapter has never run against the live API. |
 | **Benchmarks** | Six suites have run, each recorded, reproducible from its record, and checked in CI, on small self-authored or synthetic datasets with their biases documented: language identification (0.9205 signal accuracy), retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893, 22 cases), agent tool gating (14/14 allowlist coverage, against a scripted model), prompt injection (19/19 attempted mutating calls blocked), the voice front end (a turn ends 575 ms after speech, in audio time, on synthetic speech) and recognition (English WER 0.123; synthetic Hindi not recognised as Hindi at all). Three experiments decided: EXP-003 rejected, EXP-008 and EXP-013 inconclusive. Full-stack latency is unmeasured. |
-| **Last updated** | 2026-09-29 |
+| **Last updated** | 2026-09-30 |
 
 > **Full-stack latency is not measured yet.** Latency figures in
 > [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) are *budgets* (design targets), not results; the one
@@ -123,11 +123,11 @@ indexes and check constraints:
 
 ```bash
 cd backend
-pip install -e ".[dev,rag]"
+pip install -c constraints.txt -e ".[dev,rag,eval]"   # the versions CI tests
 export VAANIOS_TEST_DATABASE_URL=postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
 bash scripts/fetch_models.sh    # Silero VAD weights (not committed)
-pytest -q                       # 725 tests
-pytest -q tests/unit            # 525 of them need no database at all
+pytest -q                       # 862 tests
+pytest -q tests/unit            # 592 of them need no database at all
 python scripts/bench_voice.py   # pipeline overhead, with real numbers
 ruff check . && mypy
 ```
@@ -145,6 +145,24 @@ speaking over it or pressing Stop, and see where each answer came from — its s
 it used, kept in the session's history. Everything runs today against the deterministic fake STT,
 TTS and LLM, so the words heard and spoken are placeholders: see [What is not
 verified](#what-works-today) below.
+
+**Phase 9 — failure analysis and hardening**
+- 17 failure cases, each with the input, the output verbatim and the mechanism
+  ([docs/failure_cases](docs/failure_cases/README.md)). Ten are fixed, three accepted as
+  limitations, and four open with their next step
+- Every dependency taken down in a test, with what the student gets
+  ([DEGRADATION.md](docs/DEGRADATION.md)): a model that stalls is given up on after 20 s with an
+  apology, a lost voice finishes the answer in text, and a Redis outage costs the counters, not the
+  conversation
+- Many students on one server ([LOAD.md](docs/LOAD.md)). One process serves about 50 connected voice
+  students, with first audio within 0.7 s of a lone student's (p95). Past that, add processes
+- The security checklist reconciled item by item ([SECURITY.md §6](docs/SECURITY.md)): security
+  headers on the API and the web app, a voice allowance enforced while a connection is open, and a
+  cap on how fast audio may arrive. Also blocking dependency audits, and a scan that keeps personal
+  data out of the repository
+- Found on the way, and fixed: a Redis outage stopped the product; a server process admitted
+  fifteen voice students; a cancelled answer lost its record; an unmetered connection. 22 defects
+  in all, in [PHASE_9_AUDIT.md](docs/PHASE_9_AUDIT.md)
 
 **Phase 8 — evaluation, experiments, observability**
 - Every evaluation run is recorded — config, dataset digest, git SHA, every case — and runs again

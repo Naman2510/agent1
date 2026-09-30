@@ -443,7 +443,7 @@ committed before the runs.
 | EXP-007 | Hybrid retrieval beats vector-only on Hindi/Tamil queries | retriever | retrieval | blocked: 2 Hindi queries, no Tamil |
 | EXP-008 | Heading-path prefixing improves ranking on lecture material | chunk enrichment | retrieval | **inconclusive**: +0.018 nDCG@10, CI spans 0 |
 | EXP-009 | Intent-gated tool exposure improves selection without hurting completion | tool gate | agent | pending |
-| EXP-010 | A fine-tuned intent classifier beats the prompted baseline | classifier | agent | pending |
+| EXP-010 | A fine-tuned intent classifier beats the prompted baseline | classifier | agent | **not run**, by decision: no measured baseline and no labelled real utterances yet; preconditions and rule in ADR-0017 |
 | EXP-011 | Lowering the `mixed` gate raises its recall without costing `en`/`hi-Latn` precision | classifier thresholds | lid | registered, blocked on a dataset that is not self-authored |
 | EXP-012 | Ending early only on a *question* keeps EXP-003's gain without its cut-offs | turn detector | voice | registered, blocked on cases that did not suggest it |
 | EXP-013 | Telling the recogniser the routed language cuts WER by ≥ 0.1 without hurting English | recogniser language | stt | **inconclusive**: −0.073 WER per case (CI −0.027 to −0.127), Hindi detected 11 of 11, English unchanged |

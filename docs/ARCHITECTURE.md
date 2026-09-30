@@ -543,6 +543,10 @@ mystery in the bill.
 | | **TTFA (one tool round)** | **≈ 2.6 s** | — | — |
 | | **Barge-in → audible silence** | **150 ms** | — | — |
 
+Stage 4 cannot hold as built: the intent classification it includes is a call to the hosted model
+(§8.2), and every answer waits for it. A hosted-model round trip does not fit in 60 ms. The first
+real-model run measures by how much; ADR-0017 says what follows (PHASE_10_AUDIT M10-01).
+
 ### 9.1 Measured: our own pipeline overhead
 
 Measured 2026-09-18 on the CPU-only target (4 vCPU) with `scripts/bench_voice.py`. **Every model

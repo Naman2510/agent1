@@ -1,8 +1,8 @@
 # Roadmap, Phases, and Audit Gates
 
-**Status:** Phases 0–8 have passed their audit gates; Phase 9 (failure analysis and hardening) is in
-progress: the degradation matrix (docs/DEGRADATION.md) and 14 failure cases are done; load behaviour
-and the security checklist are not.
+**Status:** Phases 0–10 have passed their audit gates, and the roadmap is complete. What that does
+and does not mean is in [`PHASE_10_AUDIT.md`](PHASE_10_AUDIT.md) §3: no real model, recogniser or
+synthesiser has run in the loop yet, and every dataset is self-authored or synthetic.
 
 The specification (§43) mandates phased delivery with an audit gate between phases. Phases 1+ below
 are reconstructed from spec §1–42; **the original specification was truncated part-way through the
@@ -178,10 +178,39 @@ At least eight documented failure cases with root causes and fixes, load behavio
 sessions, graceful degradation when each provider fails, and the security checklist closed out.
 **Gate 9:** every checklist item either done or explicitly accepted with a reason.
 
+Delivered 2026-09-30:
+- **Failure cases:** 17 documented cases (`docs/failure_cases/`): 10 fixed, 3 accepted, 4 open,
+  each open one with its next step.
+- **Degradation:** every dependency taken down in a test (`docs/DEGRADATION.md`). Nine failure
+  modes were broken when first tested and are now fixed. The worst: a Redis outage stopped the
+  product, and one dropped database connection lost the whole session.
+- **Load** (`docs/LOAD.md`): one server process admitted only fifteen voice students (the database
+  pool). Fixed, it serves about 50, with first audio p50/p95 at 2.2/2.6 s against 1.9 s for one
+  student, and is saturated at 75. The VAD takes most of its CPU, and one shared model rather than
+  one per connection cut CPU at 50 students from 94% to 78% of a core, and memory from 881 to
+  395 MB.
+- **Security** (`docs/SECURITY.md` §6): the checklist was reconciled item by item. 26 items are
+  done in full, and 3 are done except for a part accepted with its reason. Reconciling added the
+  security headers and found the voice allowance enforced only at connect and no limit on audio
+  rate.
+
+Gate 9 passed ([`PHASE_9_AUDIT.md`](PHASE_9_AUDIT.md)): 22 defects, three of them Critical. Four
+were caught by CI in the phase's own work, after CI's results had gone unread for a day. One of
+those is fixed only in part: the recogniser's baselines did not reproduce on the first Intel runner.
+One cause is pinned since, and whether it was the only one waits on the next Intel run (FC-006).
+Dependencies are now pinned (`backend/constraints.txt`).
+
 ### Phase 10 — Optional fine-tuning (only if justified)
 Intent classification only. Zero-shot → prompted → fine-tuned, on a held-out split, with cost and
 latency compared. **If the prompted baseline is already strong enough, this phase is a written
 decision not to fine-tune, which is a legitimate outcome and will be recorded as such.**
+
+Decided 2026-09-30: **not to fine-tune** ([ADR-0017](adr/0017-intent-classifier-not-fine-tuned.md),
+[`PHASE_10_AUDIT.md`](PHASE_10_AUDIT.md)). The prompted baseline has never been measured, because
+there are no labelled real utterances and no run against a real model, so "fine-tuned beats
+prompted" cannot yet be tested. EXP-010's preconditions and rule are written down. The phase also
+found that the intent call, which every answer waits for, cannot meet the 60 ms the latency budget
+gives its stage (M10-01).
 
 ---
 
