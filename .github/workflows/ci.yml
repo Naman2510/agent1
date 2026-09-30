@@ -158,11 +158,13 @@ jobs:
       - name: Dependency audit
         working-directory: backend
         run: |
-          python -m pip install --upgrade pip pip-audit
+          # setuptools too: the runner's own (79.x) carries PYSEC-2026-3447, fixed in 83.
+          python -m pip install --upgrade pip "setuptools>=83" pip-audit
           pip install -e .
-          # Non-blocking for now: a fresh advisory in a transitive dependency should surface, not
-          # block an unrelated change. Revisit once the dependency set settles (Phase 9).
-          pip-audit --progress-spinner off || echo "::warning::pip-audit reported findings"
+          # Blocking since Phase 9 (SECURITY.md §6). An advisory with no fix yet, or one that
+          # cannot reach this application, is ignored by ID (--ignore-vuln) with the reason
+          # recorded next to it, never by making the step non-blocking again.
+          pip-audit --progress-spinner off
 
   frontend:
     name: Frontend (lint, types, tests, build)
@@ -178,10 +180,16 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # What ships: the dependencies of the built app, not the tools that build and test it.
+      - run: npm audit --omit=dev
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # No provider key, nor any backend setting, may reach the browser (SECURITY.md §6): only
+      # NEXT_PUBLIC_ values are inlined into the bundle, and this keeps it that way.
+      - name: The browser bundle carries no secrets
+        run: "! grep -rIlE 'sk-ant-|ANTHROPIC|VAANIOS_' .next/static"
 
   build:
     name: Images, the Compose stack, and end-to-end in a browser

@@ -147,6 +147,10 @@ class Settings(BaseSettings):
             raise ValueError("log_transcripts must be off in production")
         if not self.rate_limit_enabled:
             raise ValueError("rate limiting cannot be disabled in production")
+        if plain := [o for o in self.cors_origins if not o.startswith("https://")]:
+            # The browser's credentials ride these origins' requests, and the voice socket is
+            # wss:// only when the API is served over TLS (frontend/src/lib/config.ts).
+            raise ValueError(f"CORS origins must be https:// in production, not {plain}")
         return self
 
     @property

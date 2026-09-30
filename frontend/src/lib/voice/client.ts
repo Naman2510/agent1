@@ -2,6 +2,7 @@ import { getAccessToken, onAccessTokenChange, refreshAccessToken } from "@/lib/a
 import { voiceSocketUrl } from "@/lib/config";
 import { PlaybackQueue } from "@/lib/voice/playback";
 import {
+  closeMessage,
   decodeAudio,
   encodeAudio,
   micTurnId,
@@ -151,12 +152,7 @@ export class VoiceClient {
   private onClose(event: CloseEvent): void {
     this.teardown();
     this.socket = null;
-    const reason =
-      event.code === 1000
-        ? null
-        : event.reason === "credential expired"
-          ? "Your sign-in expired. Reconnect to continue."
-          : event.reason || "The voice connection closed.";
+    const reason = closeMessage(event.code, event.reason);
     this.update({ connection: "closed", closeReason: reason, mic: "off", level: 0 });
   }
 

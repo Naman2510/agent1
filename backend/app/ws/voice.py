@@ -31,7 +31,7 @@ from app.db.repositories.users import StudentRepository, UserRepository
 from app.providers.registry import build_reranker, build_stt, build_tts
 from app.rag.service import RagService
 from app.services.conversation import ConversationService
-from app.services.usage import UsageLedger
+from app.services.usage import UsageLedger, VoiceQuotaExceededError
 from app.voice.audio import FRAME_BYTES, AudioFrame
 from app.voice.protocol import (
     ClientMessage,
@@ -52,6 +52,14 @@ BEARER_SUBPROTOCOL = "bearer"
 # Frames are 20 ms of 16 kHz mono PCM plus an 8-byte header. Anything much larger is a bug or an
 # attempt to make the server allocate.
 MAX_AUDIO_MESSAGE_BYTES = FRAME_BYTES * 4 + 64
+# How far the audio received may run ahead of the connection's age: a burst after a stall on the
+# network is ordinary, a client sending faster than any microphone is not — and every 32 ms of
+# audio costs the server a VAD run on the one event loop every student shares (docs/LOAD.md).
+MAX_AUDIO_AHEAD_MS = 10_000
+# How often, in audio, the connection's usage is added to the student's day and checked against
+# the allowance: checked only at connect, a connection opened with a minute left could run for
+# the hour, and any number of connections could be open at once.
+METER_EVERY_MS = 5_000
 
 
 class _WebSocketTransport:
@@ -191,7 +199,7 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
         )
 
         started = time.monotonic()
-        audio_ms = 0
+        audio_ms = metered_ms = 0
         await voice.start()
 
         try:
@@ -224,6 +232,27 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
                         await _fail(websocket, "bad_frame", str(exc))
                         continue
                     audio_ms += frame.duration_ms
+                    if audio_ms > (time.monotonic() - started) * 1000 + MAX_AUDIO_AHEAD_MS:
+                        await websocket.close(
+                            code=status.WS_1008_POLICY_VIOLATION,
+                            reason="audio faster than real time",
+                        )
+                        break
+                    if audio_ms - metered_ms >= METER_EVERY_MS:
+                        seconds = (audio_ms - metered_ms) // 1000
+                        metered_ms += seconds * 1000
+                        used = await ledger.record_voice_seconds(str(student_id), seconds)
+                        if used >= ledger.voice_allowance_seconds:
+                            await _fail(
+                                websocket,
+                                VoiceQuotaExceededError.code,
+                                VoiceQuotaExceededError.message,
+                            )
+                            await websocket.close(
+                                code=status.WS_1008_POLICY_VIOLATION,
+                                reason=VoiceQuotaExceededError.code,
+                            )
+                            break
                     await voice.handle_audio(frame)
                     continue
 
@@ -242,14 +271,20 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
                         else:
                             credential_expires_at = max(credential_expires_at, renewed)
                         continue
-                    await _dispatch_control(voice, control, socket=websocket)
+                    try:
+                        await _dispatch_control(voice, control, socket=websocket)
+                    except ProtocolError as exc:
+                        # A field of the wrong type: reported, like a malformed frame, and the
+                        # conversation goes on — it used to end it.
+                        await _fail(websocket, "bad_control", str(exc))
 
         except WebSocketDisconnect:
             pass
         finally:
             await voice.close()
-            # Metered as audio is consumed, so an abandoned session still counts what it used.
-            await ledger.record_voice_seconds(str(student_id), audio_ms // 1000)
+            # What the periodic meter has not yet counted — so an abandoned session still counts
+            # everything it used.
+            await ledger.record_voice_seconds(str(student_id), (audio_ms - metered_ms) // 1000)
             await db.commit()
             log.info(
                 "voice.session_closed",

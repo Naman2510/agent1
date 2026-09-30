@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { PlaybackQueue, type PlaybackContext } from "@/lib/voice/playback";
-import { decodeAudio, encodeAudio, micTurnId } from "@/lib/voice/protocol";
+import { closeMessage, decodeAudio, encodeAudio, micTurnId } from "@/lib/voice/protocol";
 
 const RATE = 24_000;
 
@@ -107,5 +107,20 @@ describe("protocol", () => {
     expect(micTurnId("listening", 4)).toBe(4);
     expect(micTurnId("user_speaking", 4)).toBe(4);
     expect(micTurnId("error", 4)).toBe(4);
+  });
+});
+
+describe("closeMessage", () => {
+  it("says nothing for an ordinary close", () => {
+    expect(closeMessage(1000, "bye")).toBeNull();
+  });
+
+  it("puts the server's codes into words, and passes other reasons through", () => {
+    expect(closeMessage(1008, "voice_quota_exceeded")).toBe("You've used today's voice allowance.");
+    expect(closeMessage(1008, "credential expired")).toBe(
+      "Your sign-in expired. Reconnect to continue.",
+    );
+    expect(closeMessage(1008, "audio faster than real time")).toBe("audio faster than real time");
+    expect(closeMessage(1006, "")).toBe("The voice connection closed.");
   });
 });

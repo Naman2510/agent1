@@ -186,6 +186,29 @@ def test_an_unknown_control_type_is_reported(sync_client: TestClient) -> None:
         assert error["code"] == "unknown_control"
 
 
+def test_a_control_field_of_the_wrong_type_is_reported_without_dropping_the_session(
+    sync_client: TestClient,
+) -> None:
+    """Every control frame's fields are checked (SECURITY.md §6), and, like a malformed audio frame,
+    a bad one is a client bug: reported, and the conversation goes on."""
+    headers, session_id = _register(sync_client)
+    token = headers["Authorization"].removeprefix("Bearer ")
+
+    with _connect(sync_client, session_id, token) as ws:
+        ws.receive_text()
+        ws.receive_text()
+        for bad in (
+            {"type": "playback.ack", "turn_id": "zero", "played_ms": 10},
+            {"type": "playback.ack", "turn_id": 0, "played_ms": True},
+            {"type": "user.interrupt", "turn_id": [1]},
+        ):
+            ws.send_text(json.dumps(bad))
+            error = json.loads(ws.receive_text())
+            assert error["code"] == "bad_control", bad
+        ws.send_text(json.dumps({"type": "definitely.not.a.thing"}))
+        assert json.loads(ws.receive_text())["code"] == "unknown_control", "still listening"
+
+
 def test_a_typed_turn_over_the_socket_produces_audio_and_metrics(
     sync_client: TestClient,
 ) -> None:
@@ -409,3 +432,62 @@ def test_a_connection_is_metered_even_after_a_turn_was_rolled_back(
             time.sleep(0.05)
             used = sync_client.portal.call(ledger.voice_seconds_used, student_id)  # type: ignore[union-attr]
     assert used == 3
+
+
+def test_audio_sent_faster_than_real_time_is_refused(sync_client: TestClient, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """No microphone produces audio faster than time passes, and every 32 ms of it costs a VAD run
+    on the one event loop every student shares (docs/LOAD.md). A burst after a network stall is
+    allowed for (MAX_AUDIO_AHEAD_MS, lowered here so the test need not send ten seconds)."""
+    import contextlib
+
+    import app.ws.voice as voice_ws
+
+    monkeypatch.setattr(voice_ws, "MAX_AUDIO_AHEAD_MS", 1_000)
+    headers, session_id = _register(sync_client)
+    token = headers["Authorization"].removeprefix("Bearer ")
+
+    with _connect(sync_client, session_id, token) as ws:
+        ws.receive_text()
+        ws.receive_text()
+        # Five seconds of audio at once; the server closes part-way, and later sends may fail.
+        # The last frame is one only a live session answers, so a session left open fails the
+        # test instead of hanging it.
+        with contextlib.suppress(Exception):
+            for seq in range(250):
+                ws.send_bytes(encode_audio(AudioFrame(turn_id=0, seq=seq, pcm=SILENT_FRAME)))
+            ws.send_text(json.dumps({"type": "definitely.not.a.thing"}))
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+    assert closed.value.code == 1008
+    assert closed.value.reason == "audio faster than real time"
+
+
+def test_the_daily_allowance_ends_a_connection_that_uses_it_up(sync_client: TestClient) -> None:
+    """Checked only at connect, a connection opened with a minute left could talk for the hour,
+    and any number could be open at once. Metered every few seconds of audio, the allowance ends
+    the connection that crosses it."""
+    from app.services.usage import UsageLedger
+
+    headers, session_id = _register(sync_client)
+    token = headers["Authorization"].removeprefix("Bearer ")
+    state = sync_client.app_state  # type: ignore[attr-defined]
+    state.settings = state.settings.model_copy(update={"rate_limit_voice_minutes_per_day": 1})
+    ledger = UsageLedger(state.redis, state.settings)
+    student_id = decode_access_token(state.settings, token)["sid"]
+    sync_client.portal.call(ledger.record_voice_seconds, student_id, 57)  # type: ignore[union-attr]
+
+    with _connect(sync_client, session_id, token) as ws:
+        ws.receive_text()
+        ws.receive_text()
+        for seq in range(300):  # six seconds: the meter counts five, and 62 s crosses 60
+            ws.send_bytes(encode_audio(AudioFrame(turn_id=0, seq=seq, pcm=SILENT_FRAME)))
+        # Answered only if the session were still open: then the test fails, rather than hangs.
+        ws.send_text(json.dumps({"type": "definitely.not.a.thing"}))
+        error = json.loads(ws.receive_text())
+        assert error["code"] == "voice_quota_exceeded"
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+    assert closed.value.code == 1008
+    assert closed.value.reason == "voice_quota_exceeded"
+    # 57 + the five seconds heard before the cut-off; the rest was never read.
+    assert sync_client.portal.call(ledger.voice_seconds_used, student_id) == 62  # type: ignore[union-attr]

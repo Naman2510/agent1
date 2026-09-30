@@ -19,7 +19,7 @@ from app.core.config import get_settings
 from app.db.session import create_engine
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
 from app.providers.reranker.base import NoopReranker
-from app.rag.ingest import load_corpus_manifest
+from app.rag.ingest import DocumentRejectedError, load_corpus_manifest
 from app.rag.service import DocumentTooShortError, RagService
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -50,7 +50,7 @@ async def main() -> int:
                 continue
             try:
                 result = await service.ingest_file(path, metadata)
-            except DocumentTooShortError as exc:
+            except (DocumentTooShortError, DocumentRejectedError) as exc:
                 print(f"skipped {filename}: {exc}", file=sys.stderr)
                 continue
             if result.already_ingested:

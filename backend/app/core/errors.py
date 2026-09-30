@@ -14,6 +14,8 @@ from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.middleware import API_CONTENT_POLICY, security_headers
+
 log = structlog.get_logger(__name__)
 
 
@@ -158,7 +160,14 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
         log.error("request.unhandled", error_type=type(exc).__name__, exc_info=True)
+        production = request.app.state.settings.is_production
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=_body("internal_error", "An internal error occurred.", request),
+            # Starlette answers an unhandled error outside every middleware, so the security
+            # headers are this handler's to send.
+            headers={
+                **security_headers(production=production),
+                "content-security-policy": API_CONTENT_POLICY,
+            },
         )

@@ -42,6 +42,17 @@ def test_production_refuses_disabled_rate_limiting() -> None:
         Settings(**{**BASE, "environment": "production", "rate_limit_enabled": False})  # type: ignore[arg-type]
 
 
+def test_production_refuses_an_origin_without_tls() -> None:
+    """TLS is terminated in front of the application (SECURITY.md §6): a production frontend
+    served over plain HTTP is a misconfiguration, refused at startup rather than found later."""
+    with pytest.raises(ValidationError, match="https"):
+        Settings(**{**BASE, "environment": "production", "cors_origins": ["http://app.example"]})  # type: ignore[arg-type]
+    hardened = Settings(
+        **{**BASE, "environment": "production", "cors_origins": ["https://app.example"]}
+    )  # type: ignore[arg-type]
+    assert hardened.is_production
+
+
 def test_cors_origins_accept_a_comma_separated_string() -> None:
     settings = Settings(**{**BASE, "cors_origins": "http://a.test, http://b.test"})  # type: ignore[arg-type]
     assert settings.cors_origins == ["http://a.test", "http://b.test"]

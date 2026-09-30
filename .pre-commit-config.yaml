@@ -1,0 +1,9 @@
+# Secrets are also scanned in CI, over the whole history (.github/workflows/ci.yml, "Secret scan").
+# This hook catches them before they are committed at all:
+#
+#     pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

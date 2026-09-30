@@ -24,6 +24,11 @@ from pypdf import PdfReader
 from app.agent.lang.script import Script, profile
 from app.rag.chunking import Chunk, chunk_markdown
 
+# A document is a handout or a textbook chapter. Anything far larger is a mistake, or an attack on
+# the parser: a PDF of a few kilobytes can declare a million pages (SECURITY.md §6).
+MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
+MAX_PDF_PAGES = 1_000
+
 _HYPHEN_LINEBREAK = re.compile(r"(\w)-\n(\w)")
 _MULTI_BLANK = re.compile(r"\n{3,}")
 _TRAILING_SPACE = re.compile(r"[ \t]+\n")
@@ -44,11 +49,24 @@ def parse_pdf(path: Path) -> str:
     `page_end` on each chunk (spec §15, citations in spec §16) need to be derived from them.
     """
     reader = PdfReader(str(path))
+    if len(reader.pages) > MAX_PDF_PAGES:
+        raise DocumentRejectedError(
+            f"{path.name} has {len(reader.pages)} pages; the limit is {MAX_PDF_PAGES}"
+        )
     pages = [page.extract_text() or "" for page in reader.pages]
     return "\f".join(pages)  # form-feed: an unambiguous, content-safe page separator
 
 
+class DocumentRejectedError(ValueError):
+    """A document past the size or page limit, refused before it is parsed."""
+
+
 def parse_document(path: Path) -> str:
+    size = path.stat().st_size
+    if size > MAX_DOCUMENT_BYTES:
+        raise DocumentRejectedError(
+            f"{path.name} is {size} bytes; the limit is {MAX_DOCUMENT_BYTES}"
+        )
     suffix = path.suffix.lower()
     if suffix == ".pdf":
         return parse_pdf(path)

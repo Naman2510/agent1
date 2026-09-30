@@ -90,3 +90,32 @@ def test_plain_text_files_are_read_directly(tmp_path) -> None:  # type: ignore[n
     prepared = prepare_document(path, DocumentMetadata(title="Notes", subject="Testing"))
     assert len(prepared.chunks) == 1
     assert "circuits" in prepared.chunks[0].chunk.content
+
+
+def test_a_document_past_the_size_limit_is_refused_before_it_is_read(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import app.rag.ingest as ingest
+
+    monkeypatch.setattr(ingest, "MAX_DOCUMENT_BYTES", 1_000)
+    path = tmp_path / "huge.md"
+    path.write_text("# Notes\n\n" + "voltage " * 200, encoding="utf-8")
+    with pytest.raises(ingest.DocumentRejectedError, match="the limit is 1000"):
+        prepare_document(path, DocumentMetadata(title="Notes", subject="EMT"))
+
+
+def test_a_pdf_past_the_page_limit_is_refused_before_its_text_is_extracted(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """A PDF of a few kilobytes can declare any number of pages; the count is checked first."""
+    from pypdf import PdfWriter
+
+    import app.rag.ingest as ingest
+
+    writer = PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(width=612, height=792)
+    path = tmp_path / "pages.pdf"
+    with path.open("wb") as handle:
+        writer.write(handle)
+    monkeypatch.setattr(ingest, "MAX_PDF_PAGES", 2)
+    with pytest.raises(ingest.DocumentRejectedError, match="3 pages; the limit is 2"):
+        prepare_document(path, DocumentMetadata(title="Notes", subject="EMT"))

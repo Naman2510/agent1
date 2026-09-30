@@ -94,6 +94,19 @@ connection lasts only as long as its newest token: the client renews it with a `
 frame, and the server closes with `1008` once it expires. Frames, states, playback acknowledgements
 and the microphone tagging rule are in [ARCHITECTURE.md §10](ARCHITECTURE.md).
 
+The server ends a connection with these close codes and reasons:
+
+| Code | Reason | When |
+|---|---|---|
+| `1000` | `connection age limit` | after an hour |
+| `1008` | `credential expired` | the first frame after the newest token's expiry |
+| `1008` | `voice_quota_exceeded` | the day's voice allowance is used up. Usage is metered every 5 s of audio, and an `error` frame with the same code comes first |
+| `1008` | `audio faster than real time` | audio received has run more than 10 s ahead of the connection's age. No microphone sends that |
+
+A malformed frame does not end the connection. It is answered with an `error` frame (`bad_frame`,
+`frame_too_large`, `bad_control` for a control frame that is not a JSON object, or has a field of
+the wrong type, and `unknown_control`), and the conversation goes on.
+
 ## Admin
 
 | Method | Path | Notes |

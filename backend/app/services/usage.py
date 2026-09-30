@@ -143,14 +143,17 @@ class UsageLedger:
         raw = await self._redis.get(self._voice_key(student_id, now or datetime.now(UTC)))
         return int(raw) if raw else 0
 
+    @property
+    def voice_allowance_seconds(self) -> int:
+        return self._settings.rate_limit_voice_minutes_per_day * 60
+
     async def check_voice_quota(self, student_id: str, *, now: datetime | None = None) -> None:
-        allowance = self._settings.rate_limit_voice_minutes_per_day * 60
         try:
             used = await self.voice_seconds_used(student_id, now=now)
         except redis.RedisError:
             log.warning("voice_quota.unavailable", exc_info=True)
             return
-        if used >= allowance:
+        if used >= self.voice_allowance_seconds:
             raise VoiceQuotaExceededError
 
     async def record_voice_seconds(
@@ -158,8 +161,9 @@ class UsageLedger:
     ) -> int:
         """Add to today's usage and return the new total (0 when the counter is unreachable).
 
-        Called as audio is consumed rather than once at session end, so an abandoned session still
-        counts the audio it actually used.
+        Called as audio is consumed — every few seconds of it, and once more at the close — so an
+        abandoned session still counts the audio it used, and the allowance holds while a
+        connection is open, however many are.
         """
         key = self._voice_key(student_id, now or datetime.now(UTC))
         try:

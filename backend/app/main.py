@@ -19,7 +19,7 @@ from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
-from app.core.middleware import RequestContextMiddleware
+from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from app.core.rate_limit import RateLimiter
 from app.core.redis import create_redis
 from app.core.security import PasswordHasherService
@@ -133,6 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_age=600,
     )
     app.add_middleware(RequestContextMiddleware)
+    # Outermost of ours, so that every response — a refusal, a preflight — carries them.
+    app.add_middleware(SecurityHeadersMiddleware, production=settings.is_production)
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/v1")

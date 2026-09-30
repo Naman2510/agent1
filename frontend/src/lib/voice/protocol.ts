@@ -57,3 +57,12 @@ export function decodeAudio(data: ArrayBuffer): { turnId: number; seq: number; p
 export function micTurnId(state: TurnState, turnId: number): number {
   return state === "thinking" || state === "speaking" || state === "barged_in" ? turnId + 1 : turnId;
 }
+
+/** What the student is told when the socket closes: nothing for an ordinary close, the server's
+ *  reason otherwise, in words where the reason is a code. */
+export function closeMessage(code: number, reason: string): string | null {
+  if (code === 1000) return null;
+  if (reason === "credential expired") return "Your sign-in expired. Reconnect to continue.";
+  if (reason === "voice_quota_exceeded") return "You've used today's voice allowance.";
+  return reason || "The voice connection closed.";
+}

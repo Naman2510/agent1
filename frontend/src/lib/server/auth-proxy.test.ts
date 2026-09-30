@@ -42,7 +42,7 @@ const TOKENS = { access_token: "acc-1", refresh_token: "ref-1", token_type: "bea
 describe("login", () => {
   it("keeps the refresh token out of the page and in an httpOnly, strict, path-scoped cookie", async () => {
     backend(200, TOKENS);
-    const response = await login(request("/api/auth/login", { body: { email: "a@b.co", password: "x" } }));
+    const response = await login(request("/api/auth/login", { body: { email: "a@example.com", password: "x" } }));
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -59,7 +59,7 @@ describe("login", () => {
   it("refuses a cross-site caller before touching the backend", async () => {
     const fetchMock = backend(200, TOKENS);
     const response = await login(
-      request("/api/auth/login", { body: { email: "a@b.co", password: "x" }, origin: "https://evil.example" }),
+      request("/api/auth/login", { body: { email: "a@example.com", password: "x" }, origin: "https://evil.example" }),
     );
     expect(response.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -67,14 +67,14 @@ describe("login", () => {
 
   it("refuses a request with no Origin at all", async () => {
     const fetchMock = backend(200, TOKENS);
-    const response = await login(request("/api/auth/login", { body: { email: "a@b.co" }, origin: null }));
+    const response = await login(request("/api/auth/login", { body: { email: "a@example.com" }, origin: null }));
     expect(response.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("relays the backend's error envelope and status unchanged", async () => {
     backend(401, { error: { code: "invalid_credentials", message: "Invalid email or password." } });
-    const response = await login(request("/api/auth/login", { body: { email: "a@b.co", password: "x" } }));
+    const response = await login(request("/api/auth/login", { body: { email: "a@example.com", password: "x" } }));
     expect(response.status).toBe(401);
     expect((await response.json()).error.code).toBe("invalid_credentials");
     expect(response.headers.get("set-cookie")).toBeNull();
@@ -84,7 +84,7 @@ describe("login", () => {
     const fetchMock = backend(200, TOKENS);
     await login(
       request("/api/auth/login", {
-        body: { email: "a@b.co", password: "x" },
+        body: { email: "a@example.com", password: "x" },
         headers: { "x-forwarded-for": "6.6.6.6, 198.51.100.7" },
       }),
     );
@@ -96,7 +96,7 @@ describe("login", () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new TypeError("fetch failed");
     }));
-    const response = await login(request("/api/auth/login", { body: { email: "a@b.co", password: "x" } }));
+    const response = await login(request("/api/auth/login", { body: { email: "a@example.com", password: "x" } }));
     expect(response.status).toBe(502);
     expect((await response.json()).error.code).toBe("backend_unavailable");
   });
