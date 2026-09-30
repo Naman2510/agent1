@@ -360,3 +360,99 @@ async def test_recovery_leaves_a_healthy_session_and_its_work_alone(
     await service.recover()
     await db_session.commit()
     assert len(await _messages(db_session, student_session)) == 2
+
+
+class _Watching(FakeLLMProvider):
+    """Notes, when the model is asked, whether the turn still holds a database transaction."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__([ScriptedTurn(text="Loop voltages sum to zero.")])
+        self._session = session
+        self.in_transaction_when_asked: list[bool] = []
+
+    async def stream(self, request):  # type: ignore[no-untyped-def,override]
+        self.in_transaction_when_asked.append(self._session.in_transaction())
+        async for event in super().stream(request):
+            yield event
+
+
+async def test_a_turn_holds_no_database_connection_while_the_model_answers(
+    db_session: AsyncSession, settings: Settings, redis_client, student_session: uuid.UUID
+) -> None:  # type: ignore[no-untyped-def]
+    """A transaction holds a pooled connection. Held through the model's answer and the student's
+    playback, it made the pool a worker's limit on simultaneous turns (docs/LOAD.md)."""
+    llm = _Watching(db_session)
+    service = ConversationService(
+        llm=llm,
+        messages=MessageRepository(db_session),
+        ledger=UsageLedger(redis_client, settings),
+        settings=settings,
+        db=db_session,
+    )
+    student_id = (await db_session.get(Session, student_session)).student_id  # type: ignore[union-attr]
+    await db_session.commit()
+
+    async for _fragment, _result in service.stream_turn(
+        session_id=student_session, student_id=student_id, utterance="What is KVL?"
+    ):
+        pass
+
+    assert llm.in_transaction_when_asked == [False]
+    assert [m.content for m in await _messages(db_session, student_session)] == [
+        "What is KVL?",
+        "Loop voltages sum to zero.",
+    ]
+
+
+class _SlowToRecordTheAnswer(MessageRepository):
+    """Holds the answer's write until released, so a cancellation can land in the middle of it."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        super().__init__(session)
+        self.recording = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def append(self, **fields):  # type: ignore[no-untyped-def,override]
+        if fields["role"] is MessageRole.ASSISTANT:
+            self.recording.set()
+            await self.release.wait()
+        return await super().append(**fields)
+
+
+async def test_an_answer_being_recorded_when_the_turn_is_cancelled_is_still_recorded(
+    db_session: AsyncSession, settings: Settings, redis_client, student_session: uuid.UUID
+) -> None:  # type: ignore[no-untyped-def]
+    """A barge-in, or the student leaving, can land while the answer is being written — under
+    load, while the write waits for a pooled connection. Cut off there, the answer the student
+    had heard was never recorded, and a flush or commit cut off mid-way broke the transaction
+    (docs/LOAD.md)."""
+    messages = _SlowToRecordTheAnswer(db_session)
+    service = ConversationService(
+        llm=FakeLLMProvider([ScriptedTurn(text="Loop voltages sum to zero.")]),
+        messages=messages,
+        ledger=UsageLedger(redis_client, settings),
+        settings=settings,
+        db=db_session,
+    )
+    student_id = (await db_session.get(Session, student_session)).student_id  # type: ignore[union-attr]
+    await db_session.commit()
+
+    async def turn() -> None:
+        async for _fragment, _result in service.stream_turn(
+            session_id=student_session, student_id=student_id, utterance="What is KVL?"
+        ):
+            pass
+
+    running = asyncio.create_task(turn())
+    await messages.recording.wait()
+    running.cancel()
+    messages.release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    await service.recover()
+    assert not db_session.in_transaction(), "nothing left half-written"
+    assert [m.content for m in await _messages(db_session, student_session)] == [
+        "What is KVL?",
+        "Loop voltages sum to zero.",
+    ]

@@ -239,6 +239,9 @@ class ConversationService:
                 profile = await finish_then_cancel(self._student_profiles.get_or_create(student_id))
                 memory_digest = profile.digest or None
 
+            # The turn's reads and its index are done; what follows waits on models.
+            await self._release_connection()
+
             # Fail closed (see __init__): no intent_gate means no tool is offered, not every tool.
             allowed_tools: frozenset[str] = frozenset()
             if self._intent_gate is not None and self._tool_registry is not None:
@@ -284,6 +287,7 @@ class ConversationService:
                     language=language or script_of(utterance),
                 )
             )
+            await self._release_connection()
             try:
                 if (
                     self._tool_registry is not None
@@ -418,45 +422,20 @@ class ConversationService:
                     cited_refs, ContextBlock(text="", sources=citation_sources)
                 )
 
-            message_id = await self._persist_assistant_turn(
-                session_id=session_id, turn_index=turn_index, result=result
+            # One unit that a cancellation waits for, like every other write of the turn: a
+            # barge-in or a closing connection can land here too, and cut off mid-flush or
+            # mid-commit it lost the answer and broke the transaction — under load, where a write
+            # can wait for a pooled connection, repeatedly (docs/LOAD.md).
+            await finish_then_cancel(
+                self._record_answer(
+                    session_id=session_id,
+                    student_id=student_id,
+                    turn_index=turn_index,
+                    utterance=utterance,
+                    replaces=replaces,
+                    result=result,
+                )
             )
-            if self._db is not None:
-                # Commit now rather than leaving it to the request's own outer transaction scope:
-                # a background task below connects on its own session and writes a memory_events
-                # row with a foreign key to this message. That insert races an outer commit that
-                # has not happened yet — a real foreign-key violation, not a theoretical one, is
-                # exactly what an uncommitted message row produces (caught by a real test against
-                # a real schema, not by inspection). expire_on_commit=False on every session this
-                # service is built with means nothing already loaded needs a re-fetch afterwards.
-                await self._db.commit()
-            await self._ledger.record_turn(result.cost)
-
-            # Off the critical path (app.core.background): the response has already been streamed
-            # to the student by the time either of these runs. Independent of each other and of
-            # the tool loop above — a window-cache outage must not block memory extraction or vice
-            # versa, so each gets its own tracked task rather than one that fails as a unit.
-            if self._window_cache is not None:
-                spawn(
-                    self._window_cache.record_turn(
-                        session_id,
-                        user_message=TurnMessage(role="user", text=utterance),
-                        assistant_message=TurnMessage(role="assistant", text=result.text),
-                        replaces=replaces,
-                    ),
-                    name=f"memory_window.record_turn:{session_id}",
-                )
-            if self._memory_extractor is not None:
-                spawn(
-                    self._memory_extractor.extract_and_apply(
-                        student_id=student_id,
-                        session_id=session_id,
-                        message_id=message_id,
-                        utterance=utterance,
-                        reply=result.text,
-                    ),
-                    name=f"memory_extractor.extract_and_apply:{session_id}",
-                )
             log.info(
                 "conversation.turn_completed",
                 session_id=str(session_id),
@@ -470,6 +449,72 @@ class ConversationService:
             )
 
         yield "", result
+
+    async def _record_answer(
+        self,
+        *,
+        session_id: uuid.UUID,
+        student_id: uuid.UUID,
+        turn_index: int,
+        utterance: str,
+        replaces: str | None,
+        result: TurnResult,
+    ) -> None:
+        """Keep the answer: its message, its cost, and what the memory tiers take from it."""
+        message_id = await self._persist_assistant_turn(
+            session_id=session_id, turn_index=turn_index, result=result
+        )
+        if self._db is not None:
+            # Commit now rather than leaving it to the request's own outer transaction scope:
+            # a background task below connects on its own session and writes a memory_events
+            # row with a foreign key to this message. That insert races an outer commit that
+            # has not happened yet — a real foreign-key violation, not a theoretical one, is
+            # exactly what an uncommitted message row produces (caught by a real test against
+            # a real schema, not by inspection). expire_on_commit=False on every session this
+            # service is built with means nothing already loaded needs a re-fetch afterwards.
+            await self._db.commit()
+        if result.cost is not None:  # priced before the answer is recorded
+            await self._ledger.record_turn(result.cost)
+
+        # Off the critical path (app.core.background): the response has already been streamed
+        # to the student by the time either of these runs. Independent of each other and of
+        # the tool loop — a window-cache outage must not block memory extraction or vice
+        # versa, so each gets its own tracked task rather than one that fails as a unit.
+        if self._window_cache is not None:
+            spawn(
+                self._window_cache.record_turn(
+                    session_id,
+                    user_message=TurnMessage(role="user", text=utterance),
+                    assistant_message=TurnMessage(role="assistant", text=result.text),
+                    replaces=replaces,
+                ),
+                name=f"memory_window.record_turn:{session_id}",
+            )
+        if self._memory_extractor is not None:
+            spawn(
+                self._memory_extractor.extract_and_apply(
+                    student_id=student_id,
+                    session_id=session_id,
+                    message_id=message_id,
+                    utterance=utterance,
+                    reply=result.text,
+                ),
+                name=f"memory_extractor.extract_and_apply:{session_id}",
+            )
+
+    async def _release_connection(self) -> None:
+        """Commit, which hands the session's connection back to the pool until its next query.
+
+        Called wherever a turn is about to wait on something other than the database — the intent
+        model, the answer, the student's playback. A turn used to hold one connection from its
+        first query to its last commit, seconds of model time and the whole of the playback; with
+        a voice connection also holding one from before it was accepted, a worker's pool (10 + 5)
+        was its limit on simultaneous students, and the sixteenth timed out connecting
+        (docs/LOAD.md). Only where the service owns the transaction (`db` given), as for the
+        final commit.
+        """
+        if self._db is not None:
+            await finish_then_cancel(self._db.commit())
 
     async def recover(self) -> None:
         """Leave the database session usable after a turn that did not finish.
@@ -488,7 +533,10 @@ class ConversationService:
         try:
             broken = (await session.connection()).invalidated
         except SQLAlchemyError:
-            broken = True  # already failed, and waiting for exactly this rollback
+            # Already failed, and waiting for exactly this rollback. What failed is in the chain.
+            log.error("conversation.transaction_failed", exc_info=True)
+            await session.rollback()
+            return
         if broken:
             log.error("conversation.connection_lost")
             await session.rollback()

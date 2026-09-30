@@ -12,11 +12,13 @@ keeps a cough from cancelling a good explanation (R-08).
 from __future__ import annotations
 
 import abc
+import functools
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -159,12 +161,36 @@ class VadGate:
 SILERO_CONTEXT_SAMPLES = 64
 
 
+@functools.cache
+def _shared_session(path: str) -> Any:
+    """One ONNX Runtime session per model file, for every connection in the process.
+
+    Built per connection, a session cost ~10 MB and ~36 ms of the event loop — during which no
+    other student's audio was heard — so a hundred students connecting at once stalled the loop
+    for seconds, and each held its own copy of the same weights (docs/LOAD.md).
+    `InferenceSession.run` may be called by any number of callers; the state is theirs.
+    """
+    import onnxruntime as ort
+
+    options = ort.SessionOptions()
+    # One thread: the model is tiny and thread pools would contend with the event loop.
+    options.intra_op_num_threads = 1
+    options.inter_op_num_threads = 1
+    return ort.InferenceSession(path, sess_options=options, providers=["CPUExecutionProvider"])
+
+
 class SileroVoiceDetector(VoiceDetector):
     """Silero VAD (v6.2, pinned by scripts/fetch_models.sh) through ONNX Runtime.
 
-    Measured on this project's CPU-only target: ~3.9 ms per second of audio, i.e. about 0.4% of
-    one core in real time — small enough to be irrelevant to the latency budget, which is the
-    reason a learned detector is affordable here at all.
+    Measured on this project's CPU-only target: 0.22 ms per 32 ms window (Phase 9; ~3.9 ms per
+    second of audio when first written), about 0.7% of one core per connection in real time —
+    irrelevant to one turn's latency budget, which is the reason a learned detector is affordable
+    here at all, but under load it is a share of the event loop that grows with every student
+    (docs/LOAD.md).
+
+    The model is shared: one ONNX Runtime session per process, whatever the number of
+    connections. It holds no state of its own — each detector passes its recurrent state and
+    context in, and takes them back out — so sharing it changes no result.
 
     Thresholds are the library defaults and are **not tuned against real speech**, because no
     human-speech fixture exists in the environment where this was written. Tuning them is an
@@ -173,7 +199,6 @@ class SileroVoiceDetector(VoiceDetector):
 
     def __init__(self, model_path: Path | str = DEFAULT_MODEL_PATH) -> None:
         import numpy as np
-        import onnxruntime as ort
 
         self._np = np
         path = Path(model_path)
@@ -182,13 +207,7 @@ class SileroVoiceDetector(VoiceDetector):
                 f"Silero VAD weights not found at {path}. Run scripts/fetch_models.sh, or set "
                 "VAANIOS_SILERO_VAD_PATH."
             )
-        options = ort.SessionOptions()
-        # One thread: the model is tiny and thread pools would contend with the event loop.
-        options.intra_op_num_threads = 1
-        options.inter_op_num_threads = 1
-        self._session = ort.InferenceSession(
-            str(path), sess_options=options, providers=["CPUExecutionProvider"]
-        )
+        self._session = _shared_session(str(path.resolve()))
         self._sample_rate = np.array(16_000, dtype=np.int64)
         self._state = np.zeros((2, 1, 128), dtype=np.float32)
         self._context = np.zeros(SILERO_CONTEXT_SAMPLES, dtype=np.float32)

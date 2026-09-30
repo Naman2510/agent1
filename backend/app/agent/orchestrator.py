@@ -191,6 +191,9 @@ async def run_agent_turn(
                     call, registry=registry, ctx=tool_ctx, allowed_tool_names=allowed_tool_names
                 )
             )
+            # The call's record and whatever it wrote are kept now, and the connection goes back to
+            # the pool: the model is what the turn waits on next (docs/LOAD.md).
+            await finish_then_cancel(tool_ctx.db.commit())
             results.append(result)
             tool_activity.append(ToolActivityEntry(tool_name=call.name, ok=not result.is_error))
         tool_wall_clock_ms += int((time.perf_counter() - started) * 1000)

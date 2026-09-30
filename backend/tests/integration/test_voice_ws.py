@@ -331,3 +331,81 @@ def test_another_accounts_token_cannot_extend_a_connection(
         with pytest.raises(WebSocketDisconnect) as closed:
             ws.receive_text()
     assert closed.value.reason == "credential expired"
+
+
+@pytest.fixture
+def sync_client_one_db_connection(settings, _migrated_schema, monkeypatch):  # type: ignore[no-untyped-def]
+    """The real application with a database pool of exactly one connection."""
+    import fakeredis.aioredis
+
+    import app.main as main_module
+    from app.main import create_app
+
+    monkeypatch.setattr(
+        main_module,
+        "create_redis",
+        lambda _settings: fakeredis.aioredis.FakeRedis(decode_responses=True),
+    )
+    one = settings.model_copy(update={"database_pool_size": 1, "database_max_overflow": 0})
+    with TestClient(create_app(one)) as client:
+        yield client
+
+
+def test_connected_students_hold_no_database_connection_while_idle(
+    sync_client_one_db_connection: TestClient,
+) -> None:
+    """Under load, a worker admitted exactly as many students as its database pool held (15): each
+    connection's pre-accept lookups kept a pooled connection until its first turn committed, and
+    the next student timed out in the handshake (docs/LOAD.md). With a pool of one, three students
+    connect, and stay connected, side by side."""
+    import contextlib
+
+    client = sync_client_one_db_connection
+    students = [_register(client, f"pool{i}") for i in range(3)]
+    with contextlib.ExitStack() as stack:
+        for headers, session_id in students:
+            token = headers["Authorization"].removeprefix("Bearer ")
+            ws = stack.enter_context(_connect(client, session_id, token))
+            assert json.loads(ws.receive_text())["state"] == "listening"
+            assert json.loads(ws.receive_text())["type"] == "ready"
+
+
+def test_a_connection_is_metered_even_after_a_turn_was_rolled_back(
+    sync_client: TestClient, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """A turn that breaks mid-query is rolled back (ConversationService.recover), and a rollback
+    expires every row the connection's database session had loaded — the student's among them.
+    The close read the student's id from that row, failed, and never metered the connection's
+    audio; under load it happened ten times in one run (docs/LOAD.md)."""
+    from sqlalchemy import text as sql
+
+    from app.services.usage import UsageLedger
+    from app.voice.session import VoiceSession
+
+    close = VoiceSession.close
+
+    async def close_after_a_rolled_back_turn(self: VoiceSession) -> None:
+        db = self.conversation._db
+        assert db is not None
+        await db.execute(sql("SELECT 1"))
+        await db.rollback()
+        await close(self)
+
+    monkeypatch.setattr(VoiceSession, "close", close_after_a_rolled_back_turn)
+    headers, session_id = _register(sync_client)
+    token = headers["Authorization"].removeprefix("Bearer ")
+    state = sync_client.app_state  # type: ignore[attr-defined]
+    ledger = UsageLedger(state.redis, state.settings)
+    student_id = decode_access_token(state.settings, token)["sid"]
+
+    with _connect(sync_client, session_id, token) as ws:
+        ws.receive_text()
+        ws.receive_text()
+        for seq in range(150):  # three seconds
+            ws.send_bytes(encode_audio(AudioFrame(turn_id=0, seq=seq, pcm=SILENT_FRAME)))
+        ws.send_text(encode_control("session.end"))
+        used, deadline = 0, time.monotonic() + 5
+        while not used and time.monotonic() < deadline:
+            time.sleep(0.05)
+            used = sync_client.portal.call(ledger.voice_seconds_used, student_id)  # type: ignore[union-attr]
+    assert used == 3

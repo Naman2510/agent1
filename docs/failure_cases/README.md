@@ -1,6 +1,6 @@
 # Failure Cases
 
-**Status:** 14 cases (Phase 9 requires at least eight): 8 fixed (one not yet shown across CPU
+**Status:** 17 cases (Phase 9 requires at least eight): 11 fixed (one not yet shown across CPU
 vendors), 3 accepted as limitations with the reason recorded, 3 open.
 
 | Case | What failed | Category | Status |
@@ -19,6 +19,9 @@ vendors), 3 accepted as limitations with the reason recorded, 3 open.
 | [FC-012](012-a-pause-mid-question-ends-the-turn.md) | A pause mid-question ends the student's turn | interruption | accepted-limitation |
 | [FC-013](013-an-embedding-outage-silenced-every-sourced-answer.md) | An embedding outage made every sourced answer an apology | retrieval, degradation | fixed |
 | [FC-014](014-circuit-terms-misheard-in-english.md) | Circuit terms misheard in plain English | STT | open |
+| [FC-015](015-the-sixteenth-student-could-not-connect.md) | A server process admitted fifteen voice students; the sixteenth could not connect | load | fixed |
+| [FC-016](016-an-answer-being-recorded-when-cancelled-was-lost.md) | An answer being recorded when its turn was cancelled was lost | interruption, load | fixed |
+| [FC-017](017-a-rolled-back-turn-left-the-connection-unmetered.md) | After a rolled-back turn, the connection's audio went unmetered | cost control, load | fixed |
 
 **Not yet measured,** so no case can honestly be filed: *wrong tool selection* and *hallucination
 by the mentor* need a real model in the loop, and CI has none (tier T3, which would, is run by hand

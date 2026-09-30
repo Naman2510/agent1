@@ -248,6 +248,29 @@ def test_reset_forgets_the_previous_audio() -> None:
 
 
 @needs_silero
+def test_connections_share_one_model_and_none_of_their_state() -> None:
+    """One ONNX session per process, not per connection: per connection it cost ~10 MB and ~36 ms
+    of the event loop each (docs/LOAD.md). Sharing must change no result — a detector hears the
+    same whether or not another is running on the same model in between its windows."""
+    import numpy as np
+
+    from app.voice.vad import SileroVoiceDetector
+
+    speech = _fixture_windows()
+    by_itself = SileroVoiceDetector(SILERO_PATH)
+    alone = [by_itself.probability(window) for window in speech]
+    heard, other = SileroVoiceDetector(SILERO_PATH), SileroVoiceDetector(SILERO_PATH)
+    assert heard._session is other._session
+    rng = np.random.default_rng(7)
+    interleaved = []
+    for window in speech:
+        interleaved.append(heard.probability(window))
+        noise = (rng.standard_normal(VAD_WINDOW_SAMPLES) * 3000).astype(np.int16).tobytes()
+        other.probability(noise)
+    assert interleaved == alone
+
+
+@needs_silero
 def test_silero_requires_its_exact_window_size() -> None:
     """Silero is fixed at 512 samples for 16 kHz; padding a short window would shift timings."""
     from app.voice.vad import SileroVoiceDetector

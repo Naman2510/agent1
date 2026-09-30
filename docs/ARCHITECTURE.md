@@ -564,6 +564,12 @@ is three to four orders of magnitude below its stage budget, and the whole chain
 0.4% of one core in real time. Whatever TTFA turns out to be, it will be set by the providers and
 by the turn-end wait — which is where the tuning effort belongs.
 
+**Under load it is a different question** ([LOAD.md](LOAD.md), Phase 9). Per session the VAD is
+small, but every connected session runs it every 32 ms, whether the student is talking or not. At
+50 students on one process it was most of the process's CPU. One window measured 0.22 ms in isolation
+on 30 September, not 0.12 ms, and about 0.29 ms under that load, with one model shared by every
+connection. One process serves about 50 connected students before their waits grow.
+
 Three honest observations about this budget, recorded now so they are not "discovered" later:
 
 1. **Sub-second TTFA is not plausible** for this design on a CPU-only host with a remote LLM. Stage 2

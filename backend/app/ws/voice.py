@@ -126,7 +126,12 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
             )
             return
 
-        conversation_session = await SessionRepository(db).get_for_student(session_id, student.id)
+        # A value, not the row's attribute: a turn that fails mid-query is rolled back
+        # (ConversationService.recover), which expires every row this session loaded, and reading
+        # an expired attribute outside a query is an error — at the close, it lost the
+        # connection's metering (docs/LOAD.md).
+        student_id: uuid.UUID = student.id
+        conversation_session = await SessionRepository(db).get_for_student(session_id, student_id)
         if conversation_session is None:
             # Indistinguishable from "not yours", as on the HTTP surface.
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="unknown session")
@@ -134,15 +139,20 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
 
         ledger = UsageLedger(app.state.redis, settings)
         try:
-            await ledger.check_voice_quota(str(student.id))
+            await ledger.check_voice_quota(str(student_id))
         except AppError as exc:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=exc.code)
             return
 
+        # The lookups above opened a transaction, and with it a pooled connection held until the
+        # first turn's commit — so a worker's pool (10 + 5) was its limit on connected students,
+        # idle or not, and the sixteenth timed out in the handshake (docs/LOAD.md). Ended here, a
+        # connection holds a database connection only while a turn is actually using it.
+        await db.commit()
         await websocket.accept(subprotocol=BEARER_SUBPROTOCOL)
 
         voice = VoiceSession(
-            student_id=student.id,
+            student_id=student_id,
             session_id=session_id,
             transport=_WebSocketTransport(websocket),
             vad=VadGate(
@@ -239,7 +249,7 @@ async def voice_ws(websocket: WebSocket, session_id: uuid.UUID) -> None:
         finally:
             await voice.close()
             # Metered as audio is consumed, so an abandoned session still counts what it used.
-            await ledger.record_voice_seconds(str(student.id), audio_ms // 1000)
+            await ledger.record_voice_seconds(str(student_id), audio_ms // 1000)
             await db.commit()
             log.info(
                 "voice.session_closed",

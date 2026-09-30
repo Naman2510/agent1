@@ -116,6 +116,7 @@ class Turn:
 @dataclass
 class Student:
     turns: list[Turn] = field(default_factory=list)
+    connected: bool = False
     failure: str | None = None
     late_ms: float = 0.0  # how far behind real time this client fell sending audio
 
@@ -143,6 +144,7 @@ async def student(
         async with websockets.connect(
             url, subprotocols=[Subprotocol("bearer"), Subprotocol(token)], max_size=None
         ) as ws:
+            result.connected = True
             state: dict[str, Any] = {"state": "", "turn_id": 0}
             playback: dict[str, Any] = {"turn": -1, "received_ms": 0.0, "started": 0.0, "acked": 0}
             current: list[Turn] = []
@@ -356,11 +358,16 @@ async def level(
     for t in turns:
         for code in t.errors:
             errors[code] = errors.get(code, 0) + 1
+    failures: dict[str, int] = {}
+    for r in results:
+        if r.failure:
+            failures[r.failure] = failures.get(r.failure, 0) + 1
     return {
         "sessions": n,
         "turns_expected": n * questions,
         "turns_complete": len(complete),
-        "connection_failures": sorted({r.failure for r in results if r.failure}),
+        "connected": sum(r.connected for r in results),
+        "connection_failures": failures,
         "errors": errors,
         "final_ms": [(t.final - t.speech_end) * 1000 for t in complete if t.final],
         "first_audio_ms": [
@@ -383,7 +390,8 @@ def report(r: dict[str, Any]) -> str:
 
     lags = r["loop_lag_ms"]
     out = [
-        f"{r['sessions']} sessions: {r['turns_complete']} of {r['turns_expected']} turns complete",
+        f"{r['sessions']} sessions: {r['connected']} connected, {r['turns_complete']} of"
+        f" {r['turns_expected']} turns complete",
         line("speech end → stt.final", r["final_ms"]),
         line("speech end → first audio", r["first_audio_ms"]),
         line("server ttfa_ms", r["server_ttfa_ms"]),
@@ -395,7 +403,7 @@ def report(r: dict[str, Any]) -> str:
     if r["errors"]:
         out.append(f"  errors {r['errors']}")
     if r["connection_failures"]:
-        out.append(f"  connection failures {r['connection_failures']}")
+        out.append(f"  failures {r['connection_failures']}")
     return "\n".join(out)
 
 
