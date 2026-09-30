@@ -115,9 +115,8 @@ chose AVX-512 convolution kernels there), but neither library promises the same 
 CPU models: MKL honours its reproducible AVX2 mode on Intel CPUs only, and oneDNN promises
 identical results only on identical hardware. So a baseline is enforced on the CPU model that
 computed it and compared on any other, where a difference is reported, not failed (FC-006). The
-numbers below are the AMD EPYC 7763's. What it measures is a
-recogniser hearing eSpeak — useful for comparing recognisers and settings, not a statement about
-anyone's voice. Its normalisation today is case, apostrophes and punctuation only: no numeral
+numbers below are the AMD EPYC 7763's. What it measures is a recogniser hearing eSpeak — useful
+for comparing recognisers and settings, not a statement about anyone's voice. Its normalisation today is case, apostrophes and punctuation only: no numeral
 expansion, no spelling-variant map (below).
 
 | Language (eSpeak voice) | Parts | WER | CER | Word for word | Language detected as written |
