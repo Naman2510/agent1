@@ -28,12 +28,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/constraints.txt
       - name: Install
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,rag,eval]"
+          pip install -c constraints.txt -e ".[dev,rag,eval]"
       - name: Cache model weights
         uses: actions/cache@v4
         with:
@@ -85,13 +87,15 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/constraints.txt
 
       - name: Install
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,rag,eval]"
+          pip install -c constraints.txt -e ".[dev,rag,eval]"
 
       - name: Cache model weights
         uses: actions/cache@v4
@@ -160,7 +164,7 @@ jobs:
         run: |
           # setuptools too: the runner's own (79.x) carries PYSEC-2026-3447, fixed in 83.
           python -m pip install --upgrade pip "setuptools>=83" pip-audit
-          pip install -e .
+          pip install -c constraints.txt -e .
           # Blocking since Phase 9 (SECURITY.md §6). An advisory with no fix yet, or one that
           # cannot reach this application, is ignored by ID (--ignore-vuln) with the reason
           # recorded next to it, never by making the step non-blocking again.

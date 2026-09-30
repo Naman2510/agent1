@@ -33,7 +33,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -c constraints.txt -e .
       - name: Smoke test the adapter
         if: env.ANTHROPIC_API_KEY != ''
         working-directory: backend

@@ -7,12 +7,12 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
 RUN apt-get update \
     && apt-get install --no-install-recommends -y build-essential \
     && rm -rf /var/lib/apt/lists/*
-COPY backend/pyproject.toml ./
+COPY backend/pyproject.toml backend/constraints.txt ./
 COPY backend/app ./app
 # Only the base dependency set: the `dev`, `eval` and `voice-local` extras never reach production
-# (ADR-0015).
+# (ADR-0015). At the versions CI tested (constraints.txt).
 RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir .
+    && /opt/venv/bin/pip install --no-cache-dir -c constraints.txt .
 
 # The VAD's weights: the same pinned release and checksum as scripts/fetch_models.sh. Without them
 # every voice connection fails at the handshake.
