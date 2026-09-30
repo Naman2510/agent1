@@ -12,7 +12,7 @@ behaviour Phase 2 always had, unchanged.
 from __future__ import annotations
 
 import time
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 import structlog
@@ -90,6 +90,7 @@ async def run_agent_turn(
     tool_ctx: ToolContext,
     max_output_tokens: int,
     effort: Effort | None = None,
+    after_tool_call: Callable[[], Awaitable[None]] | None = None,
 ) -> AsyncGenerator[tuple[str, AgentTurnOutcome | None], None]:
     """Run the loop for one turn. Yields `(text_fragment, None)` as it streams, then exactly one
     final `("", outcome)` — the same yield contract `ConversationService.stream_turn` already
@@ -98,6 +99,11 @@ async def run_agent_turn(
     Disabling every tool (`allowed_tool_names` empty, e.g. a CASUAL/CLARIFICATION intent) still
     goes through this loop rather than a separate no-tools code path — one loop to trust, not two
     that could silently diverge; it simply never sees a `tool_use` stop reason to act on.
+
+    `after_tool_call` runs once each call is recorded — before the model, which is what the turn
+    waits on next. The transaction is the caller's, so ending it is too: the conversation service
+    commits there, handing the connection back to the pool (docs/LOAD.md); the evaluation suites,
+    which must leave no trace, pass nothing.
     """
     messages = list(initial_messages)
     tools = registry.specs_for(allowed_tool_names)
@@ -191,9 +197,8 @@ async def run_agent_turn(
                     call, registry=registry, ctx=tool_ctx, allowed_tool_names=allowed_tool_names
                 )
             )
-            # The call's record and whatever it wrote are kept now, and the connection goes back to
-            # the pool: the model is what the turn waits on next (docs/LOAD.md).
-            await finish_then_cancel(tool_ctx.db.commit())
+            if after_tool_call is not None:
+                await after_tool_call()
             results.append(result)
             tool_activity.append(ToolActivityEntry(tool_name=call.name, ok=not result.is_error))
         tool_wall_clock_ms += int((time.perf_counter() - started) * 1000)

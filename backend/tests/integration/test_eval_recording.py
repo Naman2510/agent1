@@ -133,3 +133,21 @@ async def test_the_retrieval_suite_leaves_the_corpus_as_it_found_it_and_repeats_
     finally:
         await db_session.delete(bystander)
         await db_session.commit()
+
+
+async def test_the_agent_suites_leave_no_trace(
+    settings: Settings, db_session: AsyncSession
+) -> None:
+    """They succeed by changing nothing, inside a transaction that is never committed. When the
+    tool loop committed after each call itself, the first suite's actor was kept and the next
+    could not create its own, and CI's tier T1 failed on exactly that. Committing is now the
+    caller's decision (`run_agent_turn(after_tool_call=...)`), and these suites make none."""
+    from app.db.models import User
+
+    for name in ("agent", "injection"):  # CI's order
+        _, config = load_config(CONFIGS / f"{name}.toml")
+        await SUITES[name].evaluate(config, DATASETS / "v1", False, settings)
+    kept = await db_session.scalar(
+        select(func.count()).select_from(User).where(User.email == "eval-suite@example.invalid")
+    )
+    assert kept == 0

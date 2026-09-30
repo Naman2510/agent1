@@ -311,6 +311,9 @@ class ConversationService:
                         tool_ctx=tool_ctx,
                         max_output_tokens=self._settings.llm_max_output_tokens,
                         effort=Effort(self._settings.llm_effort),
+                        # Each call's record, and whatever it wrote, kept before the model is
+                        # asked again — and the connection back in the pool while it answers.
+                        after_tool_call=self._release_connection,
                     ):
                         if outcome is not None:
                             usage = outcome.usage

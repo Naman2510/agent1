@@ -365,8 +365,8 @@ async def test_recovery_leaves_a_healthy_session_and_its_work_alone(
 class _Watching(FakeLLMProvider):
     """Notes, when the model is asked, whether the turn still holds a database transaction."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        super().__init__([ScriptedTurn(text="Loop voltages sum to zero.")])
+    def __init__(self, session: AsyncSession, turns: list[ScriptedTurn] | None = None) -> None:
+        super().__init__(turns or [ScriptedTurn(text="Loop voltages sum to zero.")])
         self._session = session
         self.in_transaction_when_asked: list[bool] = []
 
@@ -402,6 +402,42 @@ async def test_a_turn_holds_no_database_connection_while_the_model_answers(
         "What is KVL?",
         "Loop voltages sum to zero.",
     ]
+
+
+async def test_a_tool_turn_holds_no_database_connection_while_the_model_answers_again(
+    db_session: AsyncSession, settings: Settings, redis_client, student_session: uuid.UUID
+) -> None:  # type: ignore[no-untyped-def]
+    """After a tool call the model is asked again. The call's record is kept, and the connection
+    handed back, before that — by the hook the service gives the tool loop (`after_tool_call`)."""
+    search = ToolCall(id="c1", name="search_knowledge", arguments={"query": "KVL"})
+    llm = _Watching(
+        db_session,
+        [
+            ScriptedTurn(text="question"),  # IntentGate.classify
+            ScriptedTurn(tool_calls=[search], stop_reason="tool_use"),
+            ScriptedTurn(text="Loop voltages sum to zero."),
+        ],
+    )
+    service = ConversationService(
+        llm=llm,
+        messages=MessageRepository(db_session),
+        ledger=UsageLedger(redis_client, settings),
+        settings=settings,
+        db=db_session,
+        tool_registry=DEFAULT_REGISTRY,
+        intent_gate=IntentGate(llm),
+        rag=RagService(db_session, embeddings=TfidfSvdEmbeddingProvider(), reranker=NoopReranker()),
+    )
+    student_id = (await db_session.get(Session, student_session)).student_id  # type: ignore[union-attr]
+    await db_session.commit()
+
+    async for _fragment, _result in service.stream_turn(
+        session_id=student_session, student_id=student_id, utterance="What is KVL?"
+    ):
+        pass
+
+    # The intent call, the first answer, and the answer after the tool call.
+    assert llm.in_transaction_when_asked == [False, False, False]
 
 
 class _SlowToRecordTheAnswer(MessageRepository):
