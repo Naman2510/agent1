@@ -107,8 +107,11 @@ Hugging Face, which this project's development environment cannot reach, so it r
 reproduce on another runner (FC-006, PHASE_8_AUDIT D8-15): Whisper's fallback sampled unseeded, and
 the arithmetic followed the CPU. Now each utterance is decoded by a seeded model of its own, the
 arithmetic is pinned (and recorded in the summary), and every T2 run checks both configs'
-baselines (`backend/eval/baselines/stt*.json`): the language-hint one has reproduced exactly on a
-second runner — the same CPU model, so across vendors it is not yet shown. What it measures is a
+baselines (`backend/eval/baselines/stt*.json`). The language-hint one has reproduced exactly on a
+second runner of the same CPU model (AMD EPYC 7763). The first Intel runner (Xeon Platinum 8573C,
+AVX-512) reproduced neither baseline: English WER 0.127 against 0.123, Hindi 1.255 against 1.425.
+One cause is pinned since: oneDNN inside CTranslate2 chose AVX-512 convolution kernels there (FC-006).
+Until an Intel run agrees, the numbers below are the AMD runner's. What it measures is a
 recogniser hearing eSpeak — useful for comparing recognisers and settings, not a statement about
 anyone's voice. Its normalisation today is case, apostrophes and punctuation only: no numeral
 expansion, no spelling-variant map (below).

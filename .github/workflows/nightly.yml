@@ -55,7 +55,8 @@ jobs:
         run: |
           set -o pipefail
           lscpu | grep -E '^(Model name|Flags)' | cut -c1-200 | tee t2-report.txt
-          CT2_VERBOSE=1 python - <<'EOF' 2>&1 | { grep -E 'CPU:|ISA|MKL|backend|WARNING' || true; } | tee -a t2-report.txt
+          # oneDNN (inside CTranslate2) runs the encoder's convolutions and names the kernel it used.
+          CT2_VERBOSE=1 ONEDNN_VERBOSE=1 python - <<'EOF' 2>&1 | { grep -E 'CPU:|ISA|MKL|backend|WARNING|onednn_verbose,(info,cpu,isa|exec,cpu,convolution)' || true; } | cut -c1-160 | sort -u | tee -a t2-report.txt
           import numpy as np
           from eval.suites import stt
           stt.pin_numerics()

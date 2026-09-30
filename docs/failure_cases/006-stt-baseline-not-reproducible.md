@@ -1,6 +1,8 @@
 # FC-006 — A speech-recognition baseline no other machine could reproduce
 
-**Status:** fixed — reproduced exactly on a second runner; across CPU vendors not yet shown
+**Status:** open — reproduced exactly on a second runner of the same CPU model; the first Intel
+runner did not reproduce, and one cause of that is found and pinned (below); whether it is the
+only one waits on the next Intel runner
 **Found:** 2026-09-27 · **Phase:** 8 (PHASE_8_AUDIT D8-15) · **Component:** evaluation (stt)
 **Severity:** major — a baseline that does not reproduce cannot catch a regression
 **Case IDs:** the whole `stt` suite, dataset v1
@@ -75,3 +77,37 @@ against about four minutes unpinned — which led T2 to run each config once rat
 If an Intel runner disagrees, the fallback is MKL's COMPATIBLE mode (slower, but documented as
 vendor-independent), and failing that a stated tolerance — which would be recorded here as the
 limit of what the baseline can catch.
+
+## The first Intel runner (Phase 9)
+
+T2's fifth run (4b3159a, 29 September) was the first on an Intel CPU: a Xeon Platinum 8573C,
+with AVX-512. The library versions were identical to the AMD runs (ctranslate2 4.8.2,
+faster-whisper 1.2.1), and the kernels reported were the same (CTranslate2 at AVX2, MKL for every
+product). Neither baseline reproduced:
+
+```
+                         AMD EPYC 7763 (baseline)   Intel Xeon 8573C
+stt              en WER  0.1227                     0.1273
+                 hi WER  1.4255                     1.2553
+                 all WER 0.4465                     0.4245
+stt-language-hint hi WER 0.9574                     0.9362
+                 hi CER  0.6328                     0.5932
+```
+
+EXP-013's comparison on that runner came out +0.047 (95% CI [+0.009, +0.098]), against +0.073
+on the AMD runner. The decision is the same (inconclusive), but the gain is not the same number.
+
+**One cause, found.** CTranslate2 carries oneDNN (v3.1.1) inside it, and oneDNN runs the
+encoder's two convolutions with kernels it picks for itself: `CT2_FORCE_CPU_ISA` does not reach it.
+On an AVX-512 machine its verbose log shows `brgconv:avx512_core`. On the AMD EPYC 7763, which has
+no AVX-512, it can only have used AVX2. Measured locally on the Whisper-shaped probe model, on
+an AVX-512 Xeon, capping oneDNN at AVX2 changes the encoder's output. `ONEDNN_MAX_CPU_ISA=AVX2` is
+now among the pins, and T2 logs the convolution kernel each run used. On the AMD runners the cap
+changes nothing, so the committed baselines keep their numbers, with the pin added to what they
+record (`amended` in each file).
+
+**Not yet shown:** that this was the only cause. MKL's reproducible mode at AVX2 is documented as
+reproducible across Intel processors, and only its COMPATIBLE mode across vendors. The next T2
+run on an Intel runner shows whether the numbers now agree. If they do not, the next step is MKL's
+COMPATIBLE mode, then a stated tolerance, as planned above. Until then the T2 check is red on any
+Intel runner, and the numbers in EVALUATION.md and EXP-013 are the AMD runner's.

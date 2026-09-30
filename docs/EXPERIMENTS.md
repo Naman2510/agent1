@@ -145,7 +145,10 @@ is"; English does not move; romanized Hindi barely moves.
 seeded, arithmetic pinned (FC-006), CI tier T2 at f94fccd on an AMD EPYC 7763. Both runs are held to
 committed baselines (`stt.json`, `stt-language-hint.json`); the candidate's reproduced exactly the
 baseline an earlier run had written on another machine. T2 has no database, so neither run is in
-`evaluation_runs`: the record is the baselines and the run's log.
+`evaluation_runs`: the record is the baselines and the run's log. A later T2 run on an Intel
+runner reproduced neither baseline, and the comparison came out +0.047 (95% CI [+0.009, +0.098]),
+against +0.073 here, with the same decision. Its arithmetic differed from the AMD runner's (FC-006),
+so the gain's size depends on the machine, within a range that does not change the decision.
 
 | | Auto-detected | Told the routed language |
 |---|---|---|

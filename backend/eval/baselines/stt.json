@@ -1,4 +1,5 @@
 {
+  "amended": "Phase 9: ONEDNN_MAX_CPU_ISA=AVX2 added to the recorded pins. On the AMD EPYC 7763 that recorded this baseline, which has no AVX-512, oneDNN's kernels were AVX2 already, so the metrics stand as recorded; the next T2 run checks that (FC-006).",
   "config": {
     "recogniser": {
       "beam_size": 5,
@@ -51,7 +52,8 @@
     "numerics": {
       "CT2_FORCE_CPU_ISA": "AVX2",
       "CT2_USE_MKL": "1",
-      "MKL_CBWR": "AVX2"
+      "MKL_CBWR": "AVX2",
+      "ONEDNN_MAX_CPU_ISA": "AVX2"
     },
     "wer": 0.4465
   }

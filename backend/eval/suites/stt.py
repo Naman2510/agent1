@@ -151,9 +151,17 @@ def language_for(case: SttCase, setting: str) -> str | None:
 # CTranslate2 picks its kernels, and Intel MKL its code path, from the CPU it finds, so two CI
 # runners computed different transcripts from the same audio (PHASE_8_AUDIT D8-15). These pin one
 # path for every x86-64 machine with AVX2: CTranslate2's own kernels, MKL for every matrix product
-# (by default it is used only on Intel CPUs), and MKL's reproducible mode. They must be set before
-# either library starts, so they are set here, over whatever the environment said.
-NUMERICS = {"CT2_FORCE_CPU_ISA": "AVX2", "CT2_USE_MKL": "1", "MKL_CBWR": "AVX2"}
+# (by default it is used only on Intel CPUs), and MKL's reproducible mode. And oneDNN, which
+# CTranslate2 carries inside it for the encoder's convolutions and which picks its own kernels:
+# on the first Intel runner, an AVX-512 machine, it chose AVX-512 ones where the AMD runners,
+# which have no AVX-512, used AVX2, and neither baseline reproduced (FC-006). They must be set
+# before any of the libraries starts, so they are set here, over whatever the environment said.
+NUMERICS = {
+    "CT2_FORCE_CPU_ISA": "AVX2",
+    "CT2_USE_MKL": "1",
+    "MKL_CBWR": "AVX2",
+    "ONEDNN_MAX_CPU_ISA": "AVX2",
+}
 
 
 def pin_numerics() -> None:

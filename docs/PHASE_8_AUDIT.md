@@ -133,6 +133,10 @@ AVX2, MKL throughout, MKL's reproducible mode) and recorded in the summary, and 
 the kernels chosen. The language-hint baseline then reproduced exactly on a second runner — the same
 CPU model (AMD EPYC 7763), so across vendors it is not yet shown (m8-01). FC-006. (bdcad75, f94fccd)
 
+*Added 2026-09-30, in Phase 9:* the first Intel runner (4b3159a) reproduced neither baseline. One
+cause, not covered by the pins above, is found: oneDNN inside CTranslate2 chose AVX-512 convolution
+kernels there. It is now pinned. PHASE_9_AUDIT.md and FC-006 have the rest.
+
 Severity: 2 Critical (D8-02, D8-04), 6 Major (D8-01, D8-03, D8-05, D8-10, D8-14, D8-15), 7 Minor. All
 fixed; each Critical and Major defect is covered by a test or a CI check that fails without the fix.
 
