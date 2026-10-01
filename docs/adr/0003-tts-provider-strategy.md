@@ -1,6 +1,8 @@
 # ADR-0003 — TTS: managed streaming synthesis for Indic languages, local voice for CI
 
 **Status:** Accepted (Phase 0), provider choice deferred to measurement · **Date:** 2026-09-17
+**Amended by [ADR-0018](0018-local-voice-espeak-ng.md):** the offline and CI voice is eSpeak NG,
+not Piper. The real-time path is unchanged.
 
 ## Context
 The mentor must speak English, Hindi, Tamil, and code-switched Hinglish, starting audio fast enough

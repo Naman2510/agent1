@@ -11,7 +11,7 @@ voice pipeline rather than a thin wrapper around an LLM API.
 | | |
 |---|---|
 | **Current phase** | Roadmap complete: Phases 0–10 have passed their gates. Phase 10 decided not to fine-tune the intent classifier until its prompted baseline is measured ([ADR-0017](docs/adr/0017-intent-classifier-not-fine-tuned.md)). What is not true yet is listed in [PHASE_10_AUDIT.md](docs/PHASE_10_AUDIT.md) §3: above all, no real model has run in the loop |
-| **Implementation** | 866 backend tests (97% line coverage), 42 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) exists for evaluation; no TTS provider does, and the Claude adapter has never run against the live API. |
+| **Implementation** | 884 backend tests (97% line coverage), 42 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) and a local voice (eSpeak NG) exist for evaluation and development; no managed recogniser or voice does, and the Claude adapter has never run against the live API. |
 | **Benchmarks** | Six suites have run, each recorded, reproducible from its record, and checked in CI, on small self-authored or synthetic datasets with their biases documented: language identification (0.9205 signal accuracy), retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893, 22 cases), agent tool gating (14/14 allowlist coverage, against a scripted model), prompt injection (19/19 attempted mutating calls blocked), the voice front end (a turn ends 575 ms after speech, in audio time, on synthetic speech) and recognition (English WER 0.123, exact on the CPU model that computed it and only compared on others ([FC-006](docs/failure_cases/006-stt-baseline-not-reproducible.md)); synthetic Hindi not recognised as Hindi at all). Three experiments decided: EXP-003 rejected, EXP-008 and EXP-013 inconclusive. Full-stack latency is unmeasured. |
 | **Last updated** | 2026-09-30 |
 
@@ -117,6 +117,14 @@ curl localhost:8000/v1/health   # {"status":"ok",...}
 curl localhost:8000/v1/ready    # per-dependency readiness
 ```
 
+**To hear the mentor speak,** add the local-voice overlay. It builds the backend with eSpeak NG
+and selects it, so answers are spoken in a robotic voice instead of the fake's silence (ADR-0018).
+The recogniser is still the fake unless `.env` says otherwise:
+
+```bash
+docker compose --env-file .env -f infra/compose.yaml -f infra/compose.local-voice.yaml up --build
+```
+
 **Running the tests** needs a PostgreSQL to point at — the suite runs the real migrations against a
 real database rather than a stand-in, because the schema relies on enums, JSONB, citext, partial
 indexes and check constraints:
@@ -126,8 +134,8 @@ cd backend
 pip install -c constraints.txt -e ".[dev,rag,eval]"   # the versions CI tests
 export VAANIOS_TEST_DATABASE_URL=postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
 bash scripts/fetch_models.sh    # Silero VAD weights (not committed)
-pytest -q                       # 866 tests
-pytest -q tests/unit            # 592 of them need no database at all
+pytest -q                       # 884 tests
+pytest -q tests/unit            # 612 of them need no database at all
 python scripts/bench_voice.py   # pipeline overhead, with real numbers
 ruff check . && mypy
 ```
@@ -142,9 +150,11 @@ so it is only sufficient through Phase 4).
 
 In the web app you can hold a **spoken or typed** conversation with the mentor, interrupt it by
 speaking over it or pressing Stop, and see where each answer came from — its sources and the tools
-it used, kept in the session's history. Everything runs today against the deterministic fake STT,
-TTS and LLM, so the words heard and spoken are placeholders: see [What is not
-verified](#what-works-today) below.
+it used, kept in the session's history. By default it runs against the deterministic fake STT,
+TTS and LLM, so the words heard and spoken are placeholders. The answers can be spoken by a real,
+local voice (eSpeak NG: robotic, in English, Hindi and Tamil) with
+`VAANIOS_TTS_PROVIDER=espeak`, and in the Compose stack with the overlay below. See [What is not
+verified](#what-works-today).
 
 **Phase 9 — failure analysis and hardening**
 - 17 failure cases, each with the input, the output verbatim and the mechanism
@@ -282,8 +292,10 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
 
 **What is not verified.** These are the honest boundary of this project today:
 
-1. **No real TTS, and only a local recogniser.** No word has been synthesised by a real model. A
-   real recogniser exists — faster-whisper, for evaluation and local development
+1. **No managed voice or recogniser, only local ones.** A local voice speaks answers: eSpeak NG, a
+   formant synthesiser, robotic and the same on every run (`VAANIOS_TTS_PROVIDER=espeak`,
+   ADR-0018). It says nothing about how a neural or managed voice would sound. A real recogniser
+   exists — faster-whisper, for evaluation and local development
    (`VAANIOS_STT_PROVIDER=faster-whisper`) — and has only ever heard synthetic speech: it runs in CI,
    because its weights cannot be downloaded where this was built. The managed streaming recogniser
    the real-time path needs does not exist. `build_stt`/`build_tts` raise for anything they do not

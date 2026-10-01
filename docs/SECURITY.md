@@ -77,6 +77,7 @@ that injection must not be able to *do* anything, rather than that it can be pre
 | XSS in transcript rendering | React escaping; no `dangerouslySetInnerHTML`; citations rendered as structured data | 7 |
 | CSRF | The API takes bearer tokens in headers, never cookies. The web app's refresh token is a cookie (Phase 7): `httpOnly`, `SameSite=Strict`, scoped to `/api/auth`, and the auth proxy refuses any request whose `Origin` is missing or another site's. No separate CSRF token: those two already refuse every cross-site request | 1, 7 |
 | Denial of wallet on eval endpoints | Eval/experiment endpoints are admin-only and rate-limited separately | 6 |
+| Crafted text reaching a native synthesiser | The local voice (eSpeak NG, ADR-0018) runs a C program on model output. The text goes in on standard input, never as arguments. It runs as a process per sentence, so a crash costs that sentence's audio and the answer goes on as text. The distribution packages used here carry the fixes for the five 2023 memory-safety CVEs (CVE-2023-49990 to 49994: Ubuntu 24.04's and Debian 12's 1.51 packages). It is not in the production image (CI checks): only `infra/compose.local-voice.yaml` builds it in | 10 |
 
 ## 3. Authentication & authorization
 

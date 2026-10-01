@@ -50,6 +50,27 @@ def sync_client(settings, _migrated_schema, monkeypatch):  # type: ignore[no-unt
         yield client
 
 
+def test_a_configured_voice_that_is_not_installed_stops_the_server_starting(
+    settings, _migrated_schema, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Not the first student's first answer (ADR-0018): the voice is built once at startup."""
+    import fakeredis.aioredis
+
+    import app.main as main_module
+    from app.main import create_app
+    from app.providers.tts import espeak
+
+    monkeypatch.setattr(
+        main_module,
+        "create_redis",
+        lambda _settings: fakeredis.aioredis.FakeRedis(decode_responses=True),
+    )
+    monkeypatch.setattr(espeak.shutil, "which", lambda _name: None)
+    application = create_app(settings.model_copy(update={"tts_provider": "espeak"}))
+    with pytest.raises(espeak.EspeakNotInstalledError), TestClient(application):
+        pass
+
+
 def _register(client: TestClient, prefix: str = "ws") -> tuple[dict[str, str], str]:
     email = f"{prefix}-{uuid.uuid4().hex[:8]}@example.com"
     response = client.post(

@@ -42,6 +42,15 @@ COPY --chown=vaanios:vaanios backend/alembic.ini ./alembic.ini
 COPY --chown=vaanios:vaanios backend/scripts ./scripts
 COPY --from=builder --chown=vaanios:vaanios /build/models ./models
 
+# The local voice (eSpeak NG, ADR-0018), only when asked for: infra/compose.local-voice.yaml sets
+# it. The default image has no synthesiser at all, so it cannot serve one by accident.
+ARG LOCAL_VOICE=0
+RUN if [ "$LOCAL_VOICE" = "1" ]; then \
+        apt-get update \
+        && apt-get install --no-install-recommends -y espeak-ng \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 USER vaanios
 EXPOSE 8000
 

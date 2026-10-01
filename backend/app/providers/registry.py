@@ -67,7 +67,13 @@ def build_stt(settings: Settings) -> STTProvider:
 def build_tts(settings: Settings) -> TTSProvider:
     if settings.tts_provider == "fake":
         return FakeTTSProvider()
-    raise UnknownProviderError("tts", settings.tts_provider, ["fake"])
+    if settings.tts_provider == "espeak":
+        # Imported here: it loads scipy, and needs a program the production image does not install
+        # (ADR-0018). Constructing it fails at startup if the program is missing.
+        from app.providers.tts.espeak import EspeakTTSProvider
+
+        return EspeakTTSProvider()
+    raise UnknownProviderError("tts", settings.tts_provider, ["fake", "espeak"])
 
 
 def build_embedding(settings: Settings) -> EmbeddingProvider:

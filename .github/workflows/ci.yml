@@ -46,6 +46,9 @@ jobs:
         # CI never exercised the detector production uses (tests/unit/test_vad.py fails, not
         # skips, when CI is set).
         run: bash backend/scripts/fetch_models.sh
+      - name: Install the local synthesiser
+        # eSpeak NG (ADR-0018). The tests that need real speech fail, not skip, when CI is set.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends espeak-ng
       - name: Lint and types
         working-directory: backend
         run: |
@@ -107,6 +110,9 @@ jobs:
         # CI never exercised the detector production uses (tests/unit/test_vad.py fails, not
         # skips, when CI is set).
         run: bash backend/scripts/fetch_models.sh
+      - name: Install the local synthesiser
+        # eSpeak NG (ADR-0018). The tests that need real speech fail, not skip, when CI is set.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends espeak-ng
 
       - name: Test
         working-directory: backend
@@ -215,6 +221,30 @@ jobs:
           docker run --rm --env-file .env.example \
             -e VAANIOS_JWT_SECRET=ci-secret-that-is-at-least-32-characters \
             vaanios-backend:ci python -c "import app.asgi; from app.voice.vad import SileroVoiceDetector; SileroVoiceDetector('models/silero_vad.onnx')"
+      - name: The image has no synthesiser, and the local-voice build speaks
+        # ADR-0018: eSpeak NG is for development and demos (infra/compose.local-voice.yaml), so the
+        # default image must not contain it; the opt-in build must start with it and say a sentence.
+        run: |
+          docker run --rm vaanios-backend:ci sh -c '! command -v espeak-ng'
+          docker build --build-arg LOCAL_VOICE=1 -f infra/docker/backend.Dockerfile -t vaanios-backend:local-voice .
+          docker run --rm --env-file .env.example \
+            -e VAANIOS_JWT_SECRET=ci-secret-that-is-at-least-32-characters \
+            -e VAANIOS_TTS_PROVIDER=espeak \
+            vaanios-backend:local-voice python -c "
+          import asyncio
+          from app.core.config import Settings
+          from app.providers.registry import build_tts
+          from app.providers.tts.base import SynthesisRequest
+          tts = build_tts(Settings())
+          async def say():
+              voice = tts.voices()[0]
+              request = SynthesisRequest(text='Hello from the mentor.', voice=voice)
+              return sum([len(frame) async for frame in tts.synthesize_stream(request)])
+          size = asyncio.run(say())
+          print(tts.info.model, size, 'bytes')
+          assert tts.info.name == 'espeak', tts.info
+          assert size > 24000, size
+          "
       - name: Build frontend image
         run: docker build -f infra/docker/frontend.Dockerfile -t vaanios-frontend:ci .
 

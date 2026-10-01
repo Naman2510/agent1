@@ -10,7 +10,7 @@ an explicit **revisit trigger**, so a decision can be reopened by evidence rathe
 |---|---|---|
 | [0001](adr/0001-transport-websocket-over-webrtc.md) | WebSocket transport for v1; WebRTC as a documented upgrade | Accepted |
 | [0002](adr/0002-stt-provider-strategy.md) | Local faster-whisper for eval/CI, managed streaming ASR for the real-time path | Accepted; provider choice deferred to EXP-001 |
-| [0003](adr/0003-tts-provider-strategy.md) | Managed streaming TTS for Indic languages, Piper for CI | Accepted; provider choice deferred |
+| [0003](adr/0003-tts-provider-strategy.md) | Managed streaming TTS for Indic languages; a local voice for CI (amended by 0018) | Accepted; provider choice deferred |
 | [0004](adr/0004-vad-silero.md) | Silero VAD (ONNX), server-side and authoritative | Accepted |
 | [0005](adr/0005-vector-store-pgvector.md) | PostgreSQL + pgvector rather than Qdrant | Accepted |
 | [0006](adr/0006-embedding-model.md) | `multilingual-e5-base` as the default embedding model | Accepted |
@@ -25,6 +25,7 @@ an explicit **revisit trigger**, so a decision can be reopened by evidence rathe
 | [0015](adr/0015-monorepo-and-eval-placement.md) | Monorepo, eval harness inside the backend package | Accepted |
 | [0016](adr/0016-provider-abstraction-boundaries.md) | Six provider interfaces and where the boundary sits | Accepted |
 | [0017](adr/0017-intent-classifier-not-fine-tuned.md) | The intent classifier is not fine-tuned until its prompted baseline is measured | Accepted (Phase 10) |
+| [0018](adr/0018-local-voice-espeak-ng.md) | The local voice is eSpeak NG, not Piper: all three languages, nothing to download | Accepted |
 
 ## Answers to the questions spec §40 asks directly
 

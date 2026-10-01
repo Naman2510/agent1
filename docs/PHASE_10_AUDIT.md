@@ -58,13 +58,14 @@ Phases 0 to 10 have passed their gates. What that does and does not mean, from t
   before they ran.
 - Graceful degradation for every dependency, load measured on one process, and the security
   checklist reconciled item by item.
-- 866 backend tests, 42 frontend unit tests, and 14 end-to-end tests in a real browser against the
+- 884 backend tests, 42 frontend unit tests, and 14 end-to-end tests in a real browser against the
   Compose stack.
 
 **Not true yet, and said so wherever it matters:**
 - **No real provider in the loop.** The answers come from a scripted model and the voice from a
-  fake synthesiser, and the Claude adapter has never run against the live API. So there is no
-  full-stack latency, and no measure of the mentor's own mistakes (M9-01, M8-01, M7-01).
+  fake synthesiser by default (a local one, eSpeak NG, now speaks them on request: ADR-0018), and
+  the Claude adapter has never run against the live API. So there is no full-stack latency, and no
+  measure of the mentor's own mistakes (M9-01, M8-01, M7-01).
 - **Every dataset is self-authored or synthetic.** Nothing has been measured on a real student's
   voice or question (M9-02).
 - **Two of the six planned evaluation suites** (`response`, `e2e`) do not exist (M9-03).

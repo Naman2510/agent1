@@ -26,7 +26,7 @@ from app.core.security import PasswordHasherService
 from app.core.telemetry import configure_tracing
 from app.db.session import create_engine, create_session_factory
 from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
-from app.providers.registry import build_llm, build_reranker
+from app.providers.registry import build_llm, build_reranker, build_tts
 from app.rag.service import RagService
 from app.services.memory_window import SessionWindowCache
 from app.services.usage import UsageLedger
@@ -45,6 +45,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.hasher = PasswordHasherService(settings)
     app.state.rate_limiter = RateLimiter(app.state.redis, settings)
     app.state.llm = build_llm(settings)
+    # The voice is built per connection (app/ws/voice.py). Building it once here fails at startup
+    # when it is misconfigured, and pays any one-off cost, such as loading a library, before the
+    # first student connects rather than during their first answer.
+    build_tts(settings)
     app.state.usage_ledger = UsageLedger(app.state.redis, settings)
 
     # Shared for the process lifetime, unlike a per-request RagService: TF-IDF/SVD's fit is a

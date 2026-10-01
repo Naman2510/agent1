@@ -79,7 +79,10 @@ class Settings(BaseSettings):
     # extra and its weights); the managed streaming recogniser ADR-0002 plans does not exist yet.
     stt_provider: Literal["fake", "faster-whisper"] = "fake"
     stt_model: str = "small"
-    tts_provider: Literal["fake"] = "fake"  # real adapters: Phase 3
+    # espeak: local synthesis for evaluation and development (needs the espeak-ng program, which
+    # the production image does not install); the managed streaming voice ADR-0003 plans does not
+    # exist yet (ADR-0018).
+    tts_provider: Literal["fake", "espeak"] = "fake"
     # tfidf_svd is what actually ships (ADR-0006's amendment — multilingual-e5-base needs
     # HuggingFace Hub, unreachable from this sandbox); it is the default so search_knowledge
     # works out of the box rather than needing an env var set to leave the fake behind.

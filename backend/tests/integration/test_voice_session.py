@@ -8,11 +8,15 @@ fencing, the pre-roll, the playback ledger, and what ends up in the database.
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import pytest
 import structlog
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -124,8 +128,9 @@ def _build(
     tts: FakeTTSProvider | None = None,
     config: VoiceSessionConfig | None = None,
     stt: STTProvider | None = None,
+    transport: RecordingTransport | None = None,
 ) -> tuple[VoiceSession, RecordingTransport, FakeTTSProvider]:
-    transport = RecordingTransport()
+    transport = transport or RecordingTransport()
     tts = tts or FakeTTSProvider()
     voice = VoiceSession(
         student_id=student_id,
@@ -197,6 +202,57 @@ async def test_a_full_turn_runs_through_every_state(
     assert transport.of_type("stt.final"), "the transcript must be sent to the client"
     assert transport.audio, "audio must be streamed"
     assert transport.of_type("metrics"), "stage marks must be reported"
+
+
+@dataclass
+class _ListeningTransport(RecordingTransport):
+    """Keeps the audio itself, not only its size."""
+
+    pcm: bytearray = field(default_factory=bytearray)
+
+    async def send_audio(self, turn_id: int, seq: int, pcm: bytes) -> None:
+        self.pcm.extend(pcm)
+        await super().send_audio(turn_id, seq, pcm)
+
+
+@pytest.mark.skipif(
+    shutil.which("espeak-ng") is None and not os.environ.get("CI"),
+    reason="needs espeak-ng (apt install espeak-ng); CI installs it",
+)
+async def test_a_turn_ends_in_real_speech_with_the_local_synthesiser(
+    db_session: AsyncSession, settings: Settings, redis_client, student_and_session
+) -> None:  # type: ignore[no-untyped-def]
+    """The fake voice sends silence of a plausible length; eSpeak NG (ADR-0018) says the answer.
+    The student is sent speech-loud audio, in frames the client can play, lasting as long as the
+    reply takes to say, and the playback ledger accounts for every byte of it."""
+    from app.providers.tts.espeak import EspeakTTSProvider
+
+    student_id, session_id = student_and_session
+    voice, transport, _ = _build(
+        db_session=db_session,
+        settings=settings,
+        redis_client=redis_client,
+        student_id=student_id,
+        session_id=session_id,
+        probabilities=speech_timeline(silence_ms=64, speech_ms=800, trailing_silence_ms=800),
+        tts=EspeakTTSProvider(),  # type: ignore[arg-type]
+        transport=_ListeningTransport(),
+    )
+    assert isinstance(transport, _ListeningTransport)
+    await voice.start()
+    await _feed(voice, 90)
+    await voice.wait_for_turn()
+    await db_session.commit()
+
+    assert transport.states()[-1] == "listening"
+    audio = np.frombuffer(bytes(transport.pcm), dtype="<i2").astype(np.float64)
+    seconds = audio.size / voice.config.tts_sample_rate
+    assert 1.0 < seconds < 5.0, "'Loop ka sum zero hota hai.', said once"
+    loudness = 20 * np.log10(np.sqrt(np.mean(audio**2)) / 32768)
+    assert loudness > -35, "speech, not silence"
+    assert max(size for _, _, size in transport.audio) == 960, "20 ms frames"
+    [metrics] = transport.of_type("metrics")
+    assert "tts_ttfb_ms" in metrics["latency_ms"], "the synthesiser's own time is measured"
 
 
 async def test_a_mid_turn_failure_reaches_the_client_as_an_error_frame_not_silence(
