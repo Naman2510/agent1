@@ -23,10 +23,10 @@ import json
 import statistics
 import uuid
 import wave
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
 import numpy as np
 
@@ -44,9 +44,6 @@ from app.services.conversation import TurnResult
 from app.voice.audio import FRAME_BYTES, FRAME_MS, SAMPLE_RATE, AudioFrame, bytes_to_ms
 from app.voice.session import VoiceSession, VoiceSessionConfig
 from app.voice.vad import SileroVoiceDetector, VadGate, VadSettings, VoiceDetector
-
-if TYPE_CHECKING:
-    from app.services.conversation import ConversationService
 
 SPEECH_KINDS = ("single", "hesitation", "multi_sentence")
 NOT_QUESTIONS = ("backchannel", "noise")
@@ -221,10 +218,10 @@ class TimedRecogniser(STTProvider):
 class _EndsAtOnce:
     """The conversation, reduced to ending each turn the moment it begins."""
 
-    async def stream_turn(self, **_: Any) -> AsyncIterator[tuple[str, TurnResult | None]]:
+    async def stream_turn(self, **_: Any) -> AsyncGenerator[tuple[str, TurnResult | None], None]:
         yield "", TurnResult(turn_index=0)
 
-    async def recover_after_cancel(self) -> None:
+    async def recover(self) -> None:
         return None
 
 
@@ -339,7 +336,7 @@ async def run_case(case: VoiceCase, config: dict[str, Any], detector: VoiceDetec
         vad=VadGate(detector, vad_settings(config)),
         stt=TimedRecogniser(case.words, clock, lag_ms=lag_ms),
         tts=FakeTTSProvider(),
-        conversation=cast("ConversationService", _EndsAtOnce()),
+        conversation=_EndsAtOnce(),
         config=session_config(config),
         clock=clock,
     )

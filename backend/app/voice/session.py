@@ -21,7 +21,7 @@ import asyncio
 import contextlib
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -44,7 +44,7 @@ from app.providers.stt.base import (
 )
 from app.providers.tts.base import SynthesisRequest, TTSProvider
 from app.rag.context import Citation, strip_cited_refs
-from app.services.conversation import ConversationService
+from app.services.conversation import DeliveryTracker, TurnResult
 from app.voice import marks as stage
 from app.voice.audio import (
     FRAME_MS,
@@ -70,6 +70,28 @@ class Transport(Protocol):
     async def send_control(self, message_type: ServerMessage | str, **payload: Any) -> None: ...
 
     async def send_audio(self, turn_id: int, seq: int, pcm: bytes) -> None: ...
+
+
+class Conversation(Protocol):
+    """What the session needs from the conversation service: a turn's answer, and recovery after
+    a turn that did not finish. `ConversationService` satisfies it, and so do the voice suite's
+    and the latency bench's stand-ins, which mypy checks against it. (Cast to the service, a
+    stand-in without `recover` once type-checked, then failed at the first barge-in.)"""
+
+    def stream_turn(
+        self,
+        *,
+        session_id: uuid.UUID,
+        student_id: uuid.UUID,
+        utterance: str,
+        delivery: DeliveryTracker | None = None,
+        language: str | None = None,
+        marks: dict[str, int] | None = None,
+        language_directive: str | None = None,
+        continues: str | None = None,
+    ) -> AsyncGenerator[tuple[str, TurnResult | None], None]: ...
+
+    async def recover(self) -> None: ...
 
 
 @dataclass
@@ -168,7 +190,7 @@ class VoiceSession:
     vad: VadGate
     stt: STTProvider
     tts: TTSProvider
-    conversation: ConversationService
+    conversation: Conversation
     settings: Settings | None = None  # not read here; the voice suite runs without any
     config: VoiceSessionConfig = field(default_factory=VoiceSessionConfig)
     clock: Callable[[], float] = time.perf_counter
@@ -881,6 +903,7 @@ class VoiceSession:
 
 
 __all__ = [
+    "Conversation",
     "IllegalTransitionError",
     "Transport",
     "VoiceSession",

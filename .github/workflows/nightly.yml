@@ -1,7 +1,8 @@
 name: Nightly (tier T2)
 
-# EVALUATION.md §6, tier T2: suites that need local models downloaded first. Today that is `stt`:
-# faster-whisper on the synthetic voice dataset, whose weights come from Hugging Face.
+# EVALUATION.md §6, tier T2: what needs local models downloaded first. Today that is the `stt`
+# suite, faster-whisper on the synthetic voice dataset, whose weights come from Hugging Face; and the
+# voice loop's latency, timed with that recogniser and eSpeak NG (scripts/bench_voice_loop.py).
 #
 # Scheduled and on-demand runs start only once this file is on the default branch; until then,
 # and afterwards too, it runs whenever what it measures changes.
@@ -19,6 +20,7 @@ on:
       - "backend/app/providers/stt/**"
       - "backend/app/providers/tts/espeak.py"
       - "backend/scripts/bench_voice_loop.py"
+      - "backend/app/voice/**"
       - "datasets/v1/voice/**"
       - ".github/workflows/nightly.yml"
 
