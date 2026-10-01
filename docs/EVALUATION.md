@@ -392,9 +392,10 @@ for this and none will be invented.
 | T2 | nightly, on demand, and when what it measures changes | `stt`: faster-whisper, weights downloaded first (`nightly.yml`); exact on the baselines' CPU model, compared on others (FC-006) | none (model download) |
 | T3 | by hand | today, the Claude adapter's live smoke test (`live.yml`, skipped — and saying so — without an `ANTHROPIC_API_KEY` secret); live `agent`, `response`, `voice` and `e2e` suites do not exist yet | paid |
 
-T0's e2e is the Playwright suite in `frontend/e2e/` (Phase 7): a real browser against the whole
+T0's e2e is the Playwright suite in `frontend/e2e/` (Phase 7): real browsers against the whole
 stack, with the real VAD and a microphone playing recorded speech, and every model provider faked.
-CI runs it against the Docker Compose stack. It is a test tier, not the `e2e` *eval* suite of §1,
+It runs in Chromium, and the flows that need no microphone run in Firefox and WebKit too. CI runs it
+against the Docker Compose stack. It is a test tier, not the `e2e` *eval* suite of §1,
 which would score live conversations and does not exist yet.
 
 A config names its tier (`tier = "T2"`; T1 when it says nothing), and `python -m eval.runner

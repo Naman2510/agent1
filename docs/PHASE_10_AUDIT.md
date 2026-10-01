@@ -58,8 +58,8 @@ Phases 0 to 10 have passed their gates. What that does and does not mean, from t
   before they ran.
 - Graceful degradation for every dependency, load measured on one process, and the security
   checklist reconciled item by item.
-- 884 backend tests, 42 frontend unit tests, and 14 end-to-end tests in a real browser against the
-  Compose stack.
+- 884 backend tests, 43 frontend unit tests, and 14 end-to-end tests against the Compose stack,
+  32 runs across Chromium, Firefox and WebKit.
 
 **Not true yet, and said so wherever it matters:**
 - **No real provider in the loop.** The answers come from a scripted model and the voice from a

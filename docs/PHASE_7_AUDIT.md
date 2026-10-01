@@ -214,6 +214,12 @@ plain HTTP) — Firefox, and a real device's audio stack (Bluetooth latency, the
 cancellation). *Scheduled:* WebKit and Firefox projects in the Playwright suite in Phase 9, and a
 manual pass on a real Android phone and iPhone before any user test.
 
+*Added 2026-10-01:* Firefox and WebKit now run the flows that need no microphone, 9 tests each
+(CI #60). WebKit's first run answered the cookie question: it drops a `Secure` cookie on
+`http://localhost`, which signed Safari students out at every reload on the local stack (FC-018,
+fixed). Still unverified: voice in Firefox and Safari, since only Chromium can play a recording as
+its microphone, and a real device.
+
 **M7-03 — The VAD's thresholds are library defaults, untuned on human speech.** The only speech
 fixture is synthetic (espeak-ng), because no consented human recording exists here. *Scheduled:*
 tune on the first consented recordings (DATASET.md), keeping the E2E recordings as a floor.

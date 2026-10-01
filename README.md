@@ -11,7 +11,7 @@ voice pipeline rather than a thin wrapper around an LLM API.
 | | |
 |---|---|
 | **Current phase** | Roadmap complete: Phases 0–10 have passed their gates. Phase 10 decided not to fine-tune the intent classifier until its prompted baseline is measured ([ADR-0017](docs/adr/0017-intent-classifier-not-fine-tuned.md)). What is not true yet is listed in [PHASE_10_AUDIT.md](docs/PHASE_10_AUDIT.md) §3: above all, no real model has run in the loop |
-| **Implementation** | 884 backend tests (97% line coverage), 42 frontend unit tests and 14 end-to-end browser tests, all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) and a local voice (eSpeak NG) exist for evaluation and development; no managed recogniser or voice does, and the Claude adapter has never run against the live API. |
+| **Implementation** | 884 backend tests (97% line coverage), 43 frontend unit tests and 14 end-to-end browser tests (32 runs across Chromium, Firefox and WebKit), all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) and a local voice (eSpeak NG) exist for evaluation and development; no managed recogniser or voice does, and the Claude adapter has never run against the live API. |
 | **Benchmarks** | Six suites have run, each recorded, reproducible from its record, and checked in CI, on small self-authored or synthetic datasets with their biases documented: language identification (0.9205 signal accuracy), retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893, 22 cases), agent tool gating (14/14 allowlist coverage, against a scripted model), prompt injection (19/19 attempted mutating calls blocked), the voice front end (a turn ends 575 ms after speech, in audio time, on synthetic speech) and recognition (English WER 0.123, exact on the CPU model that computed it and only compared on others ([FC-006](docs/failure_cases/006-stt-baseline-not-reproducible.md)); synthetic Hindi not recognised as Hindi at all). Three experiments decided: EXP-003 rejected, EXP-008 and EXP-013 inconclusive. Full-stack latency is unmeasured. |
 | **Last updated** | 2026-09-30 |
 
@@ -319,8 +319,11 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
    this English-only corpus returns nothing, honestly, rather than a wrong answer.
    ([FC-004](docs/failure_cases/004-cross-lingual-retrieval-degrades-to-zero-signal.md))
 
-6. **One browser, and no real phone.** The end-to-end suite runs in Chromium, with phone widths
-   emulated; Safari and Firefox are untested, and so is a real device's audio stack.
+6. **Three browser engines, but no real phone.** The end-to-end suite runs in Chromium, and the
+   flows that need no microphone also run in Firefox and WebKit. That first WebKit run found Safari
+   signing students out at every reload on the local stack ([FC-018](docs/failure_cases/018-safari-signed-out-at-every-reload.md),
+   fixed). Voice in Firefox and Safari is untested, because only Chromium can play a recording as
+   its microphone, and so is a real device's audio stack.
    ([M7-02](docs/PHASE_7_AUDIT.md))
 
 ## Evaluation approach

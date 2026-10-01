@@ -1,6 +1,6 @@
 # Failure Cases
 
-**Status:** 17 cases (Phase 9 requires at least eight): 10 fixed, 4 accepted as limitations with
+**Status:** 18 cases (Phase 9 requires at least eight): 11 fixed, 4 accepted as limitations with
 the reason recorded, 3 open. FC-006 was reopened in Phase 9, when the first Intel runner did not
 reproduce the recogniser's baselines. It is now accepted as a limitation: the recogniser's
 libraries promise the same numbers only on the same CPU model, so a baseline is enforced there and
@@ -25,6 +25,7 @@ compared elsewhere.
 | [FC-015](015-the-sixteenth-student-could-not-connect.md) | A server process admitted fifteen voice students; the sixteenth could not connect | load | fixed |
 | [FC-016](016-an-answer-being-recorded-when-cancelled-was-lost.md) | An answer being recorded when its turn was cancelled was lost | interruption, load | fixed |
 | [FC-017](017-a-rolled-back-turn-left-the-connection-unmetered.md) | After a rolled-back turn, the connection's audio went unmetered | cost control, load | fixed |
+| [FC-018](018-safari-signed-out-at-every-reload.md) | On the local stack, Safari signed the student out at every reload | browsers, auth | fixed |
 
 **Not yet measured,** so no case can honestly be filed: *wrong tool selection* and *hallucination
 by the mentor* need a real model in the loop, and CI has none (tier T3, which would, is run by hand
