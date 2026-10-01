@@ -33,6 +33,7 @@ import asyncio
 import json
 import platform
 import statistics
+import sys
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
@@ -46,13 +47,15 @@ from app.services.conversation import TurnResult
 from app.voice.audio import FRAME_BYTES, FRAME_MS, AudioFrame, bytes_to_ms
 from app.voice.session import VoiceSession, VoiceSessionConfig
 from app.voice.vad import SileroVoiceDetector, VadGate, VadSettings
-from eval.recording import DATASETS
-from eval.suites import voice as voice_suite
 
 if TYPE_CHECKING:
     from app.providers.stt.base import STTProvider
     from app.providers.tts.base import TTSProvider
     from app.services.conversation import ConversationService
+    from eval.suites.voice import VoiceCase
+
+# The backend directory, for the evaluation harness: run as a script, only scripts/ is on the path.
+ROOT = Path(__file__).resolve().parents[1]
 
 SILERO = Path("models/silero_vad.onnx")
 KINDS = ("single", "multi_sentence")
@@ -106,9 +109,7 @@ class _PlayingClient:
         await self.session.handle_playback_ack(turn_id=turn_id, played_ms=played)
 
 
-async def run_case(
-    case: voice_suite.VoiceCase, *, stt: STTProvider, tts: TTSProvider
-) -> _PlayingClient:
+async def run_case(case: VoiceCase, *, stt: STTProvider, tts: TTSProvider) -> _PlayingClient:
     client = _PlayingClient()
     detector = SileroVoiceDetector(SILERO)
     session = VoiceSession(
@@ -147,6 +148,8 @@ def percentiles(values: Sequence[float]) -> dict[str, float]:
 async def measure(model: str) -> dict[str, Any]:
     from app.providers.stt.faster_whisper import FasterWhisperSTT
     from app.providers.tts.espeak import EspeakTTSProvider
+    from eval.recording import DATASETS
+    from eval.suites import voice as voice_suite
     from eval.suites.stt import machine
 
     stt = FasterWhisperSTT(model)
@@ -205,4 +208,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(ROOT))
     raise SystemExit(main())
