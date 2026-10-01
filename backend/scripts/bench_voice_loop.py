@@ -188,11 +188,23 @@ async def measure(stt: STTProvider, tts: TTSProvider, *, recogniser: str) -> dic
     cases = [
         case for case in voice_suite.load_cases(DATASETS / "v1" / "voice") if case.kind in KINDS
     ]
+    outcomes = [(case, *await run_case(case, stt=stt, tts=tts)) for case in cases]
+    return {
+        "machine": machine(),
+        "python": platform.python_version(),
+        "recogniser": recogniser,
+        "voice": tts.info.model,
+        **summarise(outcomes),
+    }
+
+
+def summarise(
+    outcomes: Sequence[tuple[VoiceCase, _PlayingClient, _ScriptedModel]],
+) -> dict[str, Any]:
+    """Each answered turn's latencies, and how many of them were not one question asked once (see
+    the module docstring)."""
     turns: list[dict[str, Any]] = []
-    interrupted = 0
-    for case in cases:
-        client, model = await run_case(case, stt=stt, tts=tts)
-        interrupted += client.interrupted
+    for case, client, model in outcomes:
         for turn_id, latency in sorted(client.latencies.items()):
             heard = client.heard.get(turn_id, "")
             turns.append(
@@ -207,17 +219,12 @@ async def measure(stt: STTProvider, tts: TTSProvider, *, recogniser: str) -> dic
             )
     answered = [t["case"] for t in turns]
     return {
-        "machine": machine(),
-        "python": platform.python_version(),
-        "recogniser": recogniser,
-        "voice": tts.info.model,
-        "cases": len(cases),
+        "cases": len(outcomes),
         "turns": turns,
-        # How many answered turns were not one question asked once (see the module docstring).
-        "interrupted": interrupted,
+        "interrupted": sum(client.interrupted for _, client, _ in outcomes),
         "merged": sum(t["merged"] for t in turns),
         "answered_in_parts": sorted({c for c in answered if answered.count(c) > 1}),
-        "unanswered": [case.id for case in cases if case.id not in answered],
+        "unanswered": [case.id for case, _, _ in outcomes if case.id not in answered],
         "stages": {
             stage: percentiles([float(t[stage]) for t in turns if stage in t]) for stage in STAGES
         },
