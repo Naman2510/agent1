@@ -56,6 +56,25 @@ describe("login", () => {
     expect(cookie).toMatch(/Path=\/api\/auth/);
   });
 
+  it("marks the cookie Secure exactly when the app is served over HTTPS", async () => {
+    // M7-02: a production build served over plain HTTP (the Compose stack on localhost) must not
+    // set it, because WebKit drops a Secure cookie there and the student is signed out on reload.
+    for (const [apiUrl, secure] of [
+      ["https://api.example.com", true],
+      ["http://localhost:8000", false],
+    ] as const) {
+      vi.stubEnv("NEXT_PUBLIC_API_URL", apiUrl);
+      vi.stubEnv("NODE_ENV", "production");
+      backend(200, TOKENS);
+      const response = await login(
+        request("/api/auth/login", { body: { email: "a@example.com", password: "x" } }),
+      );
+      const cookie = response.headers.get("set-cookie") ?? "";
+      expect(/;\s*Secure/i.test(cookie), `${apiUrl}: ${cookie}`).toBe(secure);
+    }
+    vi.unstubAllEnvs();
+  });
+
   it("refuses a cross-site caller before touching the backend", async () => {
     const fetchMock = backend(200, TOKENS);
     const response = await login(

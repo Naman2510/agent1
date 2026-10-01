@@ -21,13 +21,25 @@ const BACKEND_URL = (
   "http://localhost:8000"
 ).replace(/\/$/, "");
 
-const cookieOptions = {
-  httpOnly: true,
-  sameSite: "strict" as const,
-  secure: process.env.NODE_ENV === "production",
-  // Sent to the auth proxy and nowhere else — not with every page and asset request.
-  path: "/api/auth",
-};
+/**
+ * Secure whenever the app is served over HTTPS, judged as next.config.ts judges it for HSTS: by
+ * the address the browser uses for the API, fixed at build time. Not "whenever this is a
+ * production build": the Compose stack serves one over plain HTTP on localhost, where WebKit drops
+ * a Secure cookie, so a student on Safari could never stay signed in (M7-02).
+ */
+export function servedOverHttps(): boolean {
+  return new URL(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").protocol === "https:";
+}
+
+function cookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "strict" as const,
+    secure: servedOverHttps(),
+    // Sent to the auth proxy and nowhere else, not with every page and asset request.
+    path: "/api/auth",
+  };
+}
 
 /**
  * These endpoints set and spend the refresh cookie, so a cross-site page must not be able to
@@ -111,14 +123,14 @@ export async function grantFrom(upstream: Response): Promise<NextResponse> {
   const grant: AccessGrant = { access_token: tokens.access_token, expires_in: tokens.expires_in };
   const response = NextResponse.json(grant, { headers: { "Cache-Control": "no-store" } });
   response.cookies.set(REFRESH_COOKIE, tokens.refresh_token, {
-    ...cookieOptions,
+    ...cookieOptions(),
     maxAge: REFRESH_COOKIE_MAX_AGE,
   });
   return response;
 }
 
 export function clearRefreshCookie(response: NextResponse): NextResponse {
-  response.cookies.set(REFRESH_COOKIE, "", { ...cookieOptions, maxAge: 0 });
+  response.cookies.set(REFRESH_COOKIE, "", { ...cookieOptions(), maxAge: 0 });
   return response;
 }
 
