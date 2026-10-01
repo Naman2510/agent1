@@ -96,7 +96,9 @@ stage               n   p50 ms   p95 ms   max ms
 stt_final_ms       24     3672     3833     4740
 ```
 
-The slowest transcript took 4.7 s, inside the session's 10 s wait with room to spare. The five
+The slowest transcript took 4.7 s, inside the session's 10 s wait with room to spare. The next run
+(#13, the same code on an Intel Xeon Platinum 8370C) answered every question too, the slowest
+transcript in 4.1 s. The five
 two-sentence questions ended at their pause were each answered as one question, merged (ARCHITECTURE
 §5.6), the voice suite's same five cut-offs. The two runs' times are not comparable with each other:
 different CPU models, and run #11's was much the faster.

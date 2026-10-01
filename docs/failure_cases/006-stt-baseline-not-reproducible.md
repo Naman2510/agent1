@@ -2,9 +2,9 @@
 
 **Status:** fixed on one CPU model, and accepted as a limitation across CPU models. Every T2 run on
 the AMD EPYC 7763 since oneDNN was pinned agrees to the last digit: five runs, the latest on 1
-October. Three other CPU models have differed, the latest with every pin now in place, and neither
-library in the arithmetic promises more. So a baseline computed on another model is compared, not
-enforced (below).
+October. Four other CPU models have differed. The latest two had every pin in place, and those two,
+both Intel, agree with each other to the last digit. No library in the arithmetic promises the same
+numbers across vendors. So a baseline computed on another model is compared, not enforced (below).
 **Found:** 2026-09-27 · **Phase:** 8 (PHASE_8_AUDIT D8-15) · **Component:** evaluation (stt)
 **Severity:** major — a baseline that does not reproduce cannot catch a regression
 **Case IDs:** the whole `stt` suite, dataset v1
@@ -226,3 +226,17 @@ worse). The three runs on the 7763 the same day (#9, #10, #12) reproduced both b
 So the answer to "not yet shown" is no: the AVX-512 runners do not agree with the 7763, even with
 every pin. The check stays exact on the baselines' CPU model and compared on the rest, which is what
 the libraries promise.
+
+## A fifth: two Intel generations agree with each other (1 October)
+
+T2 run #13 (49e458b) was given an Intel Xeon Platinum 8370C, an Ice Lake, two generations before
+the 6973P-C. Its pins took effect as #11's did. Every metric of `stt` and `stt-language-hint` came
+out exactly as on the 6973P-C, every difference from the 7763 the same to the last digit, and so did
+EXP-013 (+0.0308, [+0.0043, +0.0694], 5 better and 0 worse). The two differ from the 7763 alike.
+
+That fits what the libraries say, and is the first thing that does. oneMKL documents its AVX2
+reproducibility mode as giving the same results on Intel processors, while on others it runs the
+automatic path. So with every pin, the arithmetic now seems to follow the vendor, not the model.
+Two Intel models are not a promise, though, and AMD's are not covered by one. If more Intel runs
+keep agreeing, a second set of baselines computed on Intel would let T2 enforce, not just compare,
+on every Intel runner. Until then the check is as above.

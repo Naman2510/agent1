@@ -153,8 +153,9 @@ next run on an AMD EPYC 7763 (d7f415e), with oneDNN's kernels pinned too, reprod
 [+0.0265, +0.1271], 8 better and 0 worse, exactly. On a third CPU model, an AMD EPYC 9V74
 (ac725cb), it came out +0.0669, [+0.0076, +0.1679], 5 better and 0 worse. On a fourth, an Intel Xeon
 6973P-C with every pin in place (T2 run #11, d8ef722), +0.0308, [+0.0043, +0.0694], 5 better and 0
-worse; and the next run on the 7763 (#12, 139dab6) reproduced +0.0725 exactly. The decision was the
-same on all four models.
+worse; and the next run on the 7763 (#12, 139dab6) reproduced +0.0725 exactly. On a fifth, an
+Intel Xeon Platinum 8370C (#13), the 6973P-C's result to the last digit. The decision was the same
+on all five models.
 
 | | Auto-detected | Told the routed language |
 |---|---|---|

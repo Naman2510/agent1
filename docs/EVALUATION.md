@@ -109,19 +109,21 @@ the arithmetic followed the CPU. Now each utterance is decoded by a seeded model
 arithmetic is pinned (and recorded in the summary, with the CPU model), and every T2 run checks each
 config's baseline (`backend/eval/baselines/stt*.json`). On the AMD EPYC 7763 that computed them they
 reproduce to the last digit, on every T2 run given that CPU model since oneDNN was pinned: five
-runs, #6, #8, #9, #10 and #12. Three other CPU models reproduced neither. The first Intel runner
+runs, #6, #8, #9, #10 and #12. Four other CPU models reproduced neither. The first Intel runner
 (Xeon Platinum 8573C, AVX-512) got English WER 0.127 against 0.123 and Hindi 1.255 against 1.425. An
 AMD EPYC 9V74 with AVX-512 got English 0.127 and Hindi 1.447, with every pin then in place. An Intel
 Xeon 6973P-C, with every pin now in place, got English 0.123, the baseline's own (its CER moved,
-0.064 to 0.065), and Hindi 1.170 (T2 run #11). The pins now cover CTranslate2, MKL and oneDNN (from
-inside the suite), and numpy and OpenBLAS, which compute the features (from the process's start: T2
-sets them). Neither MKL nor oneDNN promises the same numbers across CPU models: MKL honours its
-reproducible AVX2 mode on Intel CPUs only, and oneDNN promises identical results only on identical
-hardware. So a baseline is enforced on the CPU model that computed it and compared on any other,
-where a difference is reported, not failed (FC-006). The numbers below are the AMD EPYC 7763's. What
-it measures is a recogniser hearing eSpeak — useful for comparing recognisers and settings, not a
-statement about anyone's voice. Its normalisation today is case, apostrophes and punctuation only:
-no numeral expansion, no spelling-variant map (below).
+0.064 to 0.065), and Hindi 1.170 (T2 run #11). An Intel Xeon Platinum 8370C got exactly the same, to
+the last digit, in every config (#13): with every pin, two Intel generations agree with each other,
+and not with the AMD runner. The pins now cover CTranslate2, MKL and oneDNN (from inside the suite),
+and numpy and OpenBLAS, which compute the features (from the process's start: T2 sets them). Neither
+MKL nor oneDNN promises the same numbers across CPU models: MKL honours its reproducible AVX2 mode
+on Intel CPUs only, and oneDNN promises identical results only on identical hardware. So a baseline
+is enforced on the CPU model that computed it and compared on any other, where a difference is
+reported, not failed (FC-006). The numbers below are the AMD EPYC 7763's. What it measures is a
+recogniser hearing eSpeak — useful for comparing recognisers and settings, not a statement about
+anyone's voice. Its normalisation today is case, apostrophes and punctuation only: no numeral
+expansion, no spelling-variant map (below).
 
 | Language (eSpeak voice) | Parts | WER | CER | Word for word | Language detected as written |
 |---|---|---|---|---|---|
@@ -388,12 +390,13 @@ each frame the moment it arrives acknowledges it. The times are the session's ow
 |---|---|---|---|
 | #11, d8ef722, Intel Xeon 6973P-C | Whisper's own, retried at rising temperatures | 20 of 24 | 2835 / 3015 ms |
 | #12, 139dab6, AMD EPYC 7763 | once, within a length budget | **24 of 24** | 4207 / 4368 ms |
+| #13, 49e458b, Intel Xeon Platinum 8370C | once, within a length budget | **24 of 24** | 3496 / 3714 ms |
 
 Run #11 found a defect: Whisper's retries on Hindi outlasted the session's 10 s wait, and the
 abandoned decodes held up every utterance after them, so the last four questions went unanswered.
-The fix is FC-019. Run #12 is the code as it stands, and the table below is its own. The two runs
-are on different CPU models, and the recogniser's time follows the CPU: it is not a before and
-after.
+The fix is FC-019. Runs #12 and #13 are the code as it stands, the same code on two CPU models, and
+the table below is #12's. The recogniser's time follows the CPU, so #11 against #12 is not a before
+and after.
 
 | Stage | From → to | p50 | p95 | max |
 |---|---|---|---|---|
@@ -410,7 +413,7 @@ turn before anything was heard, and the whole question was answered once, merged
 **What these say.** Recognition is most of the wait: 3.7 of 4.2 s. Whisper is not a streaming model.
 It hears the question as it arrives but transcribes it only once it ends (ADR-0002), and it always
 encodes a 30-second window, however short the question. So the student pays all of it after they
-stop. It is CPU-bound: on run #11's Intel CPU, the p50 was 2.3 s. The turn detector's wait is the
+stop. It is CPU-bound: on run #13's Intel CPU the p50 was 3.0 s, for first audio at 3.5 s. The turn detector's wait is the
 500 ms silence rule, rounded up to the VAD's 32 ms windows. eSpeak's first sentence costs 17 ms. With
 these local providers and a model that took no time at all, a student would hear the first word
 about four seconds after they stopped.
