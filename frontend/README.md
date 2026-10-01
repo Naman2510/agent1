@@ -46,11 +46,14 @@ to the proxy (docs/SECURITY.md §4).
 
 ## End-to-end tests
 
-A real browser (Chromium) against the real backend, PostgreSQL and Redis. The VAD is the real
-Silero model, and the microphone plays recordings of speech, generated from
-`datasets/v1/voice/fixtures/` when the run starts. What is faked is what has no real
-implementation yet or needs a paid key: the STT and TTS (fakes are the only adapters that exist)
-and the LLM (the scripted one), so the tests check the application, not a model.
+Real browsers against the real backend, PostgreSQL and Redis. The VAD is the real Silero model,
+and the microphone plays recordings of speech, generated from `datasets/v1/voice/fixtures/` when
+the run starts. The model providers are faked: the STT and TTS fakes, and the scripted LLM. So the
+tests check the application, not a model.
+
+Three engines, as three Playwright projects. Chromium runs everything. Only Chromium can play a
+recording as its microphone, so Firefox and WebKit (Safari's engine) run only the flows that need
+no microphone: signing in, typed sessions and their history, and the admin page.
 
 They cover: registering, signing in and out, staying signed in across a reload, generic sign-in
 errors, the redirect back after signing in; a typed session end to end; a student opening another
@@ -65,8 +68,9 @@ npm run e2e
 This starts the backend from `../backend` (its virtualenv, `../backend/venv`, or set `E2E_PYTHON`)
 on port 8100 and a production build of this app on 3100, so development servers are left alone.
 It needs what the backend needs: `../backend/.env` pointing at a migrated database, Redis, and the
-VAD weights (`backend/scripts/fetch_models.sh`). If Playwright's Chromium is missing, run
-`npx playwright install chromium`.
+VAD weights (`backend/scripts/fetch_models.sh`). If a browser is missing, run
+`npx playwright install chromium firefox webkit`, or run one engine with
+`npm run e2e -- --project=chromium`.
 
 To test a stack that is already running instead — CI runs these against the Docker Compose stack,
 so the shipped images are what is tested:

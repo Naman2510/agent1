@@ -3,10 +3,17 @@ import { defineConfig, devices } from "@playwright/test";
 import { fakeMicrophone, SILENCE_WAV } from "./e2e/support/audio";
 import { API_URL, BACKEND, externalStack, PYTHON, WEB_URL } from "./e2e/support/stack";
 
+// The specs that open the microphone: the phone check starts a voice session too.
+const NEEDS_A_MICROPHONE = /(voice|spoken-[a-z-]+|phone)\.spec\.ts$/;
+
 /**
  * End-to-end: a real browser against the real backend, PostgreSQL and Redis, with the model
- * providers faked — the fake STT and TTS are the only ones that exist yet, and the LLM is the
- * scripted one. The VAD is real, and the microphone plays recordings of real (synthesized) speech.
+ * providers faked: the STT and TTS fakes, and the scripted LLM. The VAD is real, and the
+ * microphone plays recordings of real (synthesized) speech.
+ *
+ * Three engines (M7-02). Only Chromium can play a recording as its microphone, so the voice tests
+ * run there alone; the flows that need no microphone (signing in, typed sessions and their history,
+ * the admin page) run in Firefox and WebKit too.
  *
  * `npm run e2e` starts the backend from ../backend (it needs that directory's .env, with its
  * database migrated) and a production build of this app, on ports 8100 and 3100 so a development
@@ -26,13 +33,22 @@ export default defineConfig({
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],
   globalSetup: "./e2e/global-setup.ts",
   use: {
-    ...devices["Desktop Chrome"],
     baseURL: WEB_URL,
-    permissions: ["microphone"],
-    // A silent microphone unless a test plays something: the default fake device beeps.
-    launchOptions: { args: fakeMicrophone(SILENCE_WAV, { loop: true }) },
     trace: "retain-on-failure",
   },
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        permissions: ["microphone"],
+        // A silent microphone unless a test plays something: the default fake device beeps.
+        launchOptions: { args: fakeMicrophone(SILENCE_WAV, { loop: true }) },
+      },
+    },
+    { name: "firefox", use: { ...devices["Desktop Firefox"] }, testIgnore: NEEDS_A_MICROPHONE },
+    { name: "webkit", use: { ...devices["Desktop Safari"] }, testIgnore: NEEDS_A_MICROPHONE },
+  ],
   webServer: externalStack
     ? undefined
     : [

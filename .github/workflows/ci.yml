@@ -278,7 +278,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium firefox webkit
       - name: End-to-end against the stack
         # The same suite a developer runs from source, pointed at the shipped images.
         working-directory: frontend
