@@ -11,13 +11,15 @@ voice pipeline rather than a thin wrapper around an LLM API.
 | | |
 |---|---|
 | **Current phase** | Roadmap complete: Phases 0–10 have passed their gates. Phase 10 decided not to fine-tune the intent classifier until its prompted baseline is measured ([ADR-0017](docs/adr/0017-intent-classifier-not-fine-tuned.md)). What is not true yet is listed in [PHASE_10_AUDIT.md](docs/PHASE_10_AUDIT.md) §3: above all, no real model has run in the loop |
-| **Implementation** | 884 backend tests (97% line coverage), 43 frontend unit tests and 14 end-to-end browser tests (32 runs across Chromium, Firefox and WebKit), all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) and a local voice (eSpeak NG) exist for evaluation and development; no managed recogniser or voice does, and the Claude adapter has never run against the live API. |
-| **Benchmarks** | Six suites have run, each recorded, reproducible from its record, and checked in CI, on small self-authored or synthetic datasets with their biases documented: language identification (0.9205 signal accuracy), retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893, 22 cases), agent tool gating (14/14 allowlist coverage, against a scripted model), prompt injection (19/19 attempted mutating calls blocked), the voice front end (a turn ends 575 ms after speech, in audio time, on synthetic speech) and recognition (English WER 0.123, exact on the CPU model that computed it and only compared on others ([FC-006](docs/failure_cases/006-stt-baseline-not-reproducible.md)); synthetic Hindi not recognised as Hindi at all). Three experiments decided: EXP-003 rejected, EXP-008 and EXP-013 inconclusive. Full-stack latency is unmeasured. |
-| **Last updated** | 2026-09-30 |
+| **Implementation** | 890 backend tests (97% line coverage), 43 frontend unit tests and 14 end-to-end browser tests (32 runs across Chromium, Firefox and WebKit), all in CI — the end-to-end suite runs against the Docker Compose stack, built as documented. A local recogniser (faster-whisper) and a local voice (eSpeak NG) exist for evaluation and development; no managed recogniser or voice does, and the Claude adapter has never run against the live API. |
+| **Benchmarks** | Six suites have run, each recorded, reproducible from its record, and checked in CI, on small self-authored or synthetic datasets with their biases documented: language identification (0.9205 signal accuracy), retrieval (hybrid RRF: recall@10 0.955, nDCG@10 0.893, 22 cases), agent tool gating (14/14 allowlist coverage, against a scripted model), prompt injection (19/19 attempted mutating calls blocked), the voice front end (a turn ends 575 ms after speech, in audio time, on synthetic speech) and recognition (English WER 0.123, exact on the CPU model that computed it and only compared on others ([FC-006](docs/failure_cases/006-stt-baseline-not-reproducible.md)); synthetic Hindi not recognised as Hindi at all). Three experiments decided: EXP-003 rejected, EXP-008 and EXP-013 inconclusive. The voice loop timed with local providers and a model that answers at once: first audio 4.2 s after the student stops (p50, on a CI runner's AMD EPYC 7763), 3.7 s of it the local recogniser ([EVALUATION.md §5.4](docs/EVALUATION.md)). With real providers, full-stack latency is unmeasured. |
+| **Last updated** | 2026-10-01 |
 
-> **Full-stack latency is not measured yet.** Latency figures in
-> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) are *budgets* (design targets), not results; the one
-> measured timing is the voice front end's, in audio time on synthetic speech. Every number above is
+> **Full-stack latency with real providers is not measured yet.** Latency figures in
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) are *budgets* (design targets), not results. Two
+> timings are measured: the voice front end's, in audio time on synthetic speech, and the whole voice
+> loop's with local providers (faster-whisper, eSpeak NG) and a scripted model that adds no time to
+> first token, on a CI runner. Every number above is
 > a recorded run (`evaluation_runs`, MLflow), reported in [`docs/EVALUATION.md`](docs/EVALUATION.md)
 > beside the command that reproduces it and the dataset's biases; metrics there without a reported
 > run are definitions, not scores. Experiments are in [`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md).
@@ -134,8 +136,8 @@ cd backend
 pip install -c constraints.txt -e ".[dev,rag,eval]"   # the versions CI tests
 export VAANIOS_TEST_DATABASE_URL=postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
 bash scripts/fetch_models.sh    # Silero VAD weights (not committed)
-pytest -q                       # 884 tests
-pytest -q tests/unit            # 612 of them need no database at all
+pytest -q                       # 890 tests
+pytest -q tests/unit            # 618 of them need no database at all
 python scripts/bench_voice.py   # pipeline overhead, with real numbers
 ruff check . && mypy
 ```
@@ -308,9 +310,14 @@ curl -N -X POST localhost:8000/v1/sessions/$SID/messages \
    severity `high` in `datasets/v1/MANIFEST.yaml`. The `mixed` class sits at 0.625 recall and was
    **deliberately not tuned**, because adjusting two constants until a self-authored suite scores
    100% is a better number and a worse system. ([M4-01](docs/PHASE_4_AUDIT.md))
-4. **There is no TTFA number.** What was measured is our pipeline's own overhead with fake
-   providers (~0.4% of one core). Real TTFA is set by the ASR round trip, LLM time-to-first-token
-   and TTS time-to-first-byte. ([M3-01](docs/PHASE_3_AUDIT.md))
+4. **There is no TTFA number with real providers.** With local ones, and a scripted model that
+   answers at once, first audio comes 4.2 s after the student stops (p50, on a CI runner's AMD EPYC
+   7763), 3.7 s of it Whisper transcribing on the CPU after the question ends
+   ([EVALUATION.md §5.4](docs/EVALUATION.md)). Real TTFA adds a model's time to first token and the
+   intent call before it, and depends on the managed recogniser and voice chosen. The first such run
+   found one utterance stopping the local recogniser hearing every later one
+   ([FC-019](docs/failure_cases/019-one-utterance-stopped-the-recogniser-hearing-the-rest.md),
+   fixed). ([M3-01](docs/PHASE_3_AUDIT.md))
 5. **The retrieval numbers are measured on a 5-document, 19-chunk, self-authored corpus.** Hybrid
    RRF's recall@10 is 0.955 on 22 labelled queries — real, reproducible, and far too small a corpus
    to say anything about recall at production scale. The embedder itself is a TF-IDF/SVD substitute

@@ -1,6 +1,6 @@
 # Failure Cases
 
-**Status:** 18 cases (Phase 9 requires at least eight): 11 fixed, 4 accepted as limitations with
+**Status:** 19 cases (Phase 9 requires at least eight): 12 fixed, 4 accepted as limitations with
 the reason recorded, 3 open. FC-006 was reopened in Phase 9, when the first Intel runner did not
 reproduce the recogniser's baselines. It is now accepted as a limitation: the recogniser's
 libraries promise the same numbers only on the same CPU model, so a baseline is enforced there and
@@ -26,10 +26,12 @@ compared elsewhere.
 | [FC-016](016-an-answer-being-recorded-when-cancelled-was-lost.md) | An answer being recorded when its turn was cancelled was lost | interruption, load | fixed |
 | [FC-017](017-a-rolled-back-turn-left-the-connection-unmetered.md) | After a rolled-back turn, the connection's audio went unmetered | cost control, load | fixed |
 | [FC-018](018-safari-signed-out-at-every-reload.md) | On the local stack, Safari signed the student out at every reload | browsers, auth | fixed |
+| [FC-019](019-one-utterance-stopped-the-recogniser-hearing-the-rest.md) | One utterance the recogniser could not make sense of stopped it hearing every later one | STT, latency spike | fixed |
 
 **Not yet measured,** so no case can honestly be filed: *wrong tool selection* and *hallucination
 by the mentor* need a real model in the loop, and CI has none (tier T3, which would, is run by hand
-and needs an API key); *TTS pronunciation* needs a real synthesiser (the one in use is a fake). RISKS.md
+and needs an API key); *TTS pronunciation* needs people listening to a voice meant for students (the
+local one, eSpeak NG, is real but robotic, and no voice-quality claim rests on it: ADR-0018). RISKS.md
 predicts where they will appear (R-05, R-07, R-08), so that when they are measured they are not
 surprises.
 

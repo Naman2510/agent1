@@ -1,9 +1,10 @@
 # FC-006 — A speech-recognition baseline no other machine could reproduce
 
-**Status:** fixed on one CPU model, and accepted as a limitation across CPU models. Runs on the
-AMD EPYC 7763 agree to the last digit (three for one config, two for the other). Two other CPU
-models have differed, one of them with every pin in place, and neither library in the arithmetic
-promises more. So a baseline computed on another model is compared, not enforced (below).
+**Status:** fixed on one CPU model, and accepted as a limitation across CPU models. Every T2 run on
+the AMD EPYC 7763 since oneDNN was pinned agrees to the last digit: five runs, the latest on 1
+October. Three other CPU models have differed, the latest with every pin now in place, and neither
+library in the arithmetic promises more. So a baseline computed on another model is compared, not
+enforced (below).
 **Found:** 2026-09-27 · **Phase:** 8 (PHASE_8_AUDIT D8-15) · **Component:** evaluation (stt)
 **Severity:** major — a baseline that does not reproduce cannot catch a regression
 **Case IDs:** the whole `stt` suite, dataset v1
@@ -198,3 +199,30 @@ matched to the last digit, with the new pins recorded, and so did EXP-013 (+0.07
 **Not yet shown:** whether the AVX-512 runners now agree with the 7763. MKL still runs its
 automatic path on AMD and its AVX2 mode on Intel, and oneDNN still promises nothing across
 hardware. So the check stays as it is: exact on the baselines' CPU model, compared on the rest.
+
+## A fourth CPU model, with every pin in place (1 October)
+
+T2 run #11 (d8ef722) was given an Intel Xeon 6973P-C, with AVX-512. Its machine report shows the
+startup pins taking effect. Unpinned, numpy would dispatch to `X86_V4`, `AVX512_ICL` and
+`AVX512_SPR`, and OpenBLAS would choose its SkylakeX kernels. Pinned, numpy used `X86_V3` and
+OpenBLAS its Haswell kernels, on 4 threads, as on the 7763. Both baselines still differed:
+
+```
+                         EPYC 7763 (baseline)   Xeon 6973P-C (d8ef722)
+stt              en WER  0.1227                 0.1227
+                 en CER  0.0641                 0.0651
+                 hi WER  1.4255                 1.1702
+                 all WER 0.4465                 0.4088
+stt-language-hint hi WER 0.9574                 0.9787
+EXP-013 gain             +0.073                 +0.031
+```
+
+English WER now agrees to four places, where both earlier AVX-512 runners had 0.1273. Its CER does
+not quite, so not every English transcript is the same. Hindi is far apart. No unpinned step is
+known. What remains is what the libraries themselves say: MKL runs a different path on Intel than
+on AMD, and oneDNN promises nothing across hardware. EXP-013's decision was the same on a fourth CPU model (inconclusive, 5 better and 0
+worse). The three runs on the 7763 the same day (#9, #10, #12) reproduced both baselines exactly.
+
+So the answer to "not yet shown" is no: the AVX-512 runners do not agree with the 7763, even with
+every pin. The check stays exact on the baselines' CPU model and compared on the rest, which is what
+the libraries promise.

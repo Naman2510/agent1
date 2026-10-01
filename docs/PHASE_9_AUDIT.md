@@ -212,7 +212,10 @@ wide enough for the runs seen (Hindi WER moved by up to 0.17) would hide a regre
 baselines are the AMD EPYC 7763's, the CPU of four of the six T2 runners that logged theirs, and
 are enforced exactly there. On any other CPU model a run is compared and reported, not enforced.
 The next Intel or AVX-512 runner shows whether the pins are now enough, without turning T2 red
-either way. FC-006.
+either way. FC-006. *2026-10-01:* they are not. An Intel Xeon 6973P-C with all five pins (T2 run
+#11) still differed: Hindi WER 1.170 against 1.425, though English WER agreed to four places. T2
+warned and stayed green, as designed, and the three runs on the 7763 that day reproduced both
+baselines exactly.
 
 **M9-05 — Capacity past one process is designed, not measured.** One process serves about 50
 students. Beyond that the design is more processes behind session-sticky routing (ARCHITECTURE
@@ -276,7 +279,8 @@ gap in the tests but in the environment they ran in: newer dependencies, and oth
 **Evaluation strategy.** The recogniser's reproducibility is recorded as it stands: exact on one
 CPU model, and compared, not enforced, across CPU models, which is as far as its libraries promise
 (M9-04). EXP-013 has run on three CPU models: the decision is the same on each, and the size of
-the gain depends on the machine (+0.047 to +0.073).
+the gain depends on the machine (+0.047 to +0.073). (*2026-10-01:* four, the same decision on the
+fourth at +0.031.)
 
 ---
 

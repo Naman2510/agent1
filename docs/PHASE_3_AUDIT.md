@@ -86,6 +86,11 @@ nothing else: **~0.4% of one core in real time**, three to four orders of magnit
 stage budget. That is a genuine and useful result — it says the latency problem will not be our
 code — but real TTFA is set by stages 3, 6 and 7, all of which need providers that have not been
 chosen and a credential that does not exist here. *Scheduled Phase 8* with EXP-001 and EXP-004.
+*2026-10-01:* the loop has now been timed with real local providers in CI tier T2: faster-whisper
+`small` hearing the voice dataset in real time, and eSpeak NG speaking (EVALUATION.md §5.4). First
+audio came at p50 4.2 s on an AMD EPYC 7763, 3.7 s of it the recogniser. It is still not TTFA as
+this finding means it: the model is scripted and answers at once, and neither provider is the one
+the real-time path plans. The first such run also found FC-019.
 
 **M3-02 — The Claude adapter is still unexercised against the live API** (carried from
 [Gate 2](PHASE_2_AUDIT.md) M2-01). Every voice turn in this phase ran through the fake LLM.

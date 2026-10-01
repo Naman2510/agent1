@@ -33,7 +33,7 @@ statement "this change improved the system" falsifiable.
 | `retrieval` ✅ | Do we find the right course material? | query + labelled relevant chunk IDs | free (local embeddings) |
 | `agent` | Does the mentor choose the right tool with the right arguments? | scenario + expected tool trace | paid LLM, mockable |
 | `response` | Is the answer grounded, relevant, and in the right language? | question + context + rubric | paid LLM + judge |
-| `voice` ✅ | Does the conversation feel responsive? | scripted audio sessions | front end measured (§5.4); full stack not yet |
+| `voice` ✅ | Does the conversation feel responsive? | scripted audio sessions | front end measured; the loop with local providers timed in T2 (§5.4); with real providers, not yet |
 | `e2e` | Do complete multi-turn conversations work, including interruption? | scripted sessions + assertions | full stack (mocked in CI) |
 
 Each writes one `evaluation_runs` row plus per-case `evaluation_results`, and logs to MLflow.
@@ -101,25 +101,27 @@ reasoning per case) and are written up as
 **Status (Phase 8): measured, in CI.** `python -m eval.runner --suite stt` runs faster-whisper
 (`small`, int8, beam 5, language auto-detected) over the 66 spoken parts of the synthetic voice
 dataset, against the sentences they were synthesised from: WER and CER pooled over words, per
-language, and how often the detected language matches the written one. Its weights come from
-Hugging Face, which this project's development environment cannot reach, so it runs in tier T2
+language, and how often the detected language matches the written one. Its weights come from Hugging
+Face, which this project's development environment cannot reach, so it runs in tier T2
 (`.github/workflows/nightly.yml`), where they can be downloaded. Its first baseline did not
 reproduce on another runner (FC-006, PHASE_8_AUDIT D8-15): Whisper's fallback sampled unseeded, and
 the arithmetic followed the CPU. Now each utterance is decoded by a seeded model of its own, the
-arithmetic is pinned (and recorded in the summary, with the CPU model), and every T2 run checks
-both configs' baselines (`backend/eval/baselines/stt*.json`). On the AMD EPYC 7763 that computed
-them they reproduce to the last digit: the language-hint one on two more runners, the other on
-one. Two other CPU models reproduced neither. The first Intel runner (Xeon Platinum 8573C,
-AVX-512) got English WER 0.127 against 0.123 and Hindi 1.255 against 1.425. An AMD EPYC 9V74 with
-AVX-512 got English 0.127 and Hindi 1.447, with every pin then in place. The pins now cover
-CTranslate2, MKL and oneDNN (from inside the suite), and numpy and OpenBLAS, which compute the
-features (from the process's start: T2 sets them). Neither MKL nor oneDNN promises the same
-numbers across CPU models: MKL honours its reproducible AVX2 mode on Intel CPUs only, and oneDNN
-promises identical results only on identical hardware. So a baseline is enforced on the CPU model
-that computed it and compared on any other, where a difference is reported, not failed (FC-006).
-The numbers below are the AMD EPYC 7763's. What it measures is a recogniser hearing eSpeak — useful
-for comparing recognisers and settings, not a statement about anyone's voice. Its normalisation today is case, apostrophes and punctuation only: no numeral
-expansion, no spelling-variant map (below).
+arithmetic is pinned (and recorded in the summary, with the CPU model), and every T2 run checks each
+config's baseline (`backend/eval/baselines/stt*.json`). On the AMD EPYC 7763 that computed them they
+reproduce to the last digit, on every T2 run given that CPU model since oneDNN was pinned: five
+runs, #6, #8, #9, #10 and #12. Three other CPU models reproduced neither. The first Intel runner
+(Xeon Platinum 8573C, AVX-512) got English WER 0.127 against 0.123 and Hindi 1.255 against 1.425. An
+AMD EPYC 9V74 with AVX-512 got English 0.127 and Hindi 1.447, with every pin then in place. An Intel
+Xeon 6973P-C, with every pin now in place, got English 0.123, the baseline's own (its CER moved,
+0.064 to 0.065), and Hindi 1.170 (T2 run #11). The pins now cover CTranslate2, MKL and oneDNN (from
+inside the suite), and numpy and OpenBLAS, which compute the features (from the process's start: T2
+sets them). Neither MKL nor oneDNN promises the same numbers across CPU models: MKL honours its
+reproducible AVX2 mode on Intel CPUs only, and oneDNN promises identical results only on identical
+hardware. So a baseline is enforced on the CPU model that computed it and compared on any other,
+where a difference is reported, not failed (FC-006). The numbers below are the AMD EPYC 7763's. What
+it measures is a recogniser hearing eSpeak — useful for comparing recognisers and settings, not a
+statement about anyone's voice. Its normalisation today is case, apostrophes and punctuation only:
+no numeral expansion, no spelling-variant map (below).
 
 | Language (eSpeak voice) | Parts | WER | CER | Word for word | Language detected as written |
 |---|---|---|---|---|---|
@@ -140,6 +142,13 @@ above 1 is that: more words invented than were spoken. The romanized-Hindi row i
 phonetics read back as English words. Telling the recogniser the language the router decided
 (EXP-013) removes the detection failure — Hindi detected 11 of 11, WER 1.425 → 0.957, English
 unchanged — but not the acoustic one, and none of this says anything about a human speaking Hindi.
+
+**The decoding a conversation uses.** The table is Whisper's own decoding, which retries an
+utterance it cannot make sense of up to six times. A conversation cannot wait for that, and in one
+it stopped every later utterance being heard (FC-019). So the app's adapter decodes once, within a
+length budget, and `stt-live.toml` measures that: English and romanized Hindi exactly as above, to
+four places, and Hindi WER 1.383 against 1.425 (CER 1.192 against 1.198). That is T2 run #12, on
+the same AMD EPYC 7763, which recorded its baseline.
 
 ### 3.1 Metrics, and where they lie
 
@@ -361,20 +370,79 @@ such a split from becoming two answers. EXP-003 measured the obvious fix and rej
 of turns is this dataset's (datasets/v1/voice/README.md): nothing here is a claim about real
 students in real rooms. Barge-in detection is not measured yet.
 
-#### Full-stack latency — not yet measured
+#### The voice loop with local providers — measured, without a model
 
-Measured from real runs against scripted audio sessions, never estimated. Every provider is still a
-fake (M7-01), so none of these has a number:
+```
+python scripts/bench_voice_loop.py [--model small] [--json out.json]
+```
 
-| Metric | Definition | p50 | p95 |
+**Runs:** CI tier T2 (`nightly.yml`), GitHub-hosted runners with 4 vCPUs. The run's report is its
+`t2-report` artifact. The production `VoiceSession` hears the voice dataset's 24 one-question cases
+(12 of one sentence, 12 of two) in real time, 20 ms a frame on the wall clock, as a microphone
+delivers them. faster-whisper `small` (int8, beam 5, language detected per utterance) transcribes.
+A scripted model answers at once in the routed language, eSpeak NG speaks, and a client that plays
+each frame the moment it arrives acknowledges it. The times are the session's own stage marks
+(`app/voice/marks.py`), on that machine's clock.
+
+| Run | Recogniser's decoding | Questions answered | First audio p50 / p95 |
 |---|---|---|---|
-| TTFA | user speech end → first audio sample played | — | — |
-| TTFA (filler enabled) | same, with cached opener audio | — | — |
-| STT final latency | turn end → final transcript | — | — |
-| LLM TTFT | request sent → first token | — | — |
-| TTS TTFB | first sentence → first audio byte | — | — |
-| Barge-in stop | voice onset → last sample played | — | — |
-| End-to-end turn | user speech end → response fully played | — | — |
+| #11, d8ef722, Intel Xeon 6973P-C | Whisper's own, retried at rising temperatures | 20 of 24 | 2835 / 3015 ms |
+| #12, 139dab6, AMD EPYC 7763 | once, within a length budget | **24 of 24** | 4207 / 4368 ms |
+
+Run #11 found a defect: Whisper's retries on Hindi outlasted the session's 10 s wait, and the
+abandoned decodes held up every utterance after them, so the last four questions went unanswered.
+The fix is FC-019. Run #12 is the code as it stands, and the table below is its own. The two runs
+are on different CPU models, and the recogniser's time follows the CPU: it is not a before and
+after.
+
+| Stage | From → to | p50 | p95 | max |
+|---|---|---|---|---|
+| Turn end | speech end, as the VAD judged it → the turn detector ends the utterance | 512 ms | 512 ms | 512 ms |
+| Transcript | the utterance ended → final transcript | 3672 ms | 3833 ms | 4740 ms |
+| Voice | first sentence → first audio byte | 17 ms | 18 ms | 20 ms |
+| **First audio** | speech end, as the VAD judged it → first audio played | **4207 ms** | **4368 ms** | **5275 ms** |
+
+24 answered turns, and no error sent to the student. Five two-sentence questions were ended at
+their pause, as many as the voice suite cuts off. Each time, the second sentence interrupted the
+turn before anything was heard, and the whole question was answered once, merged (ARCHITECTURE
+§5.6).
+
+**What these say.** Recognition is most of the wait: 3.7 of 4.2 s. Whisper is not a streaming model.
+It hears the question as it arrives but transcribes it only once it ends (ADR-0002), and it always
+encodes a 30-second window, however short the question. So the student pays all of it after they
+stop. It is CPU-bound: on run #11's Intel CPU, the p50 was 2.3 s. The turn detector's wait is the
+500 ms silence rule, rounded up to the VAD's 32 ms windows. eSpeak's first sentence costs 17 ms. With
+these local providers and a model that took no time at all, a student would hear the first word
+about four seconds after they stopped.
+
+**What they do not say.**
+- **No model.** The scripted model answers at once, so a real model's time to its first token adds
+  to every first-audio time here, and so does the intent gate's call before it (M10-01).
+- **Not the planned real-time providers.** ADR-0002 and ADR-0003 plan managed streaming ones. A
+  streaming recogniser transcribes while the student is still speaking, so most of the 3.7 s would
+  not be paid after they stop. And there is no network round trip here.
+- **The VAD's speech end, not the speech's.** The session's marks start when its VAD judged the
+  speech over. The voice suite, in audio time, puts that about 60 ms after it ended (575 ms against
+  512), and a student waits that much longer.
+- **One student at a time.** The model serves one decode at a time for every connection on a
+  process (FC-019), so students who stop speaking together wait for each other's transcripts. That
+  is not measured here, and LOAD.md's numbers use a fake recogniser.
+- **Synthetic speech, instant playback.** The questions are eSpeak's. The client plays each frame on
+  arrival, so neither a turn's full length nor the time to stop on a barge-in is measured.
+
+#### Full-stack latency with real providers — not yet measured
+
+Measured from real runs against scripted audio sessions, never estimated:
+
+| Metric | Definition | Measured |
+|---|---|---|
+| TTFA | user speech end → first audio sample played | with local providers and no model only: 4207 ms p50, above |
+| TTFA (filler enabled) | same, with cached opener audio | — (no filler is built) |
+| STT final latency | turn end → final transcript | faster-whisper `small` only: 3672 ms p50, above |
+| LLM TTFT | request sent → first token | — (needs a credential: M9-01) |
+| TTS TTFB | first sentence → first audio byte | eSpeak NG only: 17 ms p50, above |
+| Barge-in stop | voice onset → last sample played | — |
+| End-to-end turn | user speech end → response fully played | — |
 
 TTFA is reported with and without the filler-audio optimisation, and a filler-enabled number is
 never presented as the bare TTFA — that would be measuring a trick.

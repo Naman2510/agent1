@@ -35,6 +35,10 @@ A bound on the wait, `stt_final_timeout_ms` (10 s), after which the task is canc
 discarded, no turn spent, listening again. Ten seconds is past any healthy recogniser, the local
 faster-whisper on CPU included.
 
+*2026-10-01:* not for Whisper's own decoding of audio it cannot make sense of, which retries up to
+six times; and cancelling the task frees the session but not the local model, whose decode runs on.
+The first timing of the voice loop found both, and one utterance failing every later one: FC-019.
+
 ## Result
 
 The test passes within its bound; before the fix it hung until cancelled. The streaming

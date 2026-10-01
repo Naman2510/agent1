@@ -151,8 +151,10 @@ against +0.073 here, with the same decision. Its arithmetic differed from the AM
 so the gain's size depends on the machine, within a range that does not change the decision. The
 next run on an AMD EPYC 7763 (d7f415e), with oneDNN's kernels pinned too, reproduced +0.0725,
 [+0.0265, +0.1271], 8 better and 0 worse, exactly. On a third CPU model, an AMD EPYC 9V74
-(ac725cb), it came out +0.0669, [+0.0076, +0.1679], 5 better and 0 worse. The decision was the same
-on all three models.
+(ac725cb), it came out +0.0669, [+0.0076, +0.1679], 5 better and 0 worse. On a fourth, an Intel Xeon
+6973P-C with every pin in place (T2 run #11, d8ef722), +0.0308, [+0.0043, +0.0694], 5 better and 0
+worse; and the next run on the 7763 (#12, 139dab6) reproduced +0.0725 exactly. The decision was the
+same on all four models.
 
 | | Auto-detected | Told the routed language |
 |---|---|---|

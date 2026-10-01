@@ -58,20 +58,25 @@ Phases 0 to 10 have passed their gates. What that does and does not mean, from t
   before they ran.
 - Graceful degradation for every dependency, load measured on one process, and the security
   checklist reconciled item by item.
-- 884 backend tests, 43 frontend unit tests, and 14 end-to-end tests against the Compose stack,
+- The voice loop timed with real local speech in and out, in tier T2 (EVALUATION.md §5.4). Its
+  first run found one utterance stopping the recogniser hearing every later one, and its second
+  confirmed the fix (FC-019).
+- 890 backend tests, 43 frontend unit tests, and 14 end-to-end tests against the Compose stack,
   32 runs across Chromium, Firefox and WebKit.
 
 **Not true yet, and said so wherever it matters:**
 - **No real provider in the loop.** The answers come from a scripted model and the voice from a
   fake synthesiser by default (a local one, eSpeak NG, now speaks them on request: ADR-0018), and
-  the Claude adapter has never run against the live API. So there is no full-stack latency, and no
-  measure of the mentor's own mistakes (M9-01, M8-01, M7-01).
+  the Claude adapter has never run against the live API. So full-stack latency is measured only
+  with local providers and a model that answers at once: first audio about 4.2 s after the student
+  stops, 3.7 s of it the local recogniser (EVALUATION.md §5.4). And there is no measure of the
+  mentor's own mistakes (M9-01, M8-01, M7-01).
 - **Every dataset is self-authored or synthetic.** Nothing has been measured on a real student's
   voice or question (M9-02).
 - **Two of the six planned evaluation suites** (`response`, `e2e`) do not exist (M9-03).
 - **The recogniser's baselines are exact on one CPU model only** (AMD EPYC 7763), and compared,
-  not enforced, on others. Two other models have differed, and its libraries promise no more
-  (M9-04, FC-006).
+  not enforced, on others. Three other models have differed, the latest with every pin in place,
+  and its libraries promise no more (M9-04, FC-006).
 - **Past about 50 connected voice students** the design is more processes, and that is not
   measured (M9-05).
 - **Tamil** was deferred at the MVP decision and is not built.
