@@ -99,8 +99,8 @@ def test_the_summary_says_how_many_turns_were_not_one_question_asked_once(
             _client(bench, {1: "Let me see.", 2: "Is it twelve volts?"}, stages),
             _model(bench),
         ),
-        # Never answered at all.
-        (_case("silent"), bench._PlayingClient(), _model(bench)),
+        # Never answered: the recogniser gave up, twice.
+        (_case("silent"), bench._PlayingClient(errors={"stt_failed": 2}), _model(bench)),
     ]
     summary = bench.summarise(outcomes)
 
@@ -111,6 +111,7 @@ def test_the_summary_says_how_many_turns_were_not_one_question_asked_once(
     assert summary["merged"] == 1
     assert summary["answered_in_parts"] == ["parts"]
     assert summary["unanswered"] == ["silent"]
+    assert summary["errors"] == {"stt_failed": 2}
     assert summary["stages"]["ttfa_ms"] == {"n": 4, "p50": 1450.0, "p95": 1450.0, "max": 1450.0}
 
 

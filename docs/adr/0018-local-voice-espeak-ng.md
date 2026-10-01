@@ -61,6 +61,8 @@ path is still the managed provider ADR-0003 plans.
 - CI installs `espeak-ng`, and its tests fail rather than skip there: the three voices, framing,
   loudness, option injection, cancellation, failure, and a full voice turn that ends in speech.
 - ADR-0003's offline and CI voice is eSpeak NG. Its decision for the real-time path is unchanged.
+- The voice loop is timed with it and faster-whisper in tier T2 (`scripts/bench_voice_loop.py`,
+  EVALUATION.md §5.4), and every number from that run is labelled local providers, no model.
 
 ## Revisit when
 A managed streaming voice is chosen (ADR-0003), or a neural local voice covering Hindi and Tamil

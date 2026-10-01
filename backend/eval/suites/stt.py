@@ -28,7 +28,7 @@ from typing import Any
 
 import numpy as np
 
-from app.providers.stt.faster_whisper import FasterWhisperSTT
+from app.providers.stt.faster_whisper import WHISPER_FALLBACK, FasterWhisperSTT
 from app.voice.audio import SAMPLE_RATE
 from eval.recording import SuiteUnavailableError
 
@@ -208,6 +208,21 @@ def machine(cpuinfo: Path = Path("/proc/cpuinfo")) -> str:
     return platform.processor() or platform.machine() or "unknown"
 
 
+def decoding(settings: dict[str, Any]) -> tuple[float | tuple[float, ...], float | None]:
+    """The configured decoding: (temperature, tokens a second of audio may produce). A config that
+    says nothing gets Whisper's own, unbounded — what the suite has always measured, and what
+    `stt.toml` still does. A conversation decodes once, and within a budget (FC-019):
+    `stt-live.toml` measures that."""
+    temperature = settings.get("temperature", WHISPER_FALLBACK)
+    per_second = settings.get("tokens_per_second")
+    return (
+        tuple(float(t) for t in temperature)
+        if isinstance(temperature, list | tuple)
+        else float(temperature),
+        None if per_second is None else float(per_second),
+    )
+
+
 def faster_whisper_recogniser(config: dict[str, Any]) -> Recognise:
     """The configured faster-whisper model, decoding exactly as the app's adapter does
     (FasterWhisperSTT), as a `Recognise` whose answer depends only on the audio."""
@@ -240,10 +255,18 @@ def faster_whisper_recogniser(config: dict[str, Any]) -> Recognise:
     # first samples, and cannot be reseeded after — so every utterance gets a model of its own:
     # each is heard as if it came first, whatever the utterances before it did.
     ctranslate2.set_random_seed(int(settings.get("seed", 0)))
+    temperature, tokens_per_second = decoding(settings)
 
     def recognise(audio: np.ndarray, language: str | None) -> tuple[str, str | None]:
         model = WhisperModel(path, device="cpu", compute_type=compute_type, cpu_threads=cpu_threads)
-        adapter = FasterWhisperSTT(size, beam_size=beam_size, language=language, model=model)
+        adapter = FasterWhisperSTT(
+            size,
+            beam_size=beam_size,
+            language=language,
+            temperature=temperature,
+            tokens_per_second=tokens_per_second,
+            model=model,
+        )
         heard = adapter.transcribe(audio)
         return heard.text, heard.language_hint
 
@@ -282,10 +305,19 @@ def summarise(results: Sequence[Scored]) -> dict[str, Any]:
 def render(summary: dict[str, Any], config: dict[str, Any]) -> str:
     settings = config.get("recogniser", {})
     pins = summary.get("numerics") or {}
+    temperature, tokens_per_second = decoding(settings)
+    retries = isinstance(temperature, tuple) and len(temperature) > 1
     lines = [
         f"recogniser  faster-whisper {settings.get('model', 'small')}"
         f" ({settings.get('compute_type', 'int8')}, beam {settings.get('beam_size', 5)},"
         f" language {settings.get('language', 'auto')}, seed {settings.get('seed', 0)})",
+        "decoding    "
+        + ("Whisper's own: retried at rising temperatures" if retries else "once")
+        + (
+            f", at most {tokens_per_second:g} tokens a second of audio"
+            if tokens_per_second is not None
+            else ", no length limit"
+        ),
         "numerics    "
         + (" ".join(f"{k}={v or 'unset'}" for k, v in pins.items()) or "not recorded"),
         f"machine     {summary.get('machine') or 'not recorded'}",

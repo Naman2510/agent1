@@ -113,6 +113,9 @@ class _PlayingClient:
     received: dict[int, int] = field(default_factory=dict)
     # Turns the student interrupted, by going on talking after the turn detector ended theirs.
     interrupted: int = 0
+    # What the session told the student went wrong, by its code (`stt_failed`: the recogniser
+    # gave no transcript within the session's wait, FC-019).
+    errors: dict[str, int] = field(default_factory=dict)
 
     async def send_control(self, message_type: Any, **payload: Any) -> None:
         if str(message_type) == "metrics":
@@ -121,6 +124,9 @@ class _PlayingClient:
             self.heard[payload["turn_id"]] = str(payload["text"])
         elif str(message_type) == "tts.cancel":
             self.interrupted += 1
+        elif str(message_type) == "error":
+            code = str(payload.get("code"))
+            self.errors[code] = self.errors.get(code, 0) + 1
 
     async def send_audio(self, turn_id: int, seq: int, pcm: bytes) -> None:
         self.received[turn_id] = self.received.get(turn_id, 0) + len(pcm)
@@ -218,9 +224,14 @@ def summarise(
                 }
             )
     answered = [t["case"] for t in turns]
+    errors: dict[str, int] = {}
+    for _, client, _ in outcomes:
+        for code, count in client.errors.items():
+            errors[code] = errors.get(code, 0) + count
     return {
         "cases": len(outcomes),
         "turns": turns,
+        "errors": dict(sorted(errors.items())),
         "interrupted": sum(client.interrupted for _, client, _ in outcomes),
         "merged": sum(t["merged"] for t in turns),
         "answered_in_parts": sorted({c for c in answered if answered.count(c) > 1}),
@@ -264,6 +275,8 @@ def main() -> int:
         print(f"            answered in parts: {', '.join(result['answered_in_parts'])}")
     if result["unanswered"]:
         print(f"            never answered: {', '.join(result['unanswered'])}")
+    for code, count in result["errors"].items():
+        print(f"            errors sent to the student: {code} {count}")
     print()
     print(f"{'stage':16s} {'n':>4s} {'p50 ms':>8s} {'p95 ms':>8s} {'max ms':>8s}")
     for stage, row in result["stages"].items():

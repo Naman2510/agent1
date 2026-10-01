@@ -389,7 +389,7 @@ for this and none will be invented.
 |---|---|---|---|
 | T0 | every push | unit + integration + e2e with all providers faked | none |
 | T1 | every push | every committed eval config reproduces its baseline: `lid`, `retrieval` and its ablations, `agent`, `injection`, `voice` and EXP-003's candidate | none (local models; scripted LLM) |
-| T2 | nightly, on demand, and when what it measures changes | `stt`: faster-whisper, weights downloaded first (`nightly.yml`); exact on the baselines' CPU model, compared on others (FC-006) | none (model download) |
+| T2 | nightly, on demand, and when what it measures changes | `stt`: faster-whisper, weights downloaded first (`nightly.yml`); exact on the baselines' CPU model, compared on others (FC-006). And the voice loop's latency with that recogniser and eSpeak NG (`scripts/bench_voice_loop.py`, §5.4): wall-clock, so reported, never held to a baseline | none (model download) |
 | T3 | by hand | today, the Claude adapter's live smoke test (`live.yml`, skipped — and saying so — without an `ANTHROPIC_API_KEY` secret); live `agent`, `response`, `voice` and `e2e` suites do not exist yet | paid |
 
 T0's e2e is the Playwright suite in `frontend/e2e/` (Phase 7): real browsers against the whole

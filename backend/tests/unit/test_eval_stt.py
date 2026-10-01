@@ -6,6 +6,7 @@ The model itself runs in CI tier T2, where its weights can be downloaded.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -20,7 +21,7 @@ from app.providers.registry import build_stt
 from app.providers.stt import faster_whisper as fw
 from app.providers.stt.base import FinalTranscript
 from eval import harness, runner
-from eval.recording import DATASETS
+from eval.recording import CONFIGS, DATASETS, load_config
 from eval.suites import stt
 
 VOICE = DATASETS / "v1" / "voice"
@@ -125,6 +126,18 @@ def test_the_adapter_transcribes_the_whole_utterance_once_it_ends() -> None:
     assert kwargs["language"] is None, "Whisper detects the language per utterance"
     assert kwargs["condition_on_previous_text"] is False
     assert kwargs["vad_filter"] is False, "the session's own VAD already found the speech"
+    # FC-019: one decode, never retried, and no longer than speech that long needs.
+    assert kwargs["temperature"] == 0.0
+    assert kwargs["max_new_tokens"] == fw.MIN_NEW_TOKENS + 1, "40 ms of audio: one token's worth"
+
+
+def test_a_decode_s_budget_grows_with_the_audio_and_stops_at_whisper_s_own_cap() -> None:
+    adapter = fw.FasterWhisperSTT("small", model=_Model())
+    assert adapter.token_budget(0.0) == 32
+    assert adapter.token_budget(3.0) == 32 + 60, "three seconds: room for fast Hindi"
+    assert adapter.token_budget(30.0) == 224, "the longest utterance the session keeps"
+    unbounded = fw.FasterWhisperSTT("small", tokens_per_second=None, model=_Model())
+    assert unbounded.token_budget(3.0) is None
 
 
 def test_silence_that_reached_the_adapter_is_an_empty_transcript() -> None:
@@ -253,6 +266,26 @@ def test_each_utterance_is_heard_by_a_model_of_its_own_seeded_once(
     [(_, first)], [(_, second)] = (m.calls for m in models)
     assert (first["language"], second["language"]) == (None, "hi")
     assert first["beam_size"] == 5 and first["condition_on_previous_text"] is False
+    # A config that says nothing about decoding gets Whisper's own, as the suite always measured.
+    assert first["temperature"] == fw.WHISPER_FALLBACK and first["max_new_tokens"] is None
+
+
+def test_stt_live_measures_the_decoding_a_conversation_uses() -> None:
+    """The app builds the adapter with its defaults (app/providers/registry.py), and so does the
+    voice-loop bench: stt-live.toml must decode exactly that way, and differ from stt.toml in
+    nothing else."""
+    _, live = load_config(CONFIGS / "stt-live.toml")
+    _, whisper = load_config(CONFIGS / "stt.toml")
+    defaults = inspect.signature(fw.FasterWhisperSTT).parameters
+    assert stt.decoding(live["recogniser"]) == (
+        defaults["temperature"].default,
+        defaults["tokens_per_second"].default,
+    )
+    assert stt.decoding(whisper["recogniser"]) == (fw.WHISPER_FALLBACK, None)
+    decoding = ("temperature", "tokens_per_second")
+    assert {k: v for k, v in live["recogniser"].items() if k not in decoding} == whisper[
+        "recogniser"
+    ]
 
 
 def test_the_suite_records_each_case_and_how_its_arithmetic_was_pinned(
