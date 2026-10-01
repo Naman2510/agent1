@@ -17,6 +17,8 @@ on:
       - "backend/eval/baselines/stt*.json"
       - "backend/constraints.txt"
       - "backend/app/providers/stt/**"
+      - "backend/app/providers/tts/espeak.py"
+      - "backend/scripts/bench_voice_loop.py"
       - "datasets/v1/voice/**"
       - ".github/workflows/nightly.yml"
 
@@ -57,6 +59,16 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: whisper-${{ hashFiles('backend/eval/configs/stt.toml') }}
+      # For the voice loop below: the VAD's weights, pinned and checksummed, and the local voice.
+      - name: Cache the VAD's weights
+        uses: actions/cache@v4
+        with:
+          path: backend/models
+          key: models-${{ hashFiles('backend/scripts/fetch_models.sh') }}
+      - name: Fetch the VAD's weights, and install the local voice
+        run: |
+          bash backend/scripts/fetch_models.sh
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends espeak-ng
       # Two runners once computed different transcripts from the same audio (PHASE_8_AUDIT
       # D8-15). The suite pins the arithmetic itself (eval/suites/stt.py NUMERICS); this records
       # the machine, and which kernels numpy, OpenBLAS, CTranslate2 and MKL chose under the pins.
@@ -110,6 +122,15 @@ jobs:
             held "$code" "$config"
           done
           exit $status
+      # EVALUATION.md §5's latency table, with real local speech in and out: faster-whisper hears
+      # the voice dataset's questions in real time, a scripted model answers at once, eSpeak NG
+      # speaks. Machine-dependent wall-clock numbers, so reported, never held to a baseline.
+      - name: Voice loop latency, local recogniser and voice (reported, not a baseline)
+        if: always()
+        working-directory: backend
+        run: |
+          set -o pipefail
+          python scripts/bench_voice_loop.py --json voice-loop.json | tee -a t2-report.txt
       - name: Keep the report
         if: always()
         uses: actions/upload-artifact@v4
@@ -117,5 +138,6 @@ jobs:
           name: t2-report
           path: |
             backend/t2-report.txt
+            backend/voice-loop.json
             backend/eval/baselines/stt*.json
           if-no-files-found: ignore
