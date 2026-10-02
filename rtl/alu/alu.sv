@@ -16,6 +16,13 @@
 
 module alu
   import riscv_pkg::*;
+#(
+  // ENABLE_MUL=0 (default): ALU_MUL is never produced by control_unit.sv
+  // and yields 0 here, so synthesis infers no multiplier and the RV32I
+  // design is unchanged. ENABLE_MUL=1: low 32 bits of a*b (RV32M MUL --
+  // identical for signed and unsigned operands).
+  parameter bit ENABLE_MUL = 1'b0
+)
 (
   input  logic [31:0] a,
   input  logic [31:0] b,
@@ -42,6 +49,7 @@ module alu
       ALU_OR:    result = a | b;
       ALU_AND:   result = a & b;
       ALU_PASSB: result = b;
+      ALU_MUL:   result = ENABLE_MUL ? a * b : 32'b0;
       default:   result = 32'b0;
     endcase
   end

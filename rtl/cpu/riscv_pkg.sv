@@ -74,6 +74,8 @@ package riscv_pkg;
   parameter logic [3:0] ALU_OR    = 4'b1000;
   parameter logic [3:0] ALU_AND   = 4'b1001;
   parameter logic [3:0] ALU_PASSB = 4'b1010; // result = b input, used for LUI
+  parameter logic [3:0] ALU_MUL   = 4'b1011; // low 32 bits of a*b (RV32M MUL); only
+                                             // produced when ENABLE_MUL=1 -- see control_unit.sv
 
   // ---------------------------------------------------------------------
   // Immediate-format selector for imm_gen (see docs/riscv.md section 2.1)

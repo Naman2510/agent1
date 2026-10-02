@@ -50,7 +50,10 @@ module riscv_cpu_pipeline
   import riscv_pkg::*;
 #(
   parameter int IMEM_DEPTH_WORDS = 1024,
-  parameter      IMEM_INIT_FILE  = ""
+  parameter      IMEM_INIT_FILE  = "",
+  // Optional RV32M MUL (see control_unit.sv / alu.sv). Default off: the
+  // core is exactly RV32I, as every phase through 17 measured it.
+  parameter bit  ENABLE_MUL       = 1'b0
 ) (
   input  logic        clk,
   input  logic        rst_n,
@@ -163,7 +166,7 @@ module riscv_cpu_pipeline
   logic [1:0] result_src_id;
   logic [2:0] accel_sel_id; // Phase 10: see riscv_pkg.sv's ACCEL_SEL_*
 
-  control_unit control_inst (
+  control_unit #(.ENABLE_MUL(ENABLE_MUL)) control_inst (
     .opcode(opcode_id), .funct3(funct3_id), .funct7(funct7_id),
     .reg_write(reg_write_id), .alu_src_a(alu_src_a_id), .alu_src_b(alu_src_b_id),
     .imm_type(imm_type_id), .alu_op(alu_op_id),
@@ -324,7 +327,7 @@ module riscv_cpu_pipeline
   assign alu_a_ex = alu_src_a_ex ? pc_ex      : rs1_data_fwd;
   assign alu_b_ex = alu_src_b_ex ? imm_out_ex : rs2_data_fwd;
 
-  alu alu_inst (
+  alu #(.ENABLE_MUL(ENABLE_MUL)) alu_inst (
     .a(alu_a_ex), .b(alu_b_ex), .alu_op(alu_op_ex),
     .result(alu_result_ex), .zero(alu_zero_ex)
   );

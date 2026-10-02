@@ -26,7 +26,8 @@ module riscv_soc #(
   parameter      IMEM_INIT_FILE  = "",
   parameter int RAM_DEPTH_WORDS  = 1024,
   parameter int UART_BUSY_CYCLES = 4,
-  parameter int ACCEL_MAX_DIM    = 8
+  parameter int ACCEL_MAX_DIM    = 8,
+  parameter bit ENABLE_MUL       = 1'b0  // optional RV32M MUL in the CPU; see riscv_cpu_pipeline.sv
 ) (
   input  logic clk,
   input  logic rst_n,
@@ -74,7 +75,8 @@ module riscv_soc #(
 
   riscv_cpu_pipeline #(
     .IMEM_DEPTH_WORDS(IMEM_DEPTH_WORDS),
-    .IMEM_INIT_FILE  (IMEM_INIT_FILE)
+    .IMEM_INIT_FILE  (IMEM_INIT_FILE),
+    .ENABLE_MUL      (ENABLE_MUL)
   ) cpu_inst (
     .clk(clk), .rst_n(rst_n),
     .dbus_addr(dbus_addr), .dbus_wdata(dbus_wdata),

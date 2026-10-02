@@ -39,7 +39,7 @@ such throughout).
 |---|---|
 | 7 | Pipelined CPU CPI ~1.5-1.65 on real hand-written benchmarks (`results/performance_report.md`) |
 | 11 | Accelerator speedup over CPU-only: 1.84x (vecadd), 5.03x (dot), 11.90x (matmul) at N=16/4x4 -- the gap widens with multiply count because RV32I has no hardware multiplier (`results/accelerator_benchmark_report.md`) |
-| 12 | Full SoC synthesizes to 38,390 iCE40 cells (Yosys resource *estimate*, no physical FPGA); no memory array inferred Block RAM under default settings -- a real, flagged finding (`results/synthesis_report.md`) |
+| 12 | Full SoC synthesizes to 38,390 iCE40 cells at Phase 12 (38,464 after the post-v1 control-unit decode fix added full `funct7` validation -- see `docs/rv32m_mul.md`) (Yosys resource *estimate*, no physical FPGA); no memory array inferred Block RAM under default settings -- a real, flagged finding (`results/synthesis_report.md`) |
 | 13 | A genuine CPU-favorable crossover exists: `vecadd N=1` is 37 CPU cycles vs. 39 accelerator cycles -- found by deliberately testing the smallest possible workload, not assumed. Trained model's leave-one-out CV accuracy: 9/11 = 0.818 (`results/scheduler_report.md`) |
 | 14 | Genuinely held-out accuracy (9 workloads never trained on): 8/9 = 0.889, with one honest, instructive miss (`vecadd N=2`) exactly where Phase 13's documented uncertainty said one might occur (`results/scheduler_accuracy_report.md`) |
 | 15 | A single RISC-V program computing the scheduling decision itself, at runtime, on the CPU -- and the honest result that its own decision overhead made it SLOWER than a naive "always use the accelerator" baseline for a small workload stream (`results/dynamic_scheduling_report.md`) |

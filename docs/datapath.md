@@ -143,7 +143,10 @@ added). An opcode outside the supported set therefore can't be trapped to
 a handler that doesn't exist; instead, `control_unit.sv` raises `illegal`
 so simulation (and later, performance counters) can observe and fail on
 it, rather than the CPU silently executing the ALU's default-case
-behavior as if it meant something.
+behavior as if it meant something. (Post-v1 note: until the fix
+described in `docs/rv32m_mul.md`, this held for opcodes but not for
+`funct7` within `OP` / the shift-immediates -- those encodings are now
+validated too.)
 
 ## Verified behavior (Phase 2)
 

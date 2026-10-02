@@ -59,6 +59,9 @@ run benchmarks
 section "Phase 8: SoC integration"
 run sim_soc
 
+section "Post-v1: control-unit decode validation + optional RV32M MUL"
+run test_mul
+
 section "Phase 9-10: Hardware accelerator + custom extension"
 run test_accel
 run test_accel_custom

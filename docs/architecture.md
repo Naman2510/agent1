@@ -691,3 +691,15 @@ cost over the oracle drops from 108/229 to 9/12 cycles; the result is
 a near-tie with always-accelerator (388 vs. 389; 2368 vs. 2366), with
 the side it lands on set by the stream's mix.
 
+## Post-v1 — Decode Validation Fix + Optional RV32M MUL
+
+An exhaustive decode sweep found that the control unit validated
+opcodes but not `funct7`, so unsupported `OP`/shift-immediate encodings
+(including all of RV32M) silently executed as RV32I ops; that is now
+fixed (+12 cells in the control unit). The pipelined CPU and SoC gained
+an `ENABLE_MUL` parameter (default off, leaving the RV32I design and
+every earlier measurement unchanged) that adds a single-cycle `MUL` in
+the EX-stage ALU -- the hardware lever for revisiting the scheduler
+results, all of which trace back to RV32I's lack of a multiplier. See
+`docs/rv32m_mul.md`.
+

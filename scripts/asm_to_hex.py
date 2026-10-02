@@ -130,6 +130,9 @@ R_OPS = {  # mnemonic -> (funct3, funct7)
     "sltu": (0b011, 0b0000000), "xor": (0b100, 0b0000000),
     "srl": (0b101, 0b0000000), "sra": (0b101, 0b0100000),
     "or": (0b110, 0b0000000), "and": (0b111, 0b0000000),
+    # RV32M MUL: only executes on a core built with ENABLE_MUL=1; on the
+    # default RV32I core it decodes as illegal (rtl/cpu/control_unit.sv).
+    "mul": (0b000, 0b0000001),
 }
 
 I_ARITH_OPS = {  # mnemonic -> funct3 (no shift-amount funct7 distinction)

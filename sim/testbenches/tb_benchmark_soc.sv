@@ -33,7 +33,12 @@
 
 `timescale 1ns/1ps
 
-module tb_benchmark_soc;
+module tb_benchmark_soc #(
+  // Build the SoC's CPU with the optional RV32M MUL (docs/rv32m_mul.md).
+  // Default 0 = the RV32I core every earlier measurement used; override
+  // at compile time, e.g. iverilog -Ptb_benchmark_soc.ENABLE_MUL=1.
+  parameter bit ENABLE_MUL = 1'b0
+);
 
   localparam logic [31:0] SENTINEL = 32'hDEADBEEF;
   // Phase 13's largest CPU-only kernel (cpu_matmul_n8: N=8, 512
@@ -68,7 +73,8 @@ module tb_benchmark_soc;
     // its DEPTH_WORDS needs -- see this project's own bug writeup in
     // CHANGELOG.md's Phase 11 entry for exactly what aliasing at the
     // default depth looked like before this was caught).
-    .RAM_DEPTH_WORDS(4096)
+    .RAM_DEPTH_WORDS(4096),
+    .ENABLE_MUL(ENABLE_MUL)
   ) dut (
     .clk(clk), .rst_n(rst_n),
     .gpio_in(gpio_in), .gpio_out(gpio_out),
@@ -101,6 +107,9 @@ module tb_benchmark_soc;
     bit    got_sentinel;
 
     if (!$value$plusargs("NAME=%s", name)) name = "(unnamed)";
+    // Separate line (the BENCHMARK_RESULT format every parser relies on is
+    // unchanged): lets a caller confirm which core it actually measured.
+    $display("BENCHMARK_CONFIG: name=%s ENABLE_MUL=%0d", name, ENABLE_MUL);
     if (!$value$plusargs("HEXFILE=%s", hexfile)) begin
       $display("ERROR: +HEXFILE=... required"); $finish;
     end

@@ -1209,3 +1209,40 @@ This is the final phase of the original 17-phase specification.
   lands on is set by the stream's mix of vecadd requests, not by
   accuracy or by the decision's cost.
 
+## Post-v1 — Decode Validation Fix + Optional RV32M MUL (2026-10-02)
+
+- **Bug found and fixed: `control_unit.sv` never validated `funct7`.**
+  `OP` (R-type) instructions were decoded from `funct3` and `funct7[5]`
+  only, so any `funct7` RV32I doesn't define -- including every RV32M
+  encoding -- silently executed as an RV32I ALU op (a real `mul` ran as
+  `ADD`) with `illegal` never raised; the shift-immediates had the same
+  gap. Found by a new exhaustive sweep,
+  `sim/testbenches/tb_control_unit_decode.sv` (every `funct3` x
+  `funct7` of `OP` and `OP-IMM`, both `ENABLE_MUL` settings, against a
+  reference decoder written from the spec): 2,534 of 4,096 checks
+  failed on the unmodified control unit -- exactly the 1,014 + 253
+  invalid encodings per setting the spec predicts. Fixed; all 4,096
+  pass on Icarus Verilog and Verilator. Synthesis re-run: control unit
+  38 -> 50 cells, full SoC 38,390 -> 38,464 (+0.19%), pipelined CPU
+  total unchanged.
+
+- **Optional hardware `MUL`** (`ENABLE_MUL`, default 0) on
+  `control_unit`, `alu`, `riscv_cpu_pipeline` and `riscv_soc`. Default
+  0 is exactly the RV32I core every earlier phase measured; synthesis
+  folds the multiplier away (ALU unchanged at 843 cells). With 1, `MUL`
+  executes in the EX-stage ALU (ALU 2,225 cells: a LUT-built
+  multiplier, no DSP blocks in the default iCE40 flow). `MULH*`/`DIV*`/
+  `REM*` stay illegal. `scripts/asm_to_hex.py` gained `mul`, checked
+  bit-for-bit against GNU `as -march=rv32im`.
+
+- **Verification (`make test_mul`, both simulators):** the decode
+  sweep; `tb_mul.sv` running `sim/programs/mul/mul_test.s` on the
+  pipelined SoC built both ways (forwarding, load-use, branch, rd=x0
+  paths with `MUL`; exactly 11 illegal instructions and no writes
+  without it); and `tb_mul_kernels_correctness.sv` for 14 hardware-`MUL`
+  dot/matmul kernels generated from the Phase 13 templates by
+  `scheduler/benchmarks/gen_mul_programs.py`.
+  `sim/testbenches/tb_benchmark_soc.sv` gained an `ENABLE_MUL` parameter
+  (default 0) and a `BENCHMARK_CONFIG` line naming the core measured.
+  Full detail: `docs/rv32m_mul.md`.
+

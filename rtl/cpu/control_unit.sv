@@ -15,10 +15,21 @@
 // control unit needing to special-case OP vs OP-IMM for that decision:
 // funct7[5] is only ever "real" (non-immediate) hardware state for
 // R-type and for the two shift-immediate encodings, and in exactly those
-// cases it means what this case statement assumes.
+// cases it means what this case statement assumes. The full funct7 value
+// of those encodings is validated separately in the OP_R / OP_IMM
+// branches below, so an encoding outside RV32I raises `illegal` instead
+// of being decoded by funct7[5] alone.
+//
+// ENABLE_MUL (default 0): when set, OP_R funct7=0000001 funct3=000
+// decodes as RV32M MUL (ALU_MUL). The rest of RV32M (MULH*, DIV*, REM*)
+// is not implemented and stays illegal either way. Default-off keeps the
+// RV32I core -- and every result measured on it -- unchanged.
 
 module control_unit
   import riscv_pkg::*;
+#(
+  parameter bit ENABLE_MUL = 1'b0
+)
 (
   input  logic [6:0] opcode,
   input  logic [2:0] funct3,
@@ -73,20 +84,46 @@ module control_unit
 
     case (opcode)
       OP_R: begin
-        reg_write = 1'b1;
-        alu_src_a = 1'b0;
-        alu_src_b = 1'b0; // rs2
-        alu_op    = alu_op_rtype_or_itype;
-        result_src = RESULT_ALU;
+        // funct7 must be validated, not just funct7[5]: RV32I defines only
+        // 0000000 (all funct3) and 0100000 (SUB, SRA). Anything else --
+        // including every RV32M encoding -- is illegal here unless it is
+        // MUL with ENABLE_MUL set. Before this check existed, those
+        // encodings silently executed as the RV32I op their funct3/funct7[5]
+        // happened to select (e.g. MUL ran as ADD); caught by
+        // sim/testbenches/tb_control_unit_decode.sv's exhaustive sweep.
+        if (funct7 == 7'b0000000 ||
+            (funct7 == 7'b0100000 && (funct3 == 3'b000 || funct3 == 3'b101))) begin
+          reg_write  = 1'b1;
+          alu_src_a  = 1'b0;
+          alu_src_b  = 1'b0; // rs2
+          alu_op     = alu_op_rtype_or_itype;
+          result_src = RESULT_ALU;
+        end else if (ENABLE_MUL && funct7 == 7'b0000001 && funct3 == 3'b000) begin
+          reg_write  = 1'b1; // MUL: low 32 bits of rs1 * rs2
+          alu_src_a  = 1'b0;
+          alu_src_b  = 1'b0;
+          alu_op     = ALU_MUL;
+          result_src = RESULT_ALU;
+        end else begin
+          illegal = 1'b1;
+        end
       end
 
       OP_IMM: begin
-        reg_write = 1'b1;
-        alu_src_a = 1'b0;
-        alu_src_b = 1'b1; // immediate
-        imm_type  = IMM_I;
-        alu_op    = alu_op_rtype_or_itype;
-        result_src = RESULT_ALU;
+        // instr[31:25] is immediate data for every OP-IMM funct3 except the
+        // two shift-immediates, where it must be 0000000 (SLLI/SRLI) or
+        // 0100000 (SRAI) -- same validation gap and same fix as OP_R above.
+        if ((funct3 == 3'b001 && funct7 != 7'b0000000) ||
+            (funct3 == 3'b101 && funct7 != 7'b0000000 && funct7 != 7'b0100000)) begin
+          illegal = 1'b1;
+        end else begin
+          reg_write  = 1'b1;
+          alu_src_a  = 1'b0;
+          alu_src_b  = 1'b1; // immediate
+          imm_type   = IMM_I;
+          alu_op     = alu_op_rtype_or_itype;
+          result_src = RESULT_ALU;
+        end
       end
 
       OP_LOAD: begin // LW

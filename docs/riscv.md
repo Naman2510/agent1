@@ -227,8 +227,10 @@ U-type.
 | 1101111      | 0x6F         | J      | JAL |
 | 1100111      | 0x67         | I      | JALR |
 
-Every opcode value not in this table is undefined behavior in this
-project (the control unit will treat it as an illegal instruction; Phase
+Every opcode value not in this table -- and, within `OP` and the
+shift-immediate forms of `OP-IMM`, every `funct7` value outside those
+listed in §3 -- is undefined behavior in this project (the control unit
+will treat it as an illegal instruction; Phase
 2 defines the exact fallback: PC does not retire and a diagnostic is
 asserted in simulation, since there is no trap/exception handling yet).
 
@@ -237,7 +239,7 @@ asserted in simulation, since there is no trap/exception handling yet).
 To keep each phase honest about what is and is not implemented:
 
 - Compressed instructions (RVC / "C" extension) — not implemented.
-- Multiply/divide (M extension) — not implemented until a phase explicitly adds it.
+- Multiply/divide (M extension) — not implemented, with one optional exception: `MUL` (low 32 bits of `rs1 * rs2`, `funct7=0000001 funct3=000`) is available on the pipelined CPU when it is built with `ENABLE_MUL=1` (see `docs/rv32m_mul.md`). The default build is pure RV32I, where `MUL` -- like every other RV32M encoding (`MULH*`, `DIV*`, `REM*`) -- is decoded as illegal.
 - Atomics (A), floating point (F/D) — not implemented.
 - CSRs, traps, interrupts, privilege modes (M/S/U) — not implemented.
 - Byte/halfword loads and stores (`LB`, `LH`, `LBU`, `LHU`, `SB`, `SH`) — not implemented; only `LW`/`SW`.

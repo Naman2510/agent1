@@ -1,6 +1,6 @@
 # FPGA Synthesis Resource Estimates (Phase 12)
 
-Generated 2026-09-14 23:04 UTC by `scripts/run_synthesis.sh` (`scripts/gen_synthesis_report.py`) from actual Yosys 0.33 `synth_ice40` output, targeting Lattice iCE40 as a representative open-source-toolchain-supported device -- **this is synthesis-tool resource estimation only. No physical FPGA or hardware was used or is claimed anywhere in this report.** See `docs/synthesis.md` for full methodology, including two non-obvious things this phase had to work around (a Yosys package-import limitation, and an uninitialized-ROM optimization pitfall) -- both documented there and in `CHANGELOG.md`'s Phase 12 entry, not silently patched over.
+Generated 2026-10-02 11:43 UTC by `scripts/run_synthesis.sh` (`scripts/gen_synthesis_report.py`) from actual Yosys 0.33 `synth_ice40` output, targeting Lattice iCE40 as a representative open-source-toolchain-supported device -- **this is synthesis-tool resource estimation only. No physical FPGA or hardware was used or is claimed anywhere in this report.** See `docs/synthesis.md` for full methodology, including two non-obvious things this phase had to work around (a Yosys package-import limitation, and an uninitialized-ROM optimization pitfall) -- both documented there and in `CHANGELOG.md`'s Phase 12 entry, not silently patched over.
 
 ## Per-module cell counts
 
@@ -12,7 +12,7 @@ Each logic module synthesized independently (its own `synth_ice40 -top <module>`
 | regfile | 2820 | 1828 | 0 | 0 | 0 | 992 |
 | decoder | 0 | 0 | 0 | 0 | 0 | 0 |
 | imm_gen | 40 | 40 | 0 | 0 | 0 | 0 |
-| control_unit | 38 | 38 | 0 | 0 | 0 | 0 |
+| control_unit | 50 | 50 | 0 | 0 | 0 | 0 |
 | branch_unit | 127 | 63 | 64 | 0 | 0 | 0 |
 | forwarding_unit | 20 | 20 | 0 | 0 | 0 | 0 |
 | hazard_unit | 10 | 10 | 0 | 0 | 0 | 0 |
@@ -21,17 +21,17 @@ Each logic module synthesized independently (its own `synth_ice40 -top <module>`
 | gpio | 100 | 68 | 0 | 0 | 0 | 32 |
 | soc_bus | 108 | 108 | 0 | 0 | 0 | 0 |
 | accelerator | 17074 | 10630 | 194 | 0 | 6144 | 106 |
-| riscv_cpu_pipeline | 5923 | 3579 | 490 | 544 | 0 | 1309 |
+| riscv_cpu_pipeline | 5923 | 3610 | 459 | 544 | 0 | 1309 |
 
 ## Full SoC (`riscv_soc`)
 
 The complete design -- pipelined CPU, bus, UART, GPIO, and accelerator -- synthesized as one flattened top level, with its instruction ROM loaded with a real, instruction-diverse program (`sim/programs/soc/accel_custom_demo.s`) rather than left uninitialized (see `docs/synthesis.md` for why that distinction matters here).
 
-**Total cells: 38390**
+**Total cells: 38464**
 
 | Cell type | Count | Meaning |
 |---|---|---|
-| SB_LUT4 | 21365 | 4-input look-up table (the basic logic cell) |
+| SB_LUT4 | 21439 | 4-input look-up table (the basic logic cell) |
 | SB_DFFE | 14336 | D flip-flop with clock enable |
 | SB_DFFER | 1458 | D flip-flop with clock enable and async reset |
 | SB_CARRY | 686 | fast carry chain (used by adders/subtractors/comparators) |
