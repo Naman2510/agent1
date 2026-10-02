@@ -18,7 +18,9 @@
 // cases it means what this case statement assumes. The full funct7 value
 // of those encodings is validated separately in the OP_R / OP_IMM
 // branches below, so an encoding outside RV32I raises `illegal` instead
-// of being decoded by funct7[5] alone.
+// of being decoded by funct7[5] alone. Likewise LOAD/STORE/BRANCH/JALR
+// validate funct3. Every opcode x funct3 x funct7 combination is checked
+// against a spec-derived reference by sim/testbenches/tb_control_unit_decode.sv.
 //
 // ENABLE_MUL (default 0): when set, OP_R funct7=0000001 funct3=000
 // decodes as RV32M MUL (ALU_MUL). The rest of RV32M (MULH*, DIV*, REM*)
@@ -126,29 +128,45 @@ module control_unit
         end
       end
 
-      OP_LOAD: begin // LW
-        reg_write  = 1'b1;
-        alu_src_a  = 1'b0;
-        alu_src_b  = 1'b1;
-        imm_type   = IMM_I;
-        alu_op     = ALU_ADD;
-        mem_read   = 1'b1;
-        result_src = RESULT_MEM;
+      OP_LOAD: begin // LW only -- LB/LH/LBU/LHU (funct3 != 010) are not
+                     // implemented and must not execute as LW
+        if (funct3 == 3'b010) begin
+          reg_write  = 1'b1;
+          alu_src_a  = 1'b0;
+          alu_src_b  = 1'b1;
+          imm_type   = IMM_I;
+          alu_op     = ALU_ADD;
+          mem_read   = 1'b1;
+          result_src = RESULT_MEM;
+        end else begin
+          illegal = 1'b1;
+        end
       end
 
-      OP_STORE: begin // SW
-        alu_src_a = 1'b0;
-        alu_src_b = 1'b1;
-        imm_type  = IMM_S;
-        alu_op    = ALU_ADD;
-        mem_write = 1'b1;
+      OP_STORE: begin // SW only -- SB/SH (funct3 != 010) are not implemented;
+                      // executing them as SW would write a full word and
+                      // clobber the neighbouring bytes
+        if (funct3 == 3'b010) begin
+          alu_src_a = 1'b0;
+          alu_src_b = 1'b1;
+          imm_type  = IMM_S;
+          alu_op    = ALU_ADD;
+          mem_write = 1'b1;
+        end else begin
+          illegal = 1'b1;
+        end
       end
 
-      OP_BRANCH: begin // BEQ/BNE/BLT/BGE/BLTU/BGEU
-        imm_type = IMM_B;
-        branch   = 1'b1;
-        // alu_op/alu_src_* left at defaults: the branch unit evaluates
-        // rs1/rs2 directly and does not use the main ALU.
+      OP_BRANCH: begin // BEQ/BNE/BLT/BGE/BLTU/BGEU -- funct3 010/011 are
+                       // undefined (branch_unit.sv would just never take them)
+        if (funct3 == 3'b010 || funct3 == 3'b011) begin
+          illegal = 1'b1;
+        end else begin
+          imm_type = IMM_B;
+          branch   = 1'b1;
+          // alu_op/alu_src_* left at defaults: the branch unit evaluates
+          // rs1/rs2 directly and does not use the main ALU.
+        end
       end
 
       OP_LUI: begin
@@ -175,14 +193,18 @@ module control_unit
         result_src = RESULT_PC4;
       end
 
-      OP_JALR: begin
-        reg_write  = 1'b1;
-        alu_src_a  = 1'b0;   // rs1
-        alu_src_b  = 1'b1;   // immediate
-        imm_type   = IMM_I;
-        alu_op     = ALU_ADD; // ALU computes rs1 + imm; top level masks bit0
-        jalr       = 1'b1;
-        result_src = RESULT_PC4;
+      OP_JALR: begin // JALR requires funct3 = 000
+        if (funct3 == 3'b000) begin
+          reg_write  = 1'b1;
+          alu_src_a  = 1'b0;   // rs1
+          alu_src_b  = 1'b1;   // immediate
+          imm_type   = IMM_I;
+          alu_op     = ALU_ADD; // ALU computes rs1 + imm; top level masks bit0
+          jalr       = 1'b1;
+          result_src = RESULT_PC4;
+        end else begin
+          illegal = 1'b1;
+        end
       end
 
       OP_CUSTOM0: begin

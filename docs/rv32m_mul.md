@@ -43,6 +43,48 @@ No program this project runs is affected: the assembler and GCC only
 emit valid encodings, and the full `make demo` regression passes with
 every measured number unchanged.
 
+## Same gap in four more opcodes: full decode-space sweep
+
+The first sweep covered only `OP` and `OP-IMM`. Widening
+`tb_control_unit_decode.sv` to the **entire decode space** (every
+opcode × `funct3` × `funct7`, 131,072 encodings per `ENABLE_MUL`
+setting, 262,144 checks) found the same bug class in four more
+opcodes. The widened sweep also checks that an illegal encoding drives
+no side effect at all (no register write, memory access, branch, jump
+or accelerator operation), and that each legal one drives exactly the
+signals its instruction needs.
+
+| Opcode | What the core did | Invalid encodings |
+|---|---|---|
+| `LOAD` | never checked `funct3`: `LB`/`LH`/`LBU`/`LHU` executed as `LW` | 896 |
+| `STORE` | never checked `funct3`: `SB`/`SH` executed as `SW` -- a full-word write that clobbers the neighbouring bytes | 896 |
+| `BRANCH` | `funct3` 010/011 (undefined) decoded as a branch the branch unit never takes -- a silent no-op | 256 |
+| `JALR` | never checked `funct3` | 896 |
+
+Before running it against the unmodified RTL, the expected count was
+computed from the spec: 2,944 invalid encodings per setting, 5,888 in
+total. The sweep reported **exactly 5,888 failures**; every other
+encoding already decoded correctly, including all 128 opcodes'
+illegal/legal split, `LUI`/`AUIPC`/`JAL`, and the custom accelerator
+instructions. After the fix all 262,144 checks pass on both Icarus
+Verilog and Verilator. The legal-encoding count the testbench reports
+(5,517 without `MUL`, 5,518 with) also matches a hand tally of the spec.
+
+The byte/halfword loads and stores were already documented as not
+implemented (`docs/riscv.md` §4). What was wrong is that they still
+executed, as word accesses. No program in this project uses them: the
+assembler has no mnemonics for them, and the Phase 4 GCC-compiled C
+program uses only `lw`/`sw` (checked in its disassembly).
+
+**Cost (synthesis re-run):** the control unit goes from 50 to 59 iCE40
+cells (38 at Phase 12), and the full SoC from 38,464 to 38,528 (38,390
+at Phase 12: +0.36% for both decode fixes together). The standalone
+pipelined CPU came out *smaller*, 5,923 → 5,848 cells. That is reported
+as measured: a likely cause is that invalid encodings no longer drive
+any side effect, which gives Yosys more freedom to optimize, but it
+wasn't investigated further. `results/synthesis_report.md` is
+regenerated.
+
 ## Optional `MUL`
 
 - **`ENABLE_MUL` parameter, default 0**, on `control_unit`, `alu`,

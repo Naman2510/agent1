@@ -1273,3 +1273,24 @@ This is the final phase of the original 17-phase specification.
   regenerated; only that column changed, and nothing consumes it, so
   no model, accuracy figure or report number was affected.
 
+## Post-v1 — Full Decode-Space Validation (2026-10-02)
+
+- **Same bug class found in four more opcodes.** The decode sweep
+  (`sim/testbenches/tb_control_unit_decode.sv`) now covers the entire
+  decode space -- every opcode x `funct3` x `funct7`, 262,144 checks
+  across both `ENABLE_MUL` settings -- and also checks that illegal
+  encodings drive no side effect at all. Against the previous RTL it
+  reported exactly the 5,888 failures predicted from the spec: `LOAD`
+  and `STORE` never checked `funct3` (so `LB`/`LH`/`LBU`/`LHU` executed
+  as `LW` and `SB`/`SH` as a full-word `SW`), `BRANCH` `funct3` 010/011
+  decoded as a never-taken branch, and `JALR` never checked `funct3`.
+  Fixed in `rtl/cpu/control_unit.sv`; all 262,144 checks pass on Icarus
+  Verilog and Verilator. No program in the project uses those
+  encodings (the Phase 4 GCC build uses only `lw`/`sw`).
+
+- **Synthesis re-run:** control unit 50 -> 59 cells, full SoC 38,464 ->
+  38,528 (+0.36% over Phase 12 for both decode fixes); the standalone
+  pipelined CPU came out smaller (5,923 -> 5,848), reported as measured.
+  Full `make demo` regression passes with every measured number
+  unchanged. Docs: `docs/rv32m_mul.md`, `docs/riscv.md`.
+
