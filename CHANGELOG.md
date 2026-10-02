@@ -1246,3 +1246,30 @@ This is the final phase of the original 17-phase specification.
   (default 0) and a `BENCHMARK_CONFIG` line naming the core measured.
   Full detail: `docs/rv32m_mul.md`.
 
+## Post-v1 — CPU with Hardware MUL vs. Accelerator (2026-10-02)
+
+- **Measured the counterfactual every scheduler phase pointed at.**
+  `scheduler/benchmarks/collect_mul_dataset.py` (`make
+  collect_mul_dataset`) re-runs all 24 measured workloads on the
+  `ENABLE_MUL=1` SoC, asserting each run's `BENCHMARK_CONFIG` line and
+  that the 34 non-multiplying programs measure cycle-for-cycle the same
+  as in the RV32I datasets. Writes `scheduler/training/dataset_mul.csv`
+  and `results/mul_benchmark_report.md`.
+
+- **Result:** hardware `MUL` speeds up the CPU's `dot` 1.8-3.6x and
+  `matmul` 1.5-3.2x, but flips exactly one workload -- `dot` N=1 (35 vs.
+  39 cycles). The CPU wins 2 of 24 workloads instead of 1; the
+  accelerator still wins every `dot` with N >= 2 and every `matmul`.
+  With the multiplier, the accelerator's lead on `dot` lands within 5%
+  of its lead on `vecadd` at every N: the software multiply was the
+  whole extra gap, and what remains is loop/memory overhead a
+  multiplier doesn't touch.
+
+- **Data bug found and fixed:** the Phase 13/14/scheduler-v2 dataset
+  collectors stored regex group 7 (`load_use_stall`) in the
+  `forwarding_events` column instead of group 8 (`forwarding`), so every
+  committed `dataset*.csv` had load-use stall counts under that name
+  (CPU vecadd N=16: 16 instead of Phase 11's 200). Fixed and
+  regenerated; only that column changed, and nothing consumes it, so
+  no model, accuracy figure or report number was affected.
+

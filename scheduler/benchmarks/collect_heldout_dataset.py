@@ -89,7 +89,7 @@ def run_one(vvp_out, stem):
         sys.exit(1)
     return {
         "cycles": int(m.group(2)), "retired": int(m.group(3)),
-        "stall": int(m.group(4)), "forwarding": int(m.group(7)),
+        "stall": int(m.group(4)), "forwarding": int(m.group(8)),
     }
 
 

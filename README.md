@@ -101,6 +101,7 @@ make train_scheduler_v2                     # post-v1: retrain on all 20 known w
 make test_dynamic_v2_correctness            # post-v1: verify v2 in the runtime scheduler
 make run_dynamic_v2_demo                    # post-v1: measure v1 vs. v2 vs. lean runtime scheduler
 make test_mul                               # post-v1: decode-validation fix + optional RV32M MUL
+make collect_mul_dataset                    # post-v1: CPU with hardware MUL vs. accelerator
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,

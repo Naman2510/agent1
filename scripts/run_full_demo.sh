@@ -104,6 +104,9 @@ run train_scheduler_v2
 run test_dynamic_v2_correctness
 run run_dynamic_v2_demo
 
+section "Post-v1: CPU with hardware MUL vs. accelerator"
+run collect_mul_dataset
+
 section "SUMMARY -- real measured headline numbers (read from results/*.md)"
 
 extract() {
@@ -146,6 +149,10 @@ echo
 echo "-- Post-v1: scheduler v2 (results/scheduler_v2_report.md, results/dynamic_v2_report.md) --"
 grep -m1 "Leave-one-out CV accuracy" results/scheduler_v2_report.md
 grep -E "^\| Runtime scheduler, v2 model|^\| Always accelerator" results/dynamic_v2_report.md
+
+echo
+echo "-- Post-v1: CPU with hardware MUL (results/mul_benchmark_report.md) --"
+grep -m1 "CPU-favorable workloads" results/mul_benchmark_report.md
 
 echo
 echo "================================================================"

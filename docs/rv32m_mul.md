@@ -102,3 +102,58 @@ gained an `ENABLE_MUL` parameter (default 0) and prints a separate
 `BENCHMARK_CONFIG` line naming the core it measured. That line is
 needed because an illegal `mul` still occupies its pipeline slot, so
 cycle counts alone can't show which core ran.
+
+## Result: a multiplier closes the multiply gap, and almost nothing else
+
+```
+make collect_mul_dataset
+```
+
+`scheduler/benchmarks/collect_mul_dataset.py` re-measures all 24
+workloads with real data (vecadd/dot N = 1..64, matmul N = 1..8) on
+the `ENABLE_MUL=1` SoC. It asserts that every run's harness reports
+that core. It also asserts that the 34 programs which never multiply
+(CPU `vecadd` and every accelerator program) measure exactly the same
+cycle counts as in the RV32I datasets, which they do. Full table:
+`results/mul_benchmark_report.md`; data:
+`scheduler/training/dataset_mul.csv`.
+
+- **The CPU gets much faster where it multiplies:** `dot` 1.8-3.6x
+  (N=64: 5,270 → 1,484 cycles), `matmul` 1.5-3.2x (N=8: 32,885 →
+  10,237).
+- **It flips exactly one workload.** `dot` N=1 becomes a CPU win (35
+  vs. 39 cycles). The CPU now wins 2 of 24 workloads instead of 1
+  (`vecadd` N=1 was already a CPU win). The accelerator still wins
+  the other 22, including every `dot` with N ≥ 2 and every `matmul`.
+- **Why:** with the multiplier, the accelerator's lead on `dot` lands
+  within 5% of its lead on `vecadd` at every size (e.g. N=64: 1.87x vs.
+  1.96x), down from 1.64-6.65x without it. The software multiply was
+  the entire extra gap on `dot`. What remains is the per-element loop,
+  address and load/store overhead the accelerator beats even on plain
+  additions, and a multiplier doesn't touch that. `matmul` keeps a
+  bigger lead (2.6x at N=2, 7.0x at N=8) because its innermost loop
+  pays that overhead N³ times.
+
+For the scheduler, this is the counterfactual every earlier phase
+pointed at, now measured: giving the CPU the instruction it was missing
+roughly doubles the size of the CPU-favorable region (one more
+workload shape), but it stays confined to the smallest possible problem
+size. The conclusion of Phases 15-16 and `docs/scheduler_v2.md` holds
+with a multiplier too: on this accelerator, "always use the
+accelerator" stays close to optimal, because the accelerator's
+advantage comes from loop overhead, which a multiplier doesn't touch.
+
+## Data fix found while writing this
+
+`collect_dataset.py`, `collect_heldout_dataset.py` and
+`collect_scheduler_v2_heldout_dataset.py` (Phases 13, 14 and scheduler
+v2) stored regex group 7 of the harness's `BENCHMARK_RESULT` line in
+the `forwarding_events` column. Group 7 is `load_use_stall`;
+forwarding is group 8. Every committed `dataset*.csv` therefore held
+load-use stall counts under that name; for example, CPU `vecadd` N=16
+showed 16 instead of the 200 that Phase 11's report prints for the same
+program. All three scripts are fixed and the CSVs regenerated. Only
+that column changed (checked column by column), and nothing reads it:
+the models train on cycle counts and the size/operation features in
+`scheduler/models/features.py`. So no model, accuracy figure or report
+number was affected.

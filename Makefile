@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo demo test_scheduler_v2_heldout_correctness collect_scheduler_v2_heldout_dataset train_scheduler_v2 test_dynamic_v2_correctness run_dynamic_v2_demo test_mul
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo demo test_scheduler_v2_heldout_correctness collect_scheduler_v2_heldout_dataset train_scheduler_v2 test_dynamic_v2_correctness run_dynamic_v2_demo test_mul collect_mul_dataset
 
 help:
 	@echo "Available targets:"
@@ -76,6 +76,8 @@ help:
 	@echo "                 + write results/dynamic_v2_report.md"
 	@echo "  test_mul     - post-v1: exhaustive OP/OP-IMM decode check + optional RV32M MUL"
 	@echo "                 end-to-end on the pipelined CPU (ENABLE_MUL=1 and default 0)"
+	@echo "  collect_mul_dataset - post-v1: CPU-with-hardware-MUL vs. accelerator on all 24"
+	@echo "                 measured workloads + write results/mul_benchmark_report.md"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -175,3 +177,6 @@ run_dynamic_v2_demo:
 
 test_mul:
 	@./scripts/run_mul_test.sh
+
+collect_mul_dataset:
+	@python3 scheduler/benchmarks/collect_mul_dataset.py

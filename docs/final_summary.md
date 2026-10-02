@@ -44,6 +44,7 @@ such throughout).
 | 14 | Genuinely held-out accuracy (9 workloads never trained on): 8/9 = 0.889, with one honest, instructive miss (`vecadd N=2`) exactly where Phase 13's documented uncertainty said one might occur (`results/scheduler_accuracy_report.md`) |
 | 15 | A single RISC-V program computing the scheduling decision itself, at runtime, on the CPU -- and the honest result that its own decision overhead made it SLOWER than a naive "always use the accelerator" baseline for a small workload stream (`results/dynamic_scheduling_report.md`) |
 | 16 | At 4-32x the per-workload scale, that overhead penalty shrank from 26.5% to 9.5% -- but the deeper finding is that even a perfect, zero-overhead scheduler could only ever have saved 10 cycles on a realistic 12-workload stream, because the accelerator already wins almost everything (`results/mixed_workloads_report.md`) |
+| post-v1 | With an optional hardware `MUL`, the CPU's `dot`/`matmul` get 1.5-3.6x faster but only one more workload flips (`dot` N=1): the CPU wins 2 of 24, because the accelerator's remaining lead is loop/memory overhead, not arithmetic (`results/mul_benchmark_report.md`) |
 
 ## The honest conclusion this project's own data supports
 
