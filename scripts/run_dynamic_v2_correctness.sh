@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# run_dynamic_v2_correctness.sh -- post-v1: verify the two
-# v2-model runtime-scheduling programs (dynamic_v2_demo, mixed_dynamic_v2_demo) against
+# run_dynamic_v2_correctness.sh -- post-v1: verify the v2-model
+# runtime-scheduling programs -- both the straightforward versions
+# (dynamic_v2_demo, mixed_dynamic_v2_demo) and the lean-decision versions
+# (dynamic_lean_demo, mixed_dynamic_lean_demo) -- against
 # Python-computed expected results, under both Icarus Verilog and
-# Verilator. Must pass before
+# Verilator. The same testbench checks both pairs (they run identical
+# streams with identical output layout); only the program images
+# differ, passed in as SMALL_HEX / MIXED_HEX. Must pass before
 # scheduler/runtime/run_dynamic_v2_demo.py's measured cycle totals
 # are trusted.
 #
@@ -39,36 +43,52 @@ TB=sim/testbenches/tb_dynamic_v2_correctness.sv
 
 echo "== Generating v2-model runtime-scheduling programs =="
 .venv/bin/python3 scheduler/runtime/gen_dynamic_v2_demo.py
+.venv/bin/python3 scheduler/runtime/gen_dynamic_lean_demo.py
 
 echo
 echo "== Assembling demo programs =="
-for f in sim/programs/scheduler/dynamic_v2_demo.s sim/programs/scheduler/mixed_dynamic_v2_demo.s; do
+for stem in dynamic_v2_demo mixed_dynamic_v2_demo dynamic_lean_demo mixed_dynamic_lean_demo; do
+  f="sim/programs/scheduler/${stem}.s"
   python3 scripts/asm_to_hex.py "$f" -o "${f%.s}.hex" --words 1024
 done
 
-echo
-echo "== Icarus Verilog =="
-IVERILOG_OUT=$(mktemp)
-iverilog -g2012 -o "$IVERILOG_OUT" "${RTL_FILES[@]}" "$TB"
-vvp "$IVERILOG_OUT" | tee /tmp/dynamic_v2_correctness_iverilog.log
-rm -f "$IVERILOG_OUT"
-if ! grep -q "RESULT: ALL CHECKS PASSED" /tmp/dynamic_v2_correctness_iverilog.log; then
-  echo "Icarus Verilog run did NOT pass all checks." >&2
-  exit 1
-fi
+# variant  small-stream program    mixed-stream program
+VARIANTS=(
+  "v2   dynamic_v2_demo   mixed_dynamic_v2_demo"
+  "lean dynamic_lean_demo mixed_dynamic_lean_demo"
+)
+
+for v in "${VARIANTS[@]}"; do
+  read -r name small mixed <<<"$v"
+  DEFS_SMALL="SMALL_HEX=\"sim/programs/scheduler/${small}.hex\""
+  DEFS_MIXED="MIXED_HEX=\"sim/programs/scheduler/${mixed}.hex\""
+  LOG=/tmp/dynamic_${name}_correctness
+
+  echo
+  echo "== [$name] Icarus Verilog =="
+  IVERILOG_OUT=$(mktemp)
+  iverilog -g2012 -D"$DEFS_SMALL" -D"$DEFS_MIXED" -o "$IVERILOG_OUT" "${RTL_FILES[@]}" "$TB"
+  vvp "$IVERILOG_OUT" | tee "${LOG}_iverilog.log"
+  rm -f "$IVERILOG_OUT"
+  if ! grep -q "RESULT: ALL CHECKS PASSED" "${LOG}_iverilog.log"; then
+    echo "[$name] Icarus Verilog run did NOT pass all checks." >&2
+    exit 1
+  fi
+
+  echo
+  echo "== [$name] Verilator =="
+  VOUT=$(mktemp -d)
+  verilator --binary --timing -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINMISSING -Wno-PINCONNECTEMPTY \
+    -D"$DEFS_SMALL" -D"$DEFS_MIXED" \
+    --top-module tb_dynamic_v2_correctness "${RTL_FILES[@]}" "$TB" -o simv --Mdir "$VOUT" \
+    >"${LOG}_verilator_build.log" 2>&1
+  "$VOUT/simv" | tee "${LOG}_verilator.log"
+  rm -rf "$VOUT"
+  if ! grep -q "RESULT: ALL CHECKS PASSED" "${LOG}_verilator.log"; then
+    echo "[$name] Verilator run did NOT pass all checks." >&2
+    exit 1
+  fi
+done
 
 echo
-echo "== Verilator =="
-VOUT=$(mktemp -d)
-verilator --binary --timing -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINMISSING -Wno-PINCONNECTEMPTY \
-  --top-module tb_dynamic_v2_correctness "${RTL_FILES[@]}" "$TB" -o simv --Mdir "$VOUT" \
-  >/tmp/dynamic_v2_correctness_verilator_build.log 2>&1
-"$VOUT/simv" | tee /tmp/dynamic_v2_correctness_verilator.log
-rm -rf "$VOUT"
-if ! grep -q "RESULT: ALL CHECKS PASSED" /tmp/dynamic_v2_correctness_verilator.log; then
-  echo "Verilator run did NOT pass all checks." >&2
-  exit 1
-fi
-
-echo
-echo "== Both simulators: ALL CHECKS PASSED =="
+echo "== Both simulators, both variants: ALL CHECKS PASSED =="

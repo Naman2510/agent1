@@ -142,7 +142,7 @@ grep -m1 "vs. always-accelerator:" results/mixed_workloads_report.md
 echo
 echo "-- Post-v1: scheduler v2 (results/scheduler_v2_report.md, results/dynamic_v2_report.md) --"
 grep -m1 "Leave-one-out CV accuracy" results/scheduler_v2_report.md
-grep -E "^\| Runtime scheduler, v2 model" results/dynamic_v2_report.md
+grep -E "^\| Runtime scheduler, v2 model|^\| Always accelerator" results/dynamic_v2_report.md
 
 echo
 echo "================================================================"

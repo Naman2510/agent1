@@ -161,3 +161,57 @@ gap it can win -- which, for these kernels, is one workload shape
 standalone; the copy-out widens it here, the same effect that narrows
 the `vecadd N=2` gap). Full detail:
 `results/dynamic_v2_report.md`.
+
+## Cutting the decision cost
+
+If decision cost is the constraint, the next question is how low it
+can go without changing a single decision.
+`scheduler/runtime/gen_dynamic_lean_demo.py` emits programs that make
+exactly v2's choices (checked against `predict()` before any assembly
+is written) but compute them more cheaply:
+
+1. **Fold only what is provably constant.** The v2 rule is evaluated
+   over each operation's entire legal size range on this accelerator
+   -- N=1..`MAX_LEN` for vecadd/dot, N=1..`MAX_DIM` for matmul, both
+   parsed from `rtl/accelerator/accelerator.sv`. `dot` and `matmul`
+   can never satisfy `multiply_count == 0` at any legal N, so the
+   check for them could never change the outcome; they go straight to
+   the accelerator, with no compare and no runtime `mul32` calls.
+2. **Keep the runtime decision where it genuinely varies.** For
+   `vecadd` the CPU still decides at runtime: one compare against a
+   threshold held in `x28` for the whole program, using the
+   `li x9, N` both engine bodies already execute (hoisted above the
+   branch; the generator asserts nothing in either body writes `x9`
+   earlier).
+3. **Common path falls through.** The accelerator body follows the
+   compare (not-taken branch, no flush); the CPU body sits out of line
+   and jumps back.
+
+Correctness: the same testbench, compiled against the lean program
+images (`SMALL_HEX`/`MIXED_HEX` defines), passes on both simulators
+(`make test_dynamic_v2_correctness` now checks both variants).
+
+| Stream | v2 runtime | v2 lean | Always accelerator | Oracle |
+|---|---|---|---|---|
+| Phase 15 (6 workloads) | 487 | **388** | 389 | 379 |
+| Phase 16 (12 workloads) | 2585 | **2368** | 2366 | 2356 |
+
+The cost of deciding over the oracle drops from 108 to 9 cycles
+(Phase 15 stream) and from 229 to 12 (Phase 16 stream). The counters
+account for every remaining cycle: against the oracle, the lean
+programs retire 5 and 8 extra instructions respectively (the
+threshold load, one compare per `vecadd` request, and the jump back
+from the one out-of-line CPU dispatch) and take 2 extra pipeline
+flushes each (the taken compare and that jump), at 2 cycles per flush.
+
+The result is a near-tie, and which side it falls on depends on the
+stream: the lean runtime scheduler **beats always-accelerator by 1
+cycle** on the Phase 15 stream and **trails it by 2** on the Phase 16
+stream. Each runtime check that ends up at the accelerator costs a
+cycle; the single correct CPU dispatch earns the oracle's 10-cycle
+in-program gain minus its out-of-line round trip. Phase 16's stream
+has more `vecadd` requests that end up on the accelerator, so it pays
+for more checks against the same one win. On this accelerator, where
+only `vecadd N=1` ever favors the CPU, even an essentially free
+runtime scheduler is worth a handful of cycles per stream, in either
+direction. Full detail: `results/dynamic_v2_report.md`.

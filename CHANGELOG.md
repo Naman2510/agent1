@@ -1176,3 +1176,36 @@ This is the final phase of the original 17-phase specification.
   post-v1 scheduler-v2 steps and includes their headline numbers in
   its summary. Makefile gained `test_dynamic_v2_correctness` /
   `run_dynamic_v2_demo`; docs in `docs/scheduler_v2.md`.
+
+## Post-v1 — Lean Runtime Decision (2026-10-02)
+
+- **Cut the runtime scheduler's decision cost by 92-95% without
+  changing a single decision.** `scheduler/runtime/gen_dynamic_lean_demo.py`
+  generates programs whose engine choices equal the v2 model's
+  `predict()` on every workload (checked before writing assembly), but
+  (1) folds a decision at build time only where it is provably
+  constant -- the v2 rule enumerated over each operation's whole legal
+  size range, with `MAX_LEN`/`MAX_DIM` parsed from
+  `rtl/accelerator/accelerator.sv` (dot and matmul can never be routed
+  to the CPU, so they skip the check and matmul's runtime `mul32`
+  calls); (2) keeps a real runtime compare for vecadd, against a
+  threshold held in a register for the whole program, reusing the size
+  load both engine bodies already perform (hoisted, with an assertion
+  that nothing in either body writes that register first); (3) lays
+  the accelerator path out as fall-through and the CPU path out of
+  line.
+
+- **Correctness:** `sim/testbenches/tb_dynamic_v2_correctness.sv` now
+  takes its two program images as compile-time defines;
+  `scripts/run_dynamic_v2_correctness.sh` runs it for both the v2 and
+  the lean programs on Icarus Verilog and Verilator -- all passing.
+
+- **Result:** lean 388 vs. always-accelerator 389 (Phase 15 stream) and
+  2368 vs. 2366 (Phase 16 stream) -- a 1-cycle win and a 2-cycle loss.
+  Decision cost over the oracle fell from 108 to 9 and from 229 to 12
+  cycles; the report attributes every remaining cycle from the
+  counters (5 / 8 extra retired instructions plus 2 extra flushes at 2
+  cycles each). Which side of always-accelerator the lean scheduler
+  lands on is set by the stream's mix of vecadd requests, not by
+  accuracy or by the decision's cost.
+

@@ -13,7 +13,21 @@
 // cover: vecadd N=2 now dispatches to the accelerator instead of the
 // CPU, so its copy-out path is what produces that block's result here.
 
+//
+// The two program images are compile-time overridable (SMALL_HEX /
+// MIXED_HEX) so the same checks also cover
+// scheduler/runtime/gen_dynamic_lean_demo.py's programs, which run the
+// same two streams with the same output layout -- see
+// scripts/run_dynamic_v2_correctness.sh.
+
 `timescale 1ns/1ps
+
+`ifndef SMALL_HEX
+  `define SMALL_HEX "sim/programs/scheduler/dynamic_v2_demo.hex"
+`endif
+`ifndef MIXED_HEX
+  `define MIXED_HEX "sim/programs/scheduler/mixed_dynamic_v2_demo.hex"
+`endif
 
 module tb_dynamic_v2_correctness;
 
@@ -49,9 +63,9 @@ module tb_dynamic_v2_correctness;
 
   logic [31:0] small_gpio, mixed_gpio;
 
-  riscv_soc #(.IMEM_INIT_FILE("sim/programs/scheduler/dynamic_v2_demo.hex"), .RAM_DEPTH_WORDS(4096))
+  riscv_soc #(.IMEM_INIT_FILE(`SMALL_HEX), .RAM_DEPTH_WORDS(4096))
     dut_small (`SOC_PORTS(small_gpio));
-  riscv_soc #(.IMEM_INIT_FILE("sim/programs/scheduler/mixed_dynamic_v2_demo.hex"), .RAM_DEPTH_WORDS(4096))
+  riscv_soc #(.IMEM_INIT_FILE(`MIXED_HEX), .RAM_DEPTH_WORDS(4096))
     dut_mixed (`SOC_PORTS(mixed_gpio));
 
   localparam int MAX_CYCLES = 20000;
@@ -65,7 +79,7 @@ module tb_dynamic_v2_correctness;
   endfunction
 
   initial begin
-    $display("=== v2-model runtime scheduling correctness check ===");
+    $display("=== v2-model runtime scheduling correctness check: %s + %s ===", `SMALL_HEX, `MIXED_HEX);
 
     rst_n = 0;
     repeat (2) @(posedge clk);

@@ -681,3 +681,13 @@ streams (487 vs. 389; 2585 vs. 2366), because the oracle's whole
 advantage is 10 cycles per stream -- confirming by measurement that
 accuracy was not this system's binding constraint. See
 `docs/scheduler_v2.md` and `results/dynamic_v2_report.md`.
+
+**Lean runtime decision:** `scheduler/runtime/gen_dynamic_lean_demo.py`
+keeps v2's exact choices but folds decisions that are provably
+constant over an operation's whole legal size range (read from the
+accelerator RTL), keeps one runtime compare where the choice genuinely
+depends on N, and lays the common path out as fall-through. Decision
+cost over the oracle drops from 108/229 to 9/12 cycles; the result is
+a near-tie with always-accelerator (388 vs. 389; 2368 vs. 2366), with
+the side it lands on set by the stream's mix.
+

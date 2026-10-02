@@ -71,7 +71,7 @@ help:
 	@echo "  train_scheduler_v2 - post-v1: retrain on all 20 known workloads (fixes the"
 	@echo "                 vecadd N=2 misprediction) + validate on the round-2 held-out set"
 	@echo "  test_dynamic_v2_correctness - post-v1: verify the v2 model running in the"
-	@echo "                 on-CPU runtime scheduler (Phase 15 + 16 streams)"
+	@echo "                 on-CPU runtime scheduler, straightforward + lean decision"
 	@echo "  run_dynamic_v2_demo - post-v1: measure v1 vs. v2 runtime scheduler vs. baselines"
 	@echo "                 + write results/dynamic_v2_report.md"
 	@echo ""
