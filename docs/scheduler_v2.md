@@ -99,3 +99,65 @@ changed" accounting in `results/scheduler_v2_report.md`.
   including the smallest possible one (`N=1` for both) -- unchanged
   from Phase 13's finding, and still not contradicted by anything in
   this round's 8 additional real measurements.
+
+## v2 in the runtime scheduler
+
+Phase 15/16's on-CPU runtime scheduler evaluated Phase 13's boundary
+(`element_count <= 2`), hand-transcribed into RISC-V. To run v2 there
+without hand-transcribing again,
+`scheduler/runtime/gen_dynamic_v2_demo.py` loads
+`scheduler_tree_v2.pkl`, walks the fitted tree, and derives the
+threshold from its own splits -- raising an error, rather than falling
+back silently, if the tree has any shape the runtime template can't
+express exactly (more than one cpu leaf, a lower bound, a split on any
+other feature, a `multiply_count` bound that isn't `== 0`). It then
+checks the derived rule against the model's own `predict()` for every
+workload in both streams before writing any assembly. Run against
+Phase 13's model, the same extractor recovers `2`, matching the value
+Phase 15 transcribed by hand; against v2 it yields `1`.
+`decision_block()`/`block_asm()` gained an `ec_threshold` parameter
+whose default (`2`) regenerates every Phase 15/16 program
+byte-identically.
+
+Both v2 programs (`dynamic_v2_demo.s` on Phase 15's 6-workload stream,
+`mixed_dynamic_v2_demo.s` on Phase 16's 12-workload stream) are
+checked for correctness on both simulators
+(`sim/testbenches/tb_dynamic_v2_correctness.sv`,
+`make test_dynamic_v2_correctness`) -- including the `vecadd N=2`
+block, whose result now comes through the accelerator path's copy-out
+instead of the CPU path.
+
+```
+make run_dynamic_v2_demo
+```
+
+All four programs per stream re-measured in one run:
+
+| Stream | v1 runtime | v2 runtime | Always accelerator | Oracle |
+|---|---|---|---|---|
+| Phase 15 (6 workloads) | 492 | 487 | 389 | 379 |
+| Phase 16 (12 workloads) | 2590 | 2585 | 2366 | 2356 |
+
+- **The fix is worth 5 cycles in-program, not 11.** The standalone
+  benchmarks put `vecadd N=2` at 61 (CPU) vs. 50 (accelerator), but
+  inside these programs the accelerator path also pays the unified
+  output copy-out that the standalone benchmark doesn't, so part of
+  that gap isn't there to recover.
+- **v2's picks match the oracle's on every workload in both streams**,
+  so `v2 - oracle` is a clean measurement of one thing: what it costs
+  to compute the decision at runtime. 108 cycles on the 6-workload
+  stream, 229 on the 12-workload one -- about 18-19 cycles per
+  workload either way.
+- **A runtime scheduler that is never wrong still loses to
+  always-accelerator** on both streams (487 vs. 389; 2585 vs. 2366).
+  The oracle beats always-accelerator by just 10 cycles on each
+  stream, and the decision costs roughly 18 cycles per workload.
+
+That turns Phase 16's inference into a measurement: on this
+accelerator, accuracy was never the binding constraint. A runtime
+scheduler here only pays off if deciding costs less than the oracle
+gap it can win -- which, for these kernels, is one workload shape
+(`vecadd N=1`), worth 10 cycles in-program on each stream (2 cycles
+standalone; the copy-out widens it here, the same effect that narrows
+the `vecadd N=2` gap). Full detail:
+`results/dynamic_v2_report.md`.

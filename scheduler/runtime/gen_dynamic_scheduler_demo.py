@@ -384,13 +384,17 @@ CPU_BODY = {"vecadd": cpu_vecadd_body, "dot": cpu_dot_body, "matmul": cpu_matmul
 ACCEL_BODY = {"vecadd": accel_vecadd_body, "dot": accel_dot_body, "matmul": accel_matmul_body}
 
 
-def decision_block(op, n, tag):
+def decision_block(op, n, tag, ec_threshold=2):
     """Real RV32I instructions computing element_count/multiply_count
     and branching on them -- the runtime-evaluated equivalent of
     scheduler/models/features.py's extract_features() plus the fitted
-    tree's decision boundary (element_count <= 2 and multiply_count ==
-    0 -> cpu, else accelerator; see
-    scheduler/training/train_scheduler.py's printed tree)."""
+    tree's decision boundary (element_count <= ec_threshold and
+    multiply_count == 0 -> cpu, else accelerator). The default,
+    ec_threshold=2, is Phase 13's model (see
+    scheduler/training/train_scheduler.py's printed tree) and keeps
+    every Phase 15/16 program byte-identical; the v2 model's threshold
+    is extracted from its fitted tree by
+    scheduler/runtime/gen_dynamic_v2_demo.py, not hand-transcribed."""
     if op == "matmul":
         return f"""\
     li   x11, {n}
@@ -401,7 +405,7 @@ def decision_block(op, n, tag):
     li   x12, {n}
     jal  x1, mul32
     mv   x25, x10
-    li   x26, 2
+    li   x26, {ec_threshold}
     blt  x26, x24, {tag}_accel
     bne  x25, x0, {tag}_accel
     j    {tag}_cpu
@@ -410,14 +414,14 @@ def decision_block(op, n, tag):
     return f"""\
     li   x24, {n}
     li   x25, {multiply_count}
-    li   x26, 2
+    li   x26, {ec_threshold}
     blt  x26, x24, {tag}_accel
     bne  x25, x0, {tag}_accel
     j    {tag}_cpu
 """
 
 
-def block_asm(op, n, tag, outbase, mode, truth):
+def block_asm(op, n, tag, outbase, mode, truth, ec_threshold=2):
     if mode == "dynamic_scheduler":
         # Both the CPU-path and accelerator-path bodies for this SAME
         # block are compiled into the binary here (only one runs, per
@@ -431,7 +435,7 @@ def block_asm(op, n, tag, outbase, mode, truth):
         # same block is also present -- see CHANGELOG.md's Phase 15 entry.
         return (
             f"# -- block {tag}: {op} N={n} (runtime-computed decision) --\n"
-            f"{decision_block(op, n, tag)}"
+            f"{decision_block(op, n, tag, ec_threshold)}"
             f"{tag}_cpu:\n"
             f"{CPU_BODY[op](n, tag + 'c', outbase)}"
             f"    j    {tag}_done\n"

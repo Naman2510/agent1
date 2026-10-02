@@ -94,6 +94,13 @@ section "Phase 16: Mixed heterogeneous workloads"
 run test_mixed_workload_correctness
 run run_mixed_workload_demo
 
+section "Post-v1: scheduler v2 (expanded training set) + v2 in the runtime scheduler"
+run test_scheduler_v2_heldout_correctness
+run collect_scheduler_v2_heldout_dataset
+run train_scheduler_v2
+run test_dynamic_v2_correctness
+run run_dynamic_v2_demo
+
 section "SUMMARY -- real measured headline numbers (read from results/*.md)"
 
 extract() {
@@ -131,6 +138,11 @@ echo
 echo "-- Phase 16: dynamic scheduling, mixed stream (results/mixed_workloads_report.md) --"
 grep -m1 -E '^\| Dynamic' results/mixed_workloads_report.md
 grep -m1 "vs. always-accelerator:" results/mixed_workloads_report.md
+
+echo
+echo "-- Post-v1: scheduler v2 (results/scheduler_v2_report.md, results/dynamic_v2_report.md) --"
+grep -m1 "Leave-one-out CV accuracy" results/scheduler_v2_report.md
+grep -E "^\| Runtime scheduler, v2 model" results/dynamic_v2_report.md
 
 echo
 echo "================================================================"

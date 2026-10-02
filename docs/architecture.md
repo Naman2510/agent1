@@ -669,3 +669,15 @@ evaluation uncontaminated). Leave-one-out CV accuracy rose from 9/11 =
 `element_count <= 1` (which correctly isolates only the true
 crossover, `vecadd N=1`) -- an explainable, not just numeric,
 improvement.
+
+**v2 in the runtime scheduler:** `scheduler/runtime/gen_dynamic_v2_demo.py`
+derives the runtime decision threshold from the fitted v2 tree itself
+(and checks it against the model's `predict()` on every workload)
+instead of hand-transcribing it, then reruns Phase 15/16's streams.
+v2's choices match the oracle's everywhere, which isolates the
+runtime decision cost cleanly: about 18-19 cycles per workload. Even
+never-wrong, the runtime scheduler loses to always-accelerator on both
+streams (487 vs. 389; 2585 vs. 2366), because the oracle's whole
+advantage is 10 cycles per stream -- confirming by measurement that
+accuracy was not this system's binding constraint. See
+`docs/scheduler_v2.md` and `results/dynamic_v2_report.md`.

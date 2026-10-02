@@ -1129,3 +1129,50 @@ This is the final phase of the original 17-phase specification.
   This is tracked as a dated improvement, not a renumbered phase --
   the original specification's 17 phases remain exactly as completed
   above.
+
+## Post-v1 — v2 Model in the Runtime Scheduler (2026-10-02)
+
+- **Ran the v2 model inside Phase 15/16's on-CPU runtime scheduler,
+  without hand-transcribing its boundary.** Phase 15 typed Phase 13's
+  fitted threshold into the RISC-V decision code by hand.
+  `scheduler/runtime/gen_dynamic_v2_demo.py` instead loads
+  `scheduler_tree_v2.pkl`, walks the fitted tree, and derives the
+  threshold from its own splits; it raises an error if the tree has
+  any shape the runtime template can't express exactly, and checks the
+  derived rule against the model's own `predict()` on every workload
+  in both streams before emitting assembly. Applied to Phase 13's
+  model, the same extractor recovers `2` -- matching Phase 15's
+  hand-transcribed value. `decision_block()`/`block_asm()` in
+  `gen_dynamic_scheduler_demo.py` gained an `ec_threshold` parameter;
+  its default regenerates every Phase 15/16 program byte-identically
+  (confirmed: no diff).
+
+- **Correctness verified on both simulators** for both new programs
+  (`dynamic_v2_demo.s`, `mixed_dynamic_v2_demo.s`) by
+  `sim/testbenches/tb_dynamic_v2_correctness.sv` (31 checks), passing
+  first time.
+
+- **Real result: a runtime scheduler that is never wrong still loses
+  to always-accelerator.** `scheduler/runtime/run_dynamic_v2_demo.py`
+  re-measured all four programs per stream in one pass: v1 492 / v2
+  487 / always-accelerator 389 / oracle 379 (Phase 15 stream); v1
+  2590 / v2 2585 / 2366 / 2356 (Phase 16 stream). v2's choices equal
+  the oracle's on every workload, so `v2 - oracle` isolates the pure
+  runtime decision cost: 108 and 229 cycles, about 18-19 per workload.
+  The oracle's whole advantage over always-accelerator is 10 cycles
+  per stream. This measures what Phase 16 had inferred: on this
+  accelerator, decision accuracy was never the binding constraint;
+  decision cost is.
+
+- **Discrepancy found and explained rather than glossed over:** fixing
+  the `vecadd N=2` misprediction recovered 5 cycles in-program, not
+  the 11 that the standalone benchmarks (61 vs. 50) predict. Inside
+  these programs the accelerator path also does the unified-output
+  copy-out (`lw`/`sw` per result word) that the standalone accelerator
+  benchmark never does. The report computes the standalone gap from
+  the measured CSVs and prints both numbers side by side.
+
+- `scripts/run_full_demo.sh` (`make demo`) now also runs all of the
+  post-v1 scheduler-v2 steps and includes their headline numbers in
+  its summary. Makefile gained `test_dynamic_v2_correctness` /
+  `run_dynamic_v2_demo`; docs in `docs/scheduler_v2.md`.

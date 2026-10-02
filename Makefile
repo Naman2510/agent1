@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo demo test_scheduler_v2_heldout_correctness collect_scheduler_v2_heldout_dataset train_scheduler_v2
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo demo test_scheduler_v2_heldout_correctness collect_scheduler_v2_heldout_dataset train_scheduler_v2 test_dynamic_v2_correctness run_dynamic_v2_demo
 
 help:
 	@echo "Available targets:"
@@ -70,6 +70,10 @@ help:
 	@echo "                 scheduler/training/heldout_dataset_v2.csv from real measured cycles"
 	@echo "  train_scheduler_v2 - post-v1: retrain on all 20 known workloads (fixes the"
 	@echo "                 vecadd N=2 misprediction) + validate on the round-2 held-out set"
+	@echo "  test_dynamic_v2_correctness - post-v1: verify the v2 model running in the"
+	@echo "                 on-CPU runtime scheduler (Phase 15 + 16 streams)"
+	@echo "  run_dynamic_v2_demo - post-v1: measure v1 vs. v2 runtime scheduler vs. baselines"
+	@echo "                 + write results/dynamic_v2_report.md"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -160,3 +164,9 @@ collect_scheduler_v2_heldout_dataset:
 
 train_scheduler_v2:
 	@.venv/bin/python3 scheduler/training/train_scheduler_v2.py
+
+test_dynamic_v2_correctness:
+	@./scripts/run_dynamic_v2_correctness.sh
+
+run_dynamic_v2_demo:
+	@.venv/bin/python3 scheduler/runtime/run_dynamic_v2_demo.py
