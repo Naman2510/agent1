@@ -107,6 +107,9 @@ run run_dynamic_v2_demo
 section "Post-v1: CPU with hardware MUL vs. accelerator"
 run collect_mul_dataset
 
+section "Post-v1: concurrent CPU + accelerator co-scheduler"
+run coschedule
+
 section "SUMMARY -- real measured headline numbers (read from results/*.md)"
 
 extract() {
@@ -153,6 +156,11 @@ grep -E "^\| Runtime scheduler, v2 model|^\| Always accelerator" results/dynamic
 echo
 echo "-- Post-v1: CPU with hardware MUL (results/mul_benchmark_report.md) --"
 grep -m1 "CPU-favorable workloads" results/mul_benchmark_report.md
+
+echo
+echo "-- Post-v1: co-scheduler (results/coschedule_scorecard.md) --"
+head -1 results/coschedule_scorecard.md
+grep -E "^\| full24 \|" results/coschedule_report.md
 
 echo
 echo "================================================================"

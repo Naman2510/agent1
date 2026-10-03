@@ -1294,3 +1294,60 @@ This is the final phase of the original 17-phase specification.
   Full `make demo` regression passes with every measured number
   unchanged. Docs: `docs/rv32m_mul.md`, `docs/riscv.md`.
 
+
+## Post-v1 — Concurrent CPU + Accelerator Co-Scheduler (2026-10-03)
+
+- **Scorecard pre-registered first.** `docs/coschedule_scorecard.md`
+  (commit `9808c32`) fixed 10 pass/fail metrics and their thresholds
+  before any co-scheduler code existed, with the rule that a failing
+  metric is reported as failed and answered by improving the product,
+  never by editing the scorecard. The score is computed by script into
+  `results/coschedule_scorecard.md`, not hand-entered.
+
+- **Idea:** every earlier scheduler picked one engine per task and ran
+  tasks serially, so its ceiling was the serial oracle -- only 10-15
+  cycles better than always-accelerator. The accelerator runs
+  autonomously once started, yet every program spent its busy time in a
+  poll loop (1 to 512 cycles per task, measured by the new
+  `sim/testbenches/tb_accel_phase_probe.sv`). The co-scheduler
+  (`scheduler/coschedule/`, `make coschedule`) runs whole CPU tasks inside
+  accelerator busy windows: profile every task, plan with a cost model and
+  a local search started from both the serial oracle and all-accelerator,
+  then generate programs from the unchanged Phase 15/16 task bodies, with
+  each accelerator body split at its poll loop. No RTL change.
+
+- **Verification:** every output word of all 18 generated programs
+  (3 streams x 2 cores x 3 schedules, 2,058 words) is checked against
+  Python reference values on Icarus Verilog and Verilator by the new
+  `sim/testbenches/tb_coschedule_check.sv`. That checker was first shown
+  to fail on a single corrupted word on both simulators. Every program is
+  measured twice through `tb_benchmark_soc.sv` (new `IMEM_DEPTH_WORDS`
+  parameter, default unchanged at 1024, set to 4096 for these programs);
+  both runs were identical.
+
+- **Result (measured):** full 24-workload set, RV32I core: 6,072 cycles
+  vs. 6,582 for the serial oracle (-7.75%, 510 cycles); MUL core: 6,004
+  vs. 6,577 (-8.71%). The old ceiling (always-accel minus oracle) is 10
+  cycles, so the gain is 51x that ceiling. The co-schedule is never worse
+  than the oracle on any stream x core (3.7-8.7% better). The model
+  predicts every co-schedule within 2.25% and every serial program
+  exactly. On the 6-task stream the planner's choice equals the
+  exhaustive optimum on both cores. **Score: 100/100.**
+
+- **Fixes made during the work:** the two new testbenches failed
+  Verilator lint (`BLKSEQ` on `always #5 clk = ~clk`, now an
+  `initial`/`forever` clock), and `-GENABLE_MUL=1` triggered `WIDTHTRUNC`
+  on a `bit` parameter (now `-GENABLE_MUL=1'b1`). The first draft of
+  metric 9's evidence cited a `make coschedule` target and a `make demo`
+  regression that did not exist yet. Both were added, and the full `make
+  demo` regression (now including the co-scheduler) was run before the
+  score was claimed: exit 0, ALL STEPS COMPLETED, zero failures, score
+  100/100 reproduced, and every other report and dataset unchanged apart
+  from "Generated" timestamps.
+
+- **Limits:** the gain is bounded by accelerator busy time, because the CPU
+  still marshals every operand, which dominates small accelerator tasks; a
+  DMA-capable accelerator would widen the windows (not built). The
+  method assumes independent tasks, uses offline plans for profiled
+  streams, and keeps one accelerator context.
+  Docs: `docs/coschedule.md`.

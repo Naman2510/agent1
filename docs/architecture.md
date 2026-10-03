@@ -703,3 +703,17 @@ the EX-stage ALU -- the hardware lever for revisiting the scheduler
 results, all of which trace back to RV32I's lack of a multiplier. See
 `docs/rv32m_mul.md`.
 
+## Post-v1 — Concurrent CPU + Accelerator Co-Scheduler
+
+Every earlier scheduler ran tasks serially, so its ceiling was the serial
+oracle -- 10 cycles better than always-accelerator. The co-scheduler
+(`scheduler/coschedule/`) instead runs whole CPU tasks inside the
+accelerator's busy windows, which the hardware already permits (the
+accelerator runs autonomously; RAM is a separate path). An offline planner
+with a profiled cost model (within 2.25% of measured) chooses the
+placement; a generator splits the verified accelerator bodies at their
+poll loop to host the CPU tasks. Result on all 24 workloads: 7.7% (RV32I)
+and 8.7% (MUL core) faster than the serial oracle, every output word
+verified on both simulators, no RTL change. Scored 100/100 against a
+scorecard committed before the work began. See `docs/coschedule.md`.
+

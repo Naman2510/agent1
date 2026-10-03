@@ -37,7 +37,10 @@ module tb_benchmark_soc #(
   // Build the SoC's CPU with the optional RV32M MUL (docs/rv32m_mul.md).
   // Default 0 = the RV32I core every earlier measurement used; override
   // at compile time, e.g. iverilog -Ptb_benchmark_soc.ENABLE_MUL=1.
-  parameter bit ENABLE_MUL = 1'b0
+  parameter bit ENABLE_MUL = 1'b0,
+  // Instruction-memory depth; the default matches every earlier
+  // measurement. Larger multi-task programs (scheduler/coschedule/) override it.
+  parameter int IMEM_DEPTH_WORDS = 1024
 );
 
   localparam logic [31:0] SENTINEL = 32'hDEADBEEF;
@@ -74,6 +77,7 @@ module tb_benchmark_soc #(
     // CHANGELOG.md's Phase 11 entry for exactly what aliasing at the
     // default depth looked like before this was caught).
     .RAM_DEPTH_WORDS(4096),
+    .IMEM_DEPTH_WORDS(IMEM_DEPTH_WORDS),
     .ENABLE_MUL(ENABLE_MUL)
   ) dut (
     .clk(clk), .rst_n(rst_n),

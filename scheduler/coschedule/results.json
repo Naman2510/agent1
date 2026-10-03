@@ -1,0 +1,240 @@
+{
+ "profiles": {
+  "rv32i": {
+   "base": 8
+  },
+  "mul": {
+   "base": 8
+  }
+ },
+ "rows": [
+  {
+   "stream": "phase15",
+   "core": "rv32i",
+   "mode": "always_accel",
+   "cycles": 389,
+   "cycles_rerun": 389,
+   "predicted": 389,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 13,
+   "plan": "vecadd1=ACC, vecadd2=ACC, vecadd4=ACC, dot1=ACC, dot4=ACC, matmul2=ACC"
+  },
+  {
+   "stream": "phase15",
+   "core": "rv32i",
+   "mode": "oracle",
+   "cycles": 379,
+   "cycles_rerun": 379,
+   "predicted": 379,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 13,
+   "plan": "vecadd1=CPU, vecadd2=ACC, vecadd4=ACC, dot1=ACC, dot4=ACC, matmul2=ACC"
+  },
+  {
+   "stream": "phase15",
+   "core": "rv32i",
+   "mode": "cosched",
+   "cycles": 365,
+   "cycles_rerun": 365,
+   "predicted": 371,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 13,
+   "plan": "vecadd4=ACC[vecadd2], dot1=ACC, dot4=ACC, matmul2=ACC[vecadd1]"
+  },
+  {
+   "stream": "phase16",
+   "core": "rv32i",
+   "mode": "always_accel",
+   "cycles": 2366,
+   "cycles_rerun": 2366,
+   "predicted": 2366,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 87,
+   "plan": "vecadd1=ACC, vecadd2=ACC, dot4=ACC, matmul2=ACC, vecadd4=ACC, dot8=ACC, vecadd8=ACC, matmul4=ACC, dot16=ACC, vecadd16=ACC, dot32=ACC, vecadd32=ACC"
+  },
+  {
+   "stream": "phase16",
+   "core": "rv32i",
+   "mode": "oracle",
+   "cycles": 2356,
+   "cycles_rerun": 2356,
+   "predicted": 2356,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 87,
+   "plan": "vecadd1=CPU, vecadd2=ACC, dot4=ACC, matmul2=ACC, vecadd4=ACC, dot8=ACC, vecadd8=ACC, matmul4=ACC, dot16=ACC, vecadd16=ACC, dot32=ACC, vecadd32=ACC"
+  },
+  {
+   "stream": "phase16",
+   "core": "rv32i",
+   "mode": "cosched",
+   "cycles": 2262,
+   "cycles_rerun": 2262,
+   "predicted": 2264,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 87,
+   "plan": "dot4=ACC, matmul2=ACC, dot8=ACC, vecadd8=ACC, matmul4=ACC[vecadd2], dot16=ACC, vecadd16=ACC, dot32=ACC[vecadd1], vecadd32=ACC[vecadd4]"
+  },
+  {
+   "stream": "full24",
+   "core": "rv32i",
+   "mode": "always_accel",
+   "cycles": 6592,
+   "cycles_rerun": 6592,
+   "predicted": 6592,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 243,
+   "plan": "vecadd1=ACC, vecadd2=ACC, vecadd3=ACC, vecadd4=ACC, vecadd6=ACC, vecadd8=ACC, vecadd12=ACC, vecadd16=ACC, vecadd32=ACC, vecadd64=ACC, dot1=ACC, dot2=ACC, dot3=ACC, dot4=ACC, dot6=ACC, dot8=ACC, dot12=ACC, dot16=ACC, dot32=ACC, dot64=ACC, matmul1=ACC, matmul2=ACC, matmul4=ACC, matmul8=ACC"
+  },
+  {
+   "stream": "full24",
+   "core": "rv32i",
+   "mode": "oracle",
+   "cycles": 6582,
+   "cycles_rerun": 6582,
+   "predicted": 6582,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 243,
+   "plan": "vecadd1=CPU, vecadd2=ACC, vecadd3=ACC, vecadd4=ACC, vecadd6=ACC, vecadd8=ACC, vecadd12=ACC, vecadd16=ACC, vecadd32=ACC, vecadd64=ACC, dot1=ACC, dot2=ACC, dot3=ACC, dot4=ACC, dot6=ACC, dot8=ACC, dot12=ACC, dot16=ACC, dot32=ACC, dot64=ACC, matmul1=ACC, matmul2=ACC, matmul4=ACC, matmul8=ACC"
+  },
+  {
+   "stream": "full24",
+   "core": "rv32i",
+   "mode": "cosched",
+   "cycles": 6072,
+   "cycles_rerun": 6072,
+   "predicted": 6071,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 243,
+   "plan": "vecadd6=ACC, vecadd8=ACC, vecadd12=ACC, vecadd32=ACC[vecadd1], vecadd64=ACC[vecadd2], dot2=ACC, dot3=ACC, dot4=ACC, dot6=ACC, dot8=ACC, dot12=ACC, dot16=ACC, dot32=ACC, dot64=ACC[vecadd3], matmul1=ACC, matmul2=ACC, matmul4=ACC[dot1], matmul8=ACC[vecadd4+vecadd16]"
+  },
+  {
+   "stream": "phase15",
+   "core": "mul",
+   "mode": "always_accel",
+   "cycles": 389,
+   "cycles_rerun": 389,
+   "predicted": 389,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 13,
+   "plan": "vecadd1=ACC, vecadd2=ACC, vecadd4=ACC, dot1=ACC, dot4=ACC, matmul2=ACC"
+  },
+  {
+   "stream": "phase15",
+   "core": "mul",
+   "mode": "oracle",
+   "cycles": 374,
+   "cycles_rerun": 374,
+   "predicted": 374,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 13,
+   "plan": "vecadd1=CPU, vecadd2=ACC, vecadd4=ACC, dot1=CPU, dot4=ACC, matmul2=ACC"
+  },
+  {
+   "stream": "phase15",
+   "core": "mul",
+   "mode": "cosched",
+   "cycles": 356,
+   "cycles_rerun": 356,
+   "predicted": 364,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 13,
+   "plan": "vecadd4=ACC[vecadd2], dot4=ACC[dot1], matmul2=ACC[vecadd1]"
+  },
+  {
+   "stream": "phase16",
+   "core": "mul",
+   "mode": "always_accel",
+   "cycles": 2366,
+   "cycles_rerun": 2366,
+   "predicted": 2366,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 87,
+   "plan": "vecadd1=ACC, vecadd2=ACC, dot4=ACC, matmul2=ACC, vecadd4=ACC, dot8=ACC, vecadd8=ACC, matmul4=ACC, dot16=ACC, vecadd16=ACC, dot32=ACC, vecadd32=ACC"
+  },
+  {
+   "stream": "phase16",
+   "core": "mul",
+   "mode": "oracle",
+   "cycles": 2356,
+   "cycles_rerun": 2356,
+   "predicted": 2356,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 87,
+   "plan": "vecadd1=CPU, vecadd2=ACC, dot4=ACC, matmul2=ACC, vecadd4=ACC, dot8=ACC, vecadd8=ACC, matmul4=ACC, dot16=ACC, vecadd16=ACC, dot32=ACC, vecadd32=ACC"
+  },
+  {
+   "stream": "phase16",
+   "core": "mul",
+   "mode": "cosched",
+   "cycles": 2262,
+   "cycles_rerun": 2262,
+   "predicted": 2264,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 87,
+   "plan": "dot4=ACC, matmul2=ACC, dot8=ACC, vecadd8=ACC, matmul4=ACC[vecadd2], dot16=ACC, vecadd16=ACC, dot32=ACC[vecadd1], vecadd32=ACC[vecadd4]"
+  },
+  {
+   "stream": "full24",
+   "core": "mul",
+   "mode": "always_accel",
+   "cycles": 6592,
+   "cycles_rerun": 6592,
+   "predicted": 6592,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 243,
+   "plan": "vecadd1=ACC, vecadd2=ACC, vecadd3=ACC, vecadd4=ACC, vecadd6=ACC, vecadd8=ACC, vecadd12=ACC, vecadd16=ACC, vecadd32=ACC, vecadd64=ACC, dot1=ACC, dot2=ACC, dot3=ACC, dot4=ACC, dot6=ACC, dot8=ACC, dot12=ACC, dot16=ACC, dot32=ACC, dot64=ACC, matmul1=ACC, matmul2=ACC, matmul4=ACC, matmul8=ACC"
+  },
+  {
+   "stream": "full24",
+   "core": "mul",
+   "mode": "oracle",
+   "cycles": 6577,
+   "cycles_rerun": 6577,
+   "predicted": 6577,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 243,
+   "plan": "vecadd1=CPU, vecadd2=ACC, vecadd3=ACC, vecadd4=ACC, vecadd6=ACC, vecadd8=ACC, vecadd12=ACC, vecadd16=ACC, vecadd32=ACC, vecadd64=ACC, dot1=CPU, dot2=ACC, dot3=ACC, dot4=ACC, dot6=ACC, dot8=ACC, dot12=ACC, dot16=ACC, dot32=ACC, dot64=ACC, matmul1=ACC, matmul2=ACC, matmul4=ACC, matmul8=ACC"
+  },
+  {
+   "stream": "full24",
+   "core": "mul",
+   "mode": "cosched",
+   "cycles": 6004,
+   "cycles_rerun": 6004,
+   "predicted": 6011,
+   "correct_icarus": true,
+   "correct_verilator": true,
+   "checked_words": 243,
+   "plan": "vecadd6=ACC, vecadd8=ACC, vecadd12=ACC, vecadd32=ACC[dot1], vecadd64=ACC[vecadd2], dot3=ACC, dot4=ACC, dot6=ACC, dot8=ACC, dot12=ACC, dot16=ACC, dot32=ACC[vecadd1], dot64=ACC[vecadd3], matmul2=ACC, matmul4=ACC[dot2], matmul8=ACC[vecadd4+vecadd16+matmul1]"
+  }
+ ],
+ "exhaustive": {
+  "rv32i": {
+   "planner": 371,
+   "optimum": 371,
+   "plan": "vecadd4=ACC[vecadd1], dot1=ACC, dot4=ACC, matmul2=ACC[vecadd2]"
+  },
+  "mul": {
+   "planner": 364,
+   "optimum": 364,
+   "plan": "vecadd4=ACC[vecadd1], dot4=ACC[vecadd2], matmul2=ACC[dot1]"
+  }
+ }
+}
