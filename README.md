@@ -103,6 +103,7 @@ make run_dynamic_v2_demo                    # post-v1: measure v1 vs. v2 vs. lea
 make test_mul                               # post-v1: decode-validation fix + optional RV32M MUL
 make collect_mul_dataset                    # post-v1: CPU with hardware MUL vs. accelerator
 make coschedule                             # post-v1: concurrent CPU+accelerator co-scheduler, scored
+make test_framework                         # framework: fast Python unit tests (no simulator, ~5 s)
 ```
 
 Required tools by phase (see `scripts/check_env.sh` for the full,
@@ -139,6 +140,7 @@ container with no FPGA or other physical hardware attached.
 - [`docs/scheduler_v2.md`](docs/scheduler_v2.md) — post-v1 improvement: merges Phase 13+14's data into one 20-workload training set, fixing the `vecadd N=2` misprediction, validated on a brand-new held-out set; then runs v2 in the on-CPU runtime scheduler, measuring that decision cost, not accuracy, is the binding constraint -- and that a lean runtime check lands within a few cycles of always-accelerator.
 - [`docs/rv32m_mul.md`](docs/rv32m_mul.md) — post-v1: a real control-unit bug (unsupported `funct7` encodings, including every RV32M instruction, silently executed as RV32I ops) found by an exhaustive decode sweep and fixed, plus an optional hardware `MUL` for the pipelined CPU (`ENABLE_MUL`, default off).
 - [`docs/coschedule.md`](docs/coschedule.md) — post-v1: a concurrent co-scheduler that runs CPU tasks inside the accelerator's busy windows -- 7.7-8.7% faster than the best serial schedule on the full workload set, 51x the ceiling of every earlier scheduler, with no hardware change; scored against a pre-registered scorecard ([`docs/coschedule_scorecard.md`](docs/coschedule_scorecard.md), [`results/coschedule_scorecard.md`](results/coschedule_scorecard.md)).
+- [`docs/framework/`](docs/framework/README.md) — in progress: evolving the co-scheduler into a reusable heterogeneous-compute framework. Audit, architecture, technical debt, roadmap and benchmark baseline (Phase 1); the co-scheduler split into tested modules under `scheduler/framework/`, regenerating every program byte-identical (Phase 2). Later phases are planned, not built.
 - [`docs/benchmarking.md`](docs/benchmarking.md) — CPU-vs-accelerator benchmark methodology, real measured results, and a real bug it caught (Phase 11).
 - [`docs/synthesis.md`](docs/synthesis.md) — Yosys/iCE40 synthesis methodology, two real tooling problems it solved, and why place-and-route was tried but not adopted (Phase 12).
 - `CHANGELOG.md` — chronological log of architectural decisions.

@@ -30,7 +30,9 @@ zero area cost.
 
 ## How it works
 
-`scheduler/coschedule/` (`make coschedule`):
+`scheduler/coschedule/` (`make coschedule`). Since the framework Phase 2 restructuring the components live in
+`scheduler/framework/` (`docs/framework/README.md` has the module map); the files named below are
+kept as compatibility re-exports, with identical behaviour:
 
 1. **Profile** (`run.py`, `tb_accel_phase_probe.sv`). Every task of the
    24-workload set is run as a one-task program on each engine and each

@@ -1351,3 +1351,43 @@ This is the final phase of the original 17-phase specification.
   method assumes independent tasks, uses offline plans for profiled
   streams, and keeps one accelerator context.
   Docs: `docs/coschedule.md`.
+
+## Framework Phases 1-2 — Audit, Baseline, Modular Co-Scheduler (2026-10-03)
+
+Start of the work that turns the co-scheduler into a reusable heterogeneous-compute
+framework (`docs/framework/`). No RTL change; no measured number changed.
+
+- **Phase 1, audit + baseline.** Five documents in `docs/framework/`:
+  `PROJECT_AUDIT.md`, `CURRENT_ARCHITECTURE.md`, `TECHNICAL_DEBT.md` (D1-D18),
+  `EXTENSIBILITY_ROADMAP.md`, `BENCHMARK_BASELINE.md`. Most important findings:
+  workloads carry no input data (operands are generated in code, D1);
+  generated accelerator code never checks STATUS.ERR, so a bad size would copy stale
+  output silently (D2); the software `mul32` has data-dependent latency that the
+  synthetic-operand profiles do not exercise (D8); the accelerator's arithmetic is
+  wrap-around mod 2^32 with only the low product word, so Q-format multiplies are not
+  supported on it. Baseline: `make demo` on clean `a938891`, exit 0, zero failures,
+  6 min 40 s, with every co-scheduler program, profile and `results.json`
+  byte-identical to the committed files. The equity platform named as the first
+  external integration was not found among the reachable repositories; that phase is
+  blocked until it is identified.
+
+- **Phase 2, modularization.** `scheduler/coschedule/{codegen,planner,run}.py` split into
+  `scheduler/framework/`: `operations` (one operation registry), `workloads`, `plans`,
+  `costmodel`, `planner`, `rv32_codegen`, `verification`, `simulator`, `profiler`.
+  `scheduler/coschedule/run.py` now only orchestrates; the report and scorecard writers
+  moved verbatim to `report.py`; `codegen.py`/`planner.py` remain as re-export shims.
+  An unsupported operation now raises a clear error (previously `reference()` silently
+  fell through to the matmul formula).
+
+- **First Python tests** (`make test_framework`, stdlib `unittest`, 22 tests, about 5 s),
+  run by `make demo` just before `coschedule`. The golden test regenerates all 18
+  programs and 3 expect files from the committed profiles and requires byte
+  equality, and checks every prediction, plan and the exhaustive optimum. Negative
+  controls: one byte changed in a committed program fails it; changing `RELOAD` 2->3
+  fails three tests.
+
+- **Verification:** full `make demo` after the restructuring: exit 0, ALL STEPS
+  COMPLETED, zero failure markers, 6 min 43 s; 22/22 framework tests pass; every
+  co-scheduler program, profile and `results.json` byte-identical to the baseline,
+  every co-scheduler cycle/prediction line identical, score 100/100, all other reports
+  unchanged apart from "Generated" timestamps.

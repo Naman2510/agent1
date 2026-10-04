@@ -6,7 +6,7 @@
 # with no-ops, so `make <target>` failing with "No rule to make target"
 # honestly reflects that the phase isn't built yet.
 
-.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo demo test_scheduler_v2_heldout_correctness collect_scheduler_v2_heldout_dataset train_scheduler_v2 test_dynamic_v2_correctness run_dynamic_v2_demo test_mul collect_mul_dataset coschedule
+.PHONY: check-env help sim_cpu test_isa run_c_demo sim_pipeline test_hazards waves test_perf benchmarks sim_soc test_accel test_accel_custom test_bench_correctness benchmarks_accel synthesize test_scheduler_correctness collect_scheduler_dataset train_scheduler test_scheduler_heldout_correctness collect_scheduler_heldout_dataset evaluate_scheduler_accuracy test_dynamic_scheduler_correctness run_dynamic_scheduler_demo test_mixed_workload_correctness run_mixed_workload_demo demo test_scheduler_v2_heldout_correctness collect_scheduler_v2_heldout_dataset train_scheduler_v2 test_dynamic_v2_correctness run_dynamic_v2_demo test_mul collect_mul_dataset coschedule test_framework
 
 help:
 	@echo "Available targets:"
@@ -81,6 +81,8 @@ help:
 	@echo "  coschedule   - post-v1: concurrent CPU+accelerator co-scheduler -- profile, plan,"
 	@echo "                 generate, verify (both sims), measure, and score against"
 	@echo "                 docs/coschedule_scorecard.md -> results/coschedule_{report,scorecard}.md"
+	@echo "  test_framework - framework Phase 2+: fast Python unit tests (no simulator) incl."
+	@echo "                 golden check that every co-scheduler program regenerates byte-identical"
 	@echo ""
 	@echo "Phase targets are added here as each phase is implemented;"
 	@echo "see README.md for current phase status."
@@ -186,3 +188,6 @@ collect_mul_dataset:
 
 coschedule:
 	@.venv/bin/python3 scheduler/coschedule/run.py
+
+test_framework:
+	@cd tests && ../.venv/bin/python3 -m unittest discover -p "test_*.py" -v

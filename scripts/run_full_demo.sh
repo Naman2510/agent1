@@ -108,6 +108,9 @@ section "Post-v1: CPU with hardware MUL vs. accelerator"
 run collect_mul_dataset
 
 section "Post-v1: concurrent CPU + accelerator co-scheduler"
+# framework unit tests first: the golden check compares regenerated programs
+# against the COMMITTED ones, before `coschedule` rewrites them
+run test_framework
 run coschedule
 
 section "SUMMARY -- real measured headline numbers (read from results/*.md)"
