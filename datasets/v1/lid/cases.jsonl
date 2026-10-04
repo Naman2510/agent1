@@ -1,0 +1,88 @@
+{"id":"en-001","text":"Explain Kirchhoff's voltage law to me","language":"en","difficulty":"easy"}
+{"id":"en-002","text":"Can you help me understand mesh analysis","language":"en","difficulty":"easy"}
+{"id":"en-003","text":"What is the difference between KVL and KCL","language":"en","difficulty":"easy"}
+{"id":"en-004","text":"I do not understand the derivation of this formula","language":"en","difficulty":"easy"}
+{"id":"en-005","text":"Please give me five questions on Maxwell equations","language":"en","difficulty":"easy"}
+{"id":"en-006","text":"How am I doing in electromagnetic theory","language":"en","difficulty":"easy"}
+{"id":"en-007","text":"Tell me about displacement current again","language":"en","difficulty":"easy"}
+{"id":"en-008","text":"That was helpful but I still have a doubt","language":"en","difficulty":"easy"}
+{"id":"en-009","text":"Which chapter should I revise first for the exam","language":"en","difficulty":"easy"}
+{"id":"en-010","text":"Is the answer three point five kilohms","language":"en","difficulty":"medium"}
+{"id":"en-011","text":"Can you explain it more simply this time","language":"en","difficulty":"easy"}
+{"id":"en-012","text":"Why does the flux change when the loop moves","language":"en","difficulty":"easy"}
+{"id":"en-013","text":"I have my semester exam next week","language":"en","difficulty":"easy"}
+{"id":"en-014","text":"Show me how to apply the theorem step by step","language":"en","difficulty":"easy"}
+{"id":"en-015","text":"My name is Priya and I am in third semester","language":"en","difficulty":"medium"}
+{"id":"en-016","text":"Wait stop I have a question","language":"en","difficulty":"medium"}
+{"id":"en-017","text":"Actually never mind continue","language":"en","difficulty":"medium"}
+{"id":"en-018","text":"The waveguide part is really confusing","language":"en","difficulty":"easy"}
+{"id":"en-019","text":"Give me a practice problem on Faraday's law","language":"en","difficulty":"easy"}
+{"id":"en-020","text":"Does this apply to non uniform fields as well","language":"en","difficulty":"easy"}
+{"id":"hi-001","text":"किरचॉफ का वोल्टेज नियम समझाओ","language":"hi","difficulty":"easy"}
+{"id":"hi-002","text":"मुझे यह समझ नहीं आ रहा है","language":"hi","difficulty":"easy"}
+{"id":"hi-003","text":"क्या आप इसे आसान भाषा में बता सकते हैं","language":"hi","difficulty":"easy"}
+{"id":"hi-004","text":"मैक्सवेल के समीकरण पर पाँच सवाल दो","language":"hi","difficulty":"easy"}
+{"id":"hi-005","text":"मेरी तैयारी कैसी चल रही है","language":"hi","difficulty":"easy"}
+{"id":"hi-006","text":"displacement current का मतलब क्या है","language":"hi","difficulty":"medium"}
+{"id":"hi-007","text":"यह फॉर्मूला कहाँ से आया","language":"hi","difficulty":"easy"}
+{"id":"hi-008","text":"थोड़ा और विस्तार से बताइए","language":"hi","difficulty":"easy"}
+{"id":"hi-009","text":"अगले हफ़्ते मेरा सेमेस्टर एग्ज़ाम है","language":"hi","difficulty":"easy"}
+{"id":"hi-010","text":"KVL और KCL में क्या अंतर है","language":"hi","difficulty":"medium"}
+{"id":"hi-011","text":"रुको मुझे एक सवाल पूछना है","language":"hi","difficulty":"easy"}
+{"id":"hi-012","text":"waveguide वाला हिस्सा बहुत मुश्किल लग रहा है","language":"hi","difficulty":"medium"}
+{"id":"hi-013","text":"नहीं समझा फिर से बोलो","language":"hi","difficulty":"easy"}
+{"id":"hi-014","text":"इसका उदाहरण दीजिए","language":"hi","difficulty":"easy"}
+{"id":"hi-015","text":"हिंदी में समझाओ","language":"hi","difficulty":"easy"}
+{"id":"hil-001","text":"Kirchhoff ka voltage law samjhao","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-002","text":"Bhai KVL basically kya bol raha hai","language":"hi-Latn","difficulty":"medium"}
+{"id":"hil-003","text":"Yaar ye waveguide ka concept samajh nahi aa raha","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-004","text":"Mujhe displacement current ka matlab batao","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-005","text":"Phir se samjhao thoda dheere","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-006","text":"Maxwell equations pe paanch sawal do","language":"hi-Latn","difficulty":"medium"}
+{"id":"hil-007","text":"Meri preparation kaisi chal rahi hai","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-008","text":"Ye formula kahan se aaya","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-009","text":"Exam agle hafte hai bahut tension ho rahi hai","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-010","text":"KCL ka matlab kya hai","language":"hi-Latn","difficulty":"medium"}
+{"id":"hil-011","text":"Ruko mujhe ek sawal poochna hai","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-012","text":"Nahi samjha ek baar aur bolo","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-013","text":"Iska example do na","language":"hi-Latn","difficulty":"medium"}
+{"id":"hil-014","text":"Mesh analysis kaise karte hain","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-015","text":"Bhai thoda simple karke batao","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-016","text":"Flux change kyun hota hai jab loop move karta hai","language":"hi-Latn","difficulty":"medium"}
+{"id":"hil-017","text":"Sir yeh derivation samajh nahi aayi","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-018","text":"Konsa chapter pehle revise karna chahiye","language":"hi-Latn","difficulty":"easy"}
+{"id":"hil-019","text":"Theek hai lekin ek doubt hai","language":"hi-Latn","difficulty":"medium"}
+{"id":"hil-020","text":"Abhi ke liye itna kaafi hai","language":"hi-Latn","difficulty":"medium"}
+{"id":"hil-021","text":"Yeh answer 3.5 kilohm hai kya","language":"hi-Latn","difficulty":"hard"}
+{"id":"hil-022","text":"Achha samajh gaya","language":"hi-Latn","difficulty":"medium"}
+{"id":"hil-023","text":"Wapas se bolo","language":"hi-Latn","difficulty":"hard"}
+{"id":"hil-024","text":"Non uniform field me bhi yeh apply hota hai","language":"hi-Latn","difficulty":"medium"}
+{"id":"hil-025","text":"Faraday ke law pe ek practice problem do","language":"hi-Latn","difficulty":"medium"}
+{"id":"mix-001","text":"So basically loop ka sum zero hota hai right","language":"mixed","difficulty":"hard"}
+{"id":"mix-002","text":"I think ye concept clear ho gaya but ek doubt hai","language":"mixed","difficulty":"hard"}
+{"id":"mix-003","text":"Can you please thoda simple karke explain karo","language":"mixed","difficulty":"hard"}
+{"id":"mix-004","text":"The derivation was fine lekin last step samajh nahi aaya","language":"mixed","difficulty":"hard"}
+{"id":"mix-005","text":"Actually mujhe yeh formula bhi chahiye for the exam","language":"mixed","difficulty":"hard"}
+{"id":"mix-006","text":"Yes bilkul that is what I meant to ask","language":"mixed","difficulty":"hard"}
+{"id":"mix-007","text":"If the flux changes to phir induced emf aayega na","language":"mixed","difficulty":"hard"}
+{"id":"mix-008","text":"My doubt is ki displacement current kaise derive hota hai","language":"mixed","difficulty":"hard"}
+{"id":"ta-001","text":"கிர்ச்சாஃப் விதியை விளக்குங்கள்","language":"ta","difficulty":"easy"}
+{"id":"ta-002","text":"இது எனக்கு புரியவில்லை","language":"ta","difficulty":"easy"}
+{"id":"ta-003","text":"இன்னும் கொஞ்சம் விளக்கமாக சொல்லுங்கள்","language":"ta","difficulty":"easy"}
+{"id":"ta-004","text":"displacement current என்றால் என்ன","language":"ta","difficulty":"medium"}
+{"id":"ta-005","text":"அடுத்த வாரம் எனக்கு தேர்வு இருக்கிறது","language":"ta","difficulty":"easy"}
+{"id":"ta-006","text":"தமிழில் சொல்லுங்கள்","language":"ta","difficulty":"easy"}
+{"id":"ta-007","text":"Enna panra epdi solla theriyala","language":"ta","difficulty":"hard"}
+{"id":"ta-008","text":"Enakku idhu puriyala konjam sollunga","language":"ta","difficulty":"hard"}
+{"id":"amb-001","text":"ok","language":"unknown","difficulty":"hard"}
+{"id":"amb-002","text":"displacement current","language":"unknown","difficulty":"hard"}
+{"id":"amb-003","text":"Maxwell","language":"unknown","difficulty":"hard"}
+{"id":"amb-004","text":"3.5","language":"unknown","difficulty":"hard"}
+{"id":"amb-005","text":"KVL","language":"unknown","difficulty":"hard"}
+{"id":"amb-006","text":"hmm","language":"unknown","difficulty":"hard"}
+{"id":"amb-007","text":"waveguide impedance derivation","language":"unknown","difficulty":"hard"}
+{"id":"exp-001","text":"Can you explain in Hindi please","language":"hi","difficulty":"easy","explicit":true}
+{"id":"exp-002","text":"Hindi mein batao","language":"hi","difficulty":"easy","explicit":true}
+{"id":"exp-003","text":"Answer in English from now on","language":"en","difficulty":"easy","explicit":true}
+{"id":"exp-004","text":"Please explain in Tamil","language":"ta","difficulty":"easy","explicit":true}
+{"id":"exp-005","text":"English mein bolo","language":"en","difficulty":"medium","explicit":true}

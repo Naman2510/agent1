@@ -1,0 +1,8 @@
+# Ablation: PostgreSQL full-text search alone (ts_rank_cd — no IDF weighting; FC-003).
+suite = "retrieval"
+
+[retrieval]
+mode = "lexical_only"
+
+[embedding]
+heading_prefix = true

@@ -1,0 +1,9 @@
+# EXP-008's other arm: the shipped retriever with each chunk's heading path left out of the
+# embedder's input. Everything else as retrieval.toml.
+suite = "retrieval"
+
+[retrieval]
+mode = "hybrid"
+
+[embedding]
+heading_prefix = false

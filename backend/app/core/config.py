@@ -1,0 +1,166 @@
+"""Application configuration.
+
+Every setting is environment-driven (SECURITY.md §5): no secret has a usable default, and the
+application refuses to start with an insecure one outside development.
+"""
+
+from functools import lru_cache
+from typing import Annotated, Literal
+
+from pydantic import Field, PostgresDsn, RedisDsn, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+Environment = Literal["development", "test", "production"]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="VAANIOS_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    environment: Environment = "development"
+    debug: bool = False
+
+    # --- Stores -------------------------------------------------------------
+    database_url: PostgresDsn = Field(
+        description="async DSN, e.g. postgresql+asyncpg://user:pw@host:5432/vaanios",
+    )
+    database_pool_size: int = 10
+    database_max_overflow: int = 5
+    redis_url: RedisDsn = Field()
+
+    # --- Auth ---------------------------------------------------------------
+    jwt_secret: str = Field(min_length=32)
+    jwt_algorithm: Literal["HS256"] = "HS256"
+    access_token_ttl_seconds: int = 15 * 60
+    refresh_token_ttl_seconds: int = 30 * 24 * 3600
+
+    # Argon2id parameters. Defaults follow OWASP's guidance (>=19 MiB, t=2, p=1); tests lower
+    # them via env so the suite is not dominated by KDF time.
+    argon2_time_cost: int = 2
+    argon2_memory_cost_kib: int = 19456
+    argon2_parallelism: int = 1
+
+    # --- Rate limiting (SECURITY.md §4) -------------------------------------
+    rate_limit_enabled: bool = True
+    rate_limit_anonymous_per_min: int = 10
+    # Token refresh, per IP: generous, because refresh proves possession of a 256-bit token and a
+    # campus NAT puts many real sessions behind one address (SECURITY.md §4).
+    rate_limit_refresh_per_min: int = 60
+    rate_limit_authenticated_per_min: int = 60
+    rate_limit_ai_per_min: int = 6
+    rate_limit_voice_minutes_per_day: int = 60
+
+    # --- Model providers (ADR-0016) -----------------------------------------
+    # Selection is config, so a model comparison is an experiment rather than a rewrite.
+    llm_provider: Literal["anthropic", "fake"] = "anthropic"
+    llm_model: str = "claude-opus-5"
+    # A latency/quality dial, not a model downgrade. "medium" is the starting point for
+    # conversational turns pending EXP-004; the intent classifier will use "low".
+    llm_effort: Literal["low", "medium", "high"] = "medium"
+    # A spoken answer longer than this is a defect, not a feature (see the persona prompt).
+    llm_max_output_tokens: int = 1024
+    llm_timeout_seconds: float = 30.0
+    # How long a stream may go without a single event before the turn gives up on it with an
+    # apology (app/providers/llm/watchdog.py). Far past a healthy first token, far short of the
+    # SDK's 30 s per read times three attempts.
+    llm_stall_seconds: float = 20.0
+    # Server-side rescue when a request is declined on policy grounds, so a decline degrades to a
+    # different model instead of hanging a conversation. Empty disables it.
+    llm_refusal_fallback_model: str = "claude-opus-4-8"
+    # History window resent per turn. The context window is far larger; every token resent costs
+    # money and latency regardless of what would fit.
+    llm_history_turns: int = 20
+
+    # faster-whisper: local recognition for evaluation and development (needs the voice-local
+    # extra and its weights); the managed streaming recogniser ADR-0002 plans does not exist yet.
+    stt_provider: Literal["fake", "faster-whisper"] = "fake"
+    stt_model: str = "small"
+    # espeak: local synthesis for evaluation and development (needs the espeak-ng program, which
+    # the production image does not install); the managed streaming voice ADR-0003 plans does not
+    # exist yet (ADR-0018).
+    tts_provider: Literal["fake", "espeak"] = "fake"
+    # tfidf_svd is what actually ships (ADR-0006's amendment — multilingual-e5-base needs
+    # HuggingFace Hub, unreachable from this sandbox); it is the default so search_knowledge
+    # works out of the box rather than needing an env var set to leave the fake behind.
+    embedding_provider: Literal["fake", "tfidf_svd"] = "tfidf_svd"
+    reranker_provider: Literal["noop"] = "noop"  # ADR-0007: off by default, must earn its latency
+
+    # --- Voice (ADR-0001, ADR-0004) -----------------------------------------
+    vad_provider: Literal["silero", "scripted"] = "silero"
+    silero_vad_path: str = "models/silero_vad.onnx"
+    # Library defaults. NOT tuned against real speech — no human-speech fixture existed where
+    # this was written, so tuning waits for the first real dataset (DATASET.md).
+    vad_enter_threshold: float = 0.5
+    vad_exit_threshold: float = 0.35
+    vad_min_speech_ms: int = 250
+    vad_min_silence_ms: int = 500
+    # Rolling audio kept so an interrupting utterance keeps its first word (ARCHITECTURE §5.5).
+    voice_pre_roll_ms: int = 500
+
+    # --- Cost guard (Gate 0 finding M-11) -----------------------------------
+    # Unset means no cap is enforced. The application says so at startup rather than implying
+    # a limit exists; it never invents one.
+    monthly_spend_cap_usd: float | None = None
+
+    # --- HTTP ---------------------------------------------------------------
+    # NoDecode: pydantic-settings otherwise parses a list from the environment as JSON, so the
+    # plain comma-separated value .env.example documents failed startup before _split_origins
+    # ever ran.
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
+    request_timeout_seconds: int = 30
+
+    # --- Observability ------------------------------------------------------
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_json: bool = True
+    # Full transcripts at INFO would put student speech in every log line (SECURITY.md §5).
+    log_transcripts: bool = False
+    # Traces (app/core/telemetry.py): off, printed, or sent to an OpenTelemetry collector.
+    otel_exporter: Literal["none", "console", "otlp"] = "none"
+    otel_endpoint: str = "http://localhost:4318/v1/traces"
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
+
+    @field_validator("monthly_spend_cap_usd", mode="before")
+    @classmethod
+    def _empty_cap_is_unset(cls, v: object) -> object:
+        # .env.example documents the cap as an empty assignment; that means "no cap", not a
+        # malformed number that stops the application starting.
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @model_validator(mode="after")
+    def _production_hardening(self) -> "Settings":
+        if self.environment != "production":
+            return self
+        if self.debug:
+            raise ValueError("debug must be off in production")
+        if "*" in self.cors_origins:
+            raise ValueError("wildcard CORS origin is not allowed in production")
+        if self.log_transcripts:
+            raise ValueError("log_transcripts must be off in production")
+        if not self.rate_limit_enabled:
+            raise ValueError("rate limiting cannot be disabled in production")
+        if plain := [o for o in self.cors_origins if not o.startswith("https://")]:
+            # The browser's credentials ride these origins' requests, and the voice socket is
+            # wss:// only when the API is served over TLS (frontend/src/lib/config.ts).
+            raise ValueError(f"CORS origins must be https:// in production, not {plain}")
+        return self
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1
+# Multi-stage: the runtime image carries no build toolchain and no dev/eval dependencies.
+
+FROM python:3.11-slim-bookworm AS builder
+WORKDIR /build
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y build-essential \
+    && rm -rf /var/lib/apt/lists/*
+COPY backend/pyproject.toml backend/constraints.txt ./
+COPY backend/app ./app
+# Only the base dependency set: the `dev`, `eval` and `voice-local` extras never reach production
+# (ADR-0015). At the versions CI tested (constraints.txt).
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir -c constraints.txt .
+
+# The VAD's weights: the same pinned release and checksum as scripts/fetch_models.sh. Without them
+# every voice connection fails at the handshake.
+ARG SILERO_URL=https://raw.githubusercontent.com/snakers4/silero-vad/v6.2/src/silero_vad/data/silero_vad.onnx
+ARG SILERO_SHA256=1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3
+RUN mkdir -p /build/models && python -c "\
+import hashlib, os, sys, urllib.request; \
+data = urllib.request.urlopen(os.environ['SILERO_URL'], timeout=60).read(); \
+digest = hashlib.sha256(data).hexdigest(); \
+sys.exit(f'silero_vad.onnx checksum mismatch: {digest}') if digest != os.environ['SILERO_SHA256'] \
+else open('/build/models/silero_vad.onnx', 'wb').write(data)"
+
+FROM python:3.11-slim-bookworm AS runtime
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+# Non-root: a container that does not need root should not have it.
+RUN groupadd --gid 10001 vaanios \
+    && useradd --uid 10001 --gid vaanios --create-home --shell /usr/sbin/nologin vaanios
+
+COPY --from=builder /opt/venv /opt/venv
+WORKDIR /srv
+COPY --chown=vaanios:vaanios backend/app ./app
+COPY --chown=vaanios:vaanios backend/migrations ./migrations
+COPY --chown=vaanios:vaanios backend/alembic.ini ./alembic.ini
+COPY --chown=vaanios:vaanios backend/scripts ./scripts
+COPY --from=builder --chown=vaanios:vaanios /build/models ./models
+
+# The local voice (eSpeak NG, ADR-0018), only when asked for: infra/compose.local-voice.yaml sets
+# it. The default image has no synthesiser at all, so it cannot serve one by accident.
+ARG LOCAL_VOICE=0
+RUN if [ "$LOCAL_VOICE" = "1" ]; then \
+        apt-get update \
+        && apt-get install --no-install-recommends -y espeak-ng \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+USER vaanios
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=2).status == 200 else 1)"
+
+CMD ["uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "8000"]

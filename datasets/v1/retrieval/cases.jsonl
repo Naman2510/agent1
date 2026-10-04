@@ -1,0 +1,22 @@
+{"id":"ret-001","query":"What does KVL state?","language":"en","difficulty":"easy","relevant":[{"document":"Kirchhoff's Laws","heading_contains":"7.1"},{"document":"Kirchhoff's Laws","heading_contains":"7.3"}]}
+{"id":"ret-002","query":"Why did Maxwell add the displacement current term?","language":"en","difficulty":"easy","relevant":[{"document":"Maxwell's Equations","heading_contains":"12.2"}]}
+{"id":"ret-003","query":"What is the TE10 mode and why is it used?","language":"en","difficulty":"medium","relevant":[{"document":"Waveguides","heading_contains":"19.2"}]}
+{"id":"ret-004","query":"How do I compute a Thevenin equivalent circuit?","language":"en","difficulty":"easy","relevant":[{"document":"Network Theorems","heading_contains":"9.3"}]}
+{"id":"ret-005","query":"What is the time constant in an RC circuit?","language":"en","difficulty":"easy","relevant":[{"document":"Transient Response","heading_contains":"11.2"}]}
+{"id":"ret-006","query":"Difference between mesh analysis and nodal analysis","language":"en","difficulty":"medium","relevant":[{"document":"Network Theorems","heading_contains":"9.1"},{"document":"Network Theorems","heading_contains":"9.2"}]}
+{"id":"ret-007","query":"What happens to wave impedance near the cutoff frequency?","language":"en","difficulty":"hard","relevant":[{"document":"Waveguides","heading_contains":"19.3"}]}
+{"id":"ret-008","query":"Underdamped versus overdamped RLC response","language":"en","difficulty":"medium","relevant":[{"document":"Transient Response","heading_contains":"11.3"}]}
+{"id":"ret-009","query":"When can I suppress a source using superposition?","language":"en","difficulty":"medium","relevant":[{"document":"Network Theorems","heading_contains":"9.4"}]}
+{"id":"ret-010","query":"Does a moving loop in a static field induce an EMF?","language":"en","difficulty":"hard","relevant":[{"document":"Maxwell's Equations","heading_contains":"12.3"}]}
+{"id":"ret-011","query":"What is Gauss's law for magnetism?","language":"en","difficulty":"easy","relevant":[{"document":"Maxwell's Equations","heading_contains":"12.1"}]}
+{"id":"ret-012","query":"Common mistake students make with sign convention in KVL","language":"en","difficulty":"medium","relevant":[{"document":"Kirchhoff's Laws","heading_contains":"7.1"}]}
+{"id":"ret-013","query":"How many independent equations does nodal analysis need for n nodes?","language":"en","difficulty":"medium","relevant":[{"document":"Network Theorems","heading_contains":"9.2"}]}
+{"id":"ret-014","query":"Why is waveguide theory considered difficult by students?","language":"en","difficulty":"easy","relevant":[{"document":"Waveguides","heading_contains":"19.4"}]}
+{"id":"ret-015","query":"Steady state AC phasor analysis versus transient analysis","language":"en","difficulty":"hard","relevant":[{"document":"Transient Response","heading_contains":"11.4"}]}
+{"id":"ret-016","query":"KVL","language":"en","difficulty":"hard","relevant":[{"document":"Kirchhoff's Laws","heading_contains":"7.1"},{"document":"Kirchhoff's Laws","heading_contains":"7.3"}]}
+{"id":"ret-017","query":"3.5 kilohm resistor voltage drop example","language":"en","difficulty":"medium","relevant":[{"document":"Kirchhoff's Laws","heading_contains":"7.1"}]}
+{"id":"ret-018","query":"TE and TM mode difference","language":"en","difficulty":"easy","relevant":[{"document":"Waveguides","heading_contains":"19.2"}]}
+{"id":"ret-019","query":"Norton equivalent current source","language":"en","difficulty":"medium","relevant":[{"document":"Network Theorems","heading_contains":"9.3"}]}
+{"id":"ret-020","query":"किरचॉफ का वोल्टेज नियम क्या है","language":"hi","difficulty":"hard","relevant":[{"document":"Kirchhoff's Laws","heading_contains":"7.1"}],"note":"cross-lingual: Hindi-script query against the English-only corpus"}
+{"id":"ret-021","query":"मैक्सवेल के समीकरण में displacement current क्यों जोड़ा गया","language":"hi","difficulty":"hard","relevant":[{"document":"Maxwell's Equations","heading_contains":"12.2"}],"note":"cross-lingual, code-switched"}
+{"id":"ret-022","query":"waveguide impedance","language":"en","difficulty":"medium","relevant":[{"document":"Waveguides","heading_contains":"19.3"}],"filters":{"subject":"Electromagnetic Theory"}}

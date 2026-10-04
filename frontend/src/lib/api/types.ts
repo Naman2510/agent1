@@ -1,0 +1,188 @@
+// Mirrors of the backend's response models (backend/app/schemas). Kept by hand and small on
+// purpose: the OpenAPI schema is the source of truth, and these cover only what the UI reads.
+
+export type NotMeasured = "not_measured";
+
+export interface StudentSummary {
+  id: string;
+  display_name: string;
+  institution: string | null;
+  semester: number | null;
+  preferred_language: string;
+  consent_audio_retention: boolean;
+}
+
+export interface Me {
+  id: string;
+  email: string;
+  role: "student" | "admin" | string;
+  student: StudentSummary | null;
+}
+
+/** What the auth proxy hands the page. The refresh token never leaves the server. */
+export interface AccessGrant {
+  access_token: string;
+  expires_in: number;
+}
+
+export interface Session {
+  id: string;
+  status: string;
+  transport: string;
+  started_at: string;
+  ended_at: string | null;
+  turn_count: number;
+}
+
+export interface PaginatedSessions {
+  items: Session[];
+  total: number;
+}
+
+/** A source an answer cited, as the student was shown it. */
+export interface Citation {
+  ref: string;
+  document_title: string;
+  heading_path: string | null;
+  section: string | null;
+  page_start: number | null;
+  page_end: number | null;
+}
+
+/** A tool the mentor called for an answer, and whether it worked. */
+export interface ToolActivity {
+  tool_name: string;
+  ok: boolean;
+}
+
+export interface Message {
+  id: string;
+  turn_index: number;
+  seq: number;
+  role: "user" | "assistant" | string;
+  content: string;
+  language: string | null;
+  was_interrupted: boolean;
+  spoken_prefix_chars: number | null;
+  latency_ms: Record<string, number>;
+  created_at: string;
+  /** On the mentor's messages; empty on the student's. */
+  citations: Citation[];
+  tool_activity: ToolActivity[];
+}
+
+export interface TurnSummary {
+  turn_index: number;
+  stop_reason: string;
+  interrupted: boolean;
+  language: string | null;
+  latency_ms: Record<string, number>;
+  estimated_cost_usd: number;
+  token_usage: Record<string, unknown>;
+  citations: Citation[];
+  tool_activity: ToolActivity[];
+}
+
+export interface LatencyStats {
+  llm_ttft_ms_avg: number;
+  sample_size: number;
+}
+
+export interface ToolUsageRow {
+  tool_name: string;
+  ok?: number;
+  error?: number;
+  rejected?: number;
+  timeout?: number;
+  budget_exceeded?: number;
+}
+
+export interface AdminDashboard {
+  active_sessions: number;
+  total_students: number;
+  total_sessions: number;
+  total_messages: number;
+  latency: LatencyStats | NotMeasured;
+  stt_failures: NotMeasured;
+  tool_failures: number;
+  tool_rejections: number;
+  rag_failures: number;
+  tool_usage: ToolUsageRow[];
+  mastery: { tracked_topics: number; average_mastery: number | NotMeasured };
+  memory_events: { applied: number; rejected: number; total: number };
+}
+
+// --- evaluation (EVALUATION.md §8) -----------------------------------------------------------
+
+export interface HeadlineMetric {
+  key: string;
+  label: string;
+  unit: "ratio" | "ms" | "count";
+  value: number;
+  of: number | null;
+}
+
+export interface EvaluationRunSummary {
+  id: string;
+  suite: string;
+  config_name: string;
+  dataset_version: string;
+  dataset_digest: string;
+  git_sha: string;
+  git_dirty: boolean;
+  started_at: string;
+  finished_at: string | null;
+  case_count: number | null;
+  failed_count: number;
+  headlines: HeadlineMetric[];
+  reproduces_run_id: string | null;
+}
+
+export interface GuardResult {
+  metric: string;
+  mean_loss: number;
+  max_loss: number;
+  failed: boolean;
+}
+
+export interface ExperimentSummary {
+  slug: string;
+  title: string;
+  hypothesis: string;
+  suite: string;
+  variable_changed: string;
+  decision: "adopt" | "reject" | "inconclusive" | "pending" | string;
+  rationale: string | null;
+  decided_at: string | null;
+  baseline_run_id: string | null;
+  candidate_run_id: string | null;
+  metric: string | null;
+  cases: number;
+  baseline_mean: number | null;
+  candidate_mean: number | null;
+  mean_gain: number | null;
+  gain_95ci: [number, number] | null;
+  guards: GuardResult[];
+}
+
+export interface EvaluationOverview {
+  runs: EvaluationRunSummary[];
+  experiments: ExperimentSummary[];
+}
+
+export interface FailingCase {
+  case_id: string;
+  language: string | null;
+  input: Record<string, unknown>;
+  expected: Record<string, unknown> | null;
+  actual: Record<string, unknown> | null;
+  notes: string | null;
+}
+
+export interface RunFailures {
+  run_id: string;
+  suite: string;
+  config_name: string;
+  failed_count: number;
+  cases: FailingCase[];
+}

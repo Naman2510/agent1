@@ -1,0 +1,55 @@
+{
+  "description": "Metadata the ingestion pipeline does not infer from content (spec §15), supplied as an admin would supply it on upload. Read by scripts/ingest_sample_corpus.py and by the retrieval suite, which ingests this corpus afresh for every run.",
+  "documents": [
+    {
+      "file": "emt-01-kirchhoffs-laws.md",
+      "title": "Kirchhoff's Laws",
+      "subject": "Electromagnetic Theory",
+      "topic": "Kirchhoff's Laws",
+      "semester": 3,
+      "language": "en",
+      "license": "authored for this project",
+      "difficulty": "easy"
+    },
+    {
+      "file": "emt-02-maxwells-equations.md",
+      "title": "Maxwell's Equations",
+      "subject": "Electromagnetic Theory",
+      "topic": "Maxwell's Equations",
+      "semester": 3,
+      "language": "en",
+      "license": "authored for this project",
+      "difficulty": "medium"
+    },
+    {
+      "file": "emt-03-waveguides.md",
+      "title": "Waveguides",
+      "subject": "Electromagnetic Theory",
+      "topic": "Waveguides",
+      "semester": 5,
+      "language": "en",
+      "license": "authored for this project",
+      "difficulty": "hard"
+    },
+    {
+      "file": "ckt-01-network-theorems.md",
+      "title": "Network Theorems",
+      "subject": "Circuit Theory",
+      "topic": "Network Theorems",
+      "semester": 3,
+      "language": "en",
+      "license": "authored for this project",
+      "difficulty": "medium"
+    },
+    {
+      "file": "ckt-02-transient-response.md",
+      "title": "Transient Response",
+      "subject": "Circuit Theory",
+      "topic": "Transient Response",
+      "semester": 3,
+      "language": "en",
+      "license": "authored for this project",
+      "difficulty": "medium"
+    }
+  ]
+}

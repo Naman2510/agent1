@@ -1,0 +1,293 @@
+version: v1
+created: 2026-09-18
+updated: 2026-09-26
+status: partial
+description: >
+  First evaluation dataset. Contains the language-identification, retrieval, and agent slices
+  (both its expected-tool-trace scenarios and its prompt-injection cases, Phase 6). The STT,
+  response and e2e slices listed in docs/DATASET.md do not exist yet.
+
+slices:
+  voice_fixtures:
+    path: voice/fixtures/
+    cases: 1
+    task: >
+      Synthetic (espeak-ng) speech for detector smoke tests: proves the VAD fires on speech and
+      stays quiet around it. Not a measure of accuracy on human speech. See voice/README.md.
+
+  lid:
+    path: lid/cases.jsonl
+    cases: 88
+    task: >
+      Given one student utterance with no conversation history, identify its language:
+      en | hi | hi-Latn | mixed | ta | unknown.
+    by_language:
+      en: 22
+      hi: 17
+      hi-Latn: 25
+      mixed: 8
+      ta: 9
+      unknown: 7
+    by_difficulty:
+      easy: 50
+      medium: 19
+      hard: 19
+
+  retrieval:
+    path: retrieval/cases.jsonl
+    cases: 22
+    corpus: datasets/v1/corpus (5 self-authored EMT/Circuit Theory documents, 19 chunks)
+    task: >
+      Given a student question, retrieve the labelled-relevant chunk(s) from the ingested corpus.
+      Relevance is referenced as (document title, heading-path substring) rather than by chunk
+      UUID, so it survives a corpus re-ingest.
+    by_language:
+      en: 20
+      hi: 2
+    by_difficulty:
+      easy: 7
+      medium: 9
+      hard: 6
+    notes:
+      - "2 cases (ret-020, ret-021) are deliberately cross-lingual: a Hindi-script query against the English-only corpus, to measure the embedder's cross-lingual gap honestly rather than only testing same-language retrieval. See FC-004."
+      - "1 case (ret-022) exercises the subject metadata filter end to end."
+
+  agent_scenarios:
+    path: agent/scenarios.jsonl
+    cases: 14
+    task: >
+      Given a student utterance, an intent context, and an expected tool trace, verify (a) the
+      IntentGate allowlist for that intent actually supports the trace and excludes the named
+      forbidden tools, and (b) for scenarios marked run_pipeline, that a scripted model requesting
+      that trace completes successfully end to end against the real orchestrator, executor, and
+      database — including correct handling of an unnecessary-but-allowed extra call and of a
+      handler-raised tool error. See eval/suites/agent.py's own docstring for what this measures
+      and, importantly, what it does not (a real model's tool-selection judgement).
+    by_intent:
+      progress_request: 3
+      question: 2
+      doubt: 1
+      quiz_request: 2
+      revision_request: 1
+      study_plan: 3
+      clarification: 1
+      casual: 1
+    coverage:
+      every_registered_tool_appears: true
+      run_pipeline_scenarios: 10
+      gated_vs_ungated_probes: 5
+      tool_error_scenarios: 1
+    notes:
+      - "docs/DATASET.md's coverage table targets 40 'Tool-requiring' cases; this slice has 14, chosen to cover every tool and every intent at least once rather than to approach the target by volume — the same target-vs-actual honesty as the retrieval slice (22 of 40 'RAG-answerable')."
+      - "Two authoring mistakes were caught and fixed while building this slice, not by inspection but by running check_allowlist_coverage against the real INTENT_TOOLS table: agent-009 and agent-014 originally listed create_study_plan as 'forbidden' under the study_plan intent, which is wrong — it is legitimately allowed there (see agent-008). Left as a reminder that even a small, deliberately-authored dataset needs to be run against the system, not just read."
+
+  agent_injection:
+    path: agent/injection_cases.jsonl
+    cases: 16
+    attempted_calls: 19
+    task: >
+      Given a case naming an intent context and one or more tool calls an already-successfully-
+      injected model would attempt, assert the executor blocks every one before a handler runs —
+      by allowlist (14), by schema-level identity rejection (4), or by unknown-tool rejection (1).
+      No LLM call is made; see eval/suites/injection.py's own docstring for exactly what this does
+      and does not measure.
+    by_category:
+      document_injection: 8
+      identity_injection: 4
+      user_utterance_injection: 3
+      hallucinated_tool: 1
+    notes:
+      - "This is not a dataset of natural language for a model to be tested against — injected_text and legitimate_utterance are documentation of the attack shape a case represents, not inputs any code in this suite parses. What the suite actually exercises is attempted_calls against the real executor."
+      - "docs/DATASET.md's coverage table targets 15 prompt-injection cases; this slice has 16 (19 attempted calls), meeting that target."
+
+# ---------------------------------------------------------------------------
+# Provenance and bias. Read this before quoting any number derived from this
+# dataset. `provenance`/`bias` below are the `lid` slice's; `retrieval_*` are the
+# retrieval slice's — the two were authored under different conditions and the
+# biases are not the same shape.
+# ---------------------------------------------------------------------------
+provenance:
+  source: authored
+  author: project developer (single annotator)
+  annotators: 1
+  inter_annotator_agreement: not measured (single annotator)
+  synthetic: false        # text, not generated audio
+  llm_generated: false
+
+bias:
+  severity: high
+  statement: >
+    The LID cases were authored by the same person who wrote the lexicon they test. This is the
+    strongest form of bias available: the cases were written with knowledge of which words the
+    classifier knows. Results measure INTERNAL CONSISTENCY and serve as a regression guard. They
+    are NOT evidence of accuracy on real student speech and must never be presented as such.
+  consequences:
+    - The romanized-Hindi recall figure is optimistic by an unknown margin.
+    - Thresholds were deliberately NOT tuned against this set; doing so would be fitting a model
+      to its own author. See the Phase 4 audit.
+    - A second annotator, and utterances collected from real students, are prerequisites for any
+      claim about accuracy.
+
+retrieval_provenance:
+  source: authored
+  author: "project developer (single annotator) — same person who wrote both the corpus documents and the retrieval pipeline under test"
+  annotators: 1
+  inter_annotator_agreement: not measured (single annotator)
+  pooling: "none — relevant chunks were labelled by the corpus author from direct knowledge of the 5 source documents, not from a pooled candidate list across configurations (EVALUATION.md section 4's pooling method is the target for a larger set; skipped here as disproportionate for 19 chunks)"
+  synthetic: false
+  llm_generated: false
+
+retrieval_bias:
+  severity: high
+  statement: >
+    The same person wrote the corpus, the retrieval pipeline, and the queries, and labelled
+    relevance from memory of writing the documents rather than from independent judgement. This is
+    the same shape of bias as the LID slice, for the same reason: results measure whether the
+    pipeline retrieves what its own author expects, not real retrieval quality against material
+    the system's builder did not write.
+  consequences:
+    - "Queries tend to reuse vocabulary from the source document's own heading or opening sentence (e.g. ret-001 asks 'What does KVL state?' against a chunk titled 'Kirchhoff's Voltage Law') — easier than a real student's phrasing, which would not echo the textbook."
+    - "The corpus is 5 documents and 19 chunks. Recall@10 of 0.955 on this corpus says the pipeline mechanism works; it says nothing about recall at hundreds of documents, where near-duplicate and topically-adjacent chunks make discrimination genuinely harder."
+    - "A corpus and query set from a real course, judged by someone other than the pipeline's author, are prerequisites for any claim about real-world retrieval quality."
+
+agent_scenarios_provenance:
+  source: authored
+  author: "project developer (single annotator) — same person who wrote the IntentGate allowlist table and the orchestrator/executor under test"
+  annotators: 1
+  inter_annotator_agreement: not measured (single annotator)
+  synthetic: false
+  llm_generated: false
+
+agent_scenarios_bias:
+  severity: high
+  statement: >
+    The same person wrote the allowlist table and the scenarios meant to check it, so a category
+    of scenario the author did not think to write — a legitimate task the table fails to support
+    in a way nobody has yet noticed — has no case here and would not be caught. The pipeline
+    checks are real execution, but every "expected" trace was authored knowing the correct answer
+    in advance, which is a different exercise from generating a scenario and independently judging
+    whether a model's actual behaviour matched it. There is no real model in this loop at all
+    (see eval/suites/agent.py's own docstring) — tool-selection accuracy as EVALUATION.md §5.1
+    defines it is not measured by this dataset.
+  consequences:
+    - "14 scenarios is enough to touch every tool and every intent once, not to support a statistical claim about selection accuracy, task completion, or argument-match rate — there is no model making independent choices here to have an accuracy at all."
+    - "A real agent-suite result (a real model given these or similar utterances, judged against the expected trace) is a prerequisite for the gated-vs-ungated comparison ARCHITECTURE §8.2 actually calls for — whether narrowing tool exposure helps or hurts real completion. What this dataset shows instead is that gating mechanically changes which calls execute, which is necessary but not sufficient evidence for that question."
+    - "The one authoring bug this slice's own construction caught (agent-009/agent-014's wrong 'forbidden' claim, see the agent_scenarios notes above) is itself evidence for the first consequence: bias in the author's model of the system is exactly what independent testing would need to catch, and this dataset cannot provide that independence."
+
+agent_injection_provenance:
+  source: authored
+  author: "project developer (single annotator) — same person who wrote the tool executor under test"
+  annotators: 1
+  inter_annotator_agreement: not measured (single annotator)
+  synthetic: false
+  llm_generated: false
+
+agent_injection_bias:
+  severity: high
+  statement: >
+    The same person wrote the executor's defenses and the cases meant to test them, and every case
+    was authored knowing exactly which checks exist (allowlist, schema extra="forbid", unknown-tool
+    rejection) rather than by attempting genuinely novel attacks. Results show these specific,
+    named mechanisms hold against these specific, named attempts — not that the system is safe
+    against injection attacks in general, and not that a real model would even produce arguments
+    shaped like these if actually persuaded by the injected text (no LLM call is made; see
+    eval/suites/injection.py).
+  consequences:
+    - "A defense this dataset does not exercise (there is currently only one meaningful boundary at this layer — student_id/session_id are simply absent from every tool schema — so there is little surface left to miss) would have no case here to catch it."
+    - "Real adversarial red-teaming, ideally by someone other than the executor's author, and eventually against a real model's actual tool-call choices rather than a scripted worst case, is a prerequisite for any claim broader than 'these mechanisms work as written.'"
+    - "Sample size (16 cases, 19 attempted calls) is enough to exercise every allowlist row and every mutating tool's schema at least once, not to support a statistical claim — there is no meaningful confidence interval on a boolean-per-mechanism result."
+
+known_gaps:
+  - "No human audio. VAD and STT accuracy cannot be evaluated from this dataset; the one synthetic clip (voice_fixtures) only proves the detector fires on speech. (The Phase 3 claim that Silero cannot hear synthetic speech was a detector bug — see the correction in docs/PHASE_3_AUDIT.md §5.)"
+  - "No dialectal variation in Hindi or Tamil."
+  - "Romanized Tamil has 2 cases and no meaningful coverage; Tamil is deferred past the MVP."
+  - "`mixed` has only 8 cases, and it is the hardest class — the least reliable row in the LID report."
+  - "Sample sizes support direction, not confidence intervals. A few points of difference between two configurations is noise at n=88 (lid) or n=22 (retrieval)."
+  - "The retrieval slice's cross-lingual cases (n=2) are far too few to characterise the embedder's cross-lingual gap quantitatively — they demonstrate that the gap exists, not its magnitude."
+  - "The agent_injection slice measures defense-in-depth against a scripted worst case, never a real model's actual behaviour under injection — see agent_injection_bias above."
+  - "The agent_scenarios slice has no real model in the loop at all — see agent_scenarios_bias above. It cannot answer ARCHITECTURE §8.2's actual question (does gating help or hurt real tool-selection accuracy); that needs a real agent-suite run against an Anthropic model, which is real future work, not done here."
+
+pii:
+  contains_personal_data: false
+  statement: >
+    Names appearing in cases ("Priya") are invented, not collected. No student data, no audio,
+    and nothing traceable to a person is present in this repository.
+
+licensing:
+  content: authored for this project
+  third_party_assets: none
+
+immutability: >
+  This version is frozen once any evaluation run references it. Corrections create v1.1 with a
+  changelog entry rather than editing v1, because editing it would retroactively change published
+  metrics.
+
+runs:
+  - suite: lid
+    git_sha: 0adf300
+    date: 2026-09-18
+    signal_accuracy: 0.9205
+    signal_macro_f1: 0.8988
+    routed_accuracy: 0.8750
+    routed_macro_f1: 0.7568
+  - suite: retrieval
+    config: hybrid_rrf
+    git_sha: de38217
+    date: 2026-09-19
+    recall_at_5: 0.9318
+    recall_at_10: 0.9545
+    precision_at_5: 0.2091
+    mrr: 0.8712
+    ndcg_at_10: 0.8926
+    hit_rate: 0.9545
+  - suite: retrieval
+    config: vector_only
+    git_sha: de38217
+    date: 2026-09-19
+    recall_at_5: 0.9318
+    recall_at_10: 0.9545
+    mrr: 0.8561
+    ndcg_at_10: 0.8854
+  - suite: retrieval
+    config: lexical_only
+    git_sha: de38217
+    date: 2026-09-19
+    recall_at_5: 0.9091
+    recall_at_10: 0.9545
+    mrr: 0.7102
+    ndcg_at_10: 0.7715
+  - suite: retrieval
+    config: lexical_bm25_offline
+    note: reference only — not a shipped configuration
+    git_sha: de38217
+    date: 2026-09-19
+    recall_at_5: 0.9318
+    recall_at_10: 0.9545
+    mrr: 0.8864
+    ndcg_at_10: 0.8968
+  - suite: injection
+    git_sha: 8745ffd
+    date: 2026-09-21
+    total_attempted_calls: 19
+    blocked: 19
+    executed: 0
+    note: >
+      Every case is scripted as an already-successfully-injected model; this measures the
+      executor's defenses, not a real model's resistance to injection. See
+      agent_injection_bias above.
+  - suite: agent
+    git_sha: 1887fad
+    date: 2026-09-21
+    allowlist_coverage_ok: 14
+    allowlist_coverage_total: 14
+    pipeline_completed: 10
+    pipeline_total: 10
+    pipeline_forbidden_tool_leaked: 0
+    probes_where_gate_earned_its_place: 5
+    probes_total: 5
+    note: >
+      No real model is in this loop; see agent_scenarios_bias above. This confirms the allowlist
+      table supports every scenario's legitimate trace, the pipeline completes real multi-tool
+      turns (including an unnecessary-call flag and a handler-error recovery) against a real
+      database, and gating measurably changes which calls execute — not that gating helps or
+      hurts a real model's tool-selection accuracy, which is unmeasured.

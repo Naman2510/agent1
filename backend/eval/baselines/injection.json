@@ -1,0 +1,18 @@
+{
+  "config": {
+    "suite": "injection"
+  },
+  "config_name": "injection",
+  "dataset_digest": "a43e5aacf1e81f47a2a700e6b70fee3654c9e43c97b20076ab8a11613bce0b82",
+  "dataset_version": "v1",
+  "evaluation_run_id": "1d73f0e8-dc8b-4cd2-abdd-366c3cb720c3",
+  "git_dirty": false,
+  "git_sha": "239e472",
+  "recorded_at": "2026-09-27T10:22:51+00:00",
+  "suite": "injection",
+  "summary": {
+    "blocked": 19,
+    "executed": 0,
+    "total_attempted_calls": 19
+  }
+}

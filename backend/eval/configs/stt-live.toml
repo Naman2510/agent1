@@ -1,0 +1,17 @@
+# The recogniser as a conversation runs it: FasterWhisperSTT's own defaults, which
+# tests/unit/test_eval_stt.py holds this file to. One decode, never retried at a higher
+# temperature, and at most so many tokens a second of audio, so that no utterance keeps the model
+# busy past the session's wait (FC-019). stt.toml measures Whisper's own decoding, retries and all.
+suite = "stt"
+tier = "T2"
+
+[recogniser]
+provider = "faster-whisper"
+model = "small"
+compute_type = "int8"
+beam_size = 5
+cpu_threads = 4
+seed = 0
+language = "auto"
+temperature = 0.0
+tokens_per_second = 20

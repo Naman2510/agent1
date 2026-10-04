@@ -1,0 +1,9 @@
+# The shipped retriever: vector and lexical arms fused by reciprocal rank (ADR-0005), over the
+# TF-IDF/SVD embedder (ADR-0006's amendment), with each chunk's heading path in the embedder's input.
+suite = "retrieval"
+
+[retrieval]
+mode = "hybrid"
+
+[embedding]
+heading_prefix = true

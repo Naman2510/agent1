@@ -1,0 +1,305 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Cancel superseded runs on the same ref: a queue of stale runs helps nobody.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # The unit suite needs no PostgreSQL and no network, so it runs first and fails fast. Its
+  # independence is itself asserted — see tests/conftest.py and Gate 2 finding D2-02.
+  unit:
+    name: Unit tests (no services)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/constraints.txt
+      - name: Install
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e ".[dev,rag,eval]"
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: backend/models
+          key: models-${{ hashFiles('backend/scripts/fetch_models.sh') }}
+      - name: Fetch model weights
+        # Pinned and checksummed. Without them the tests that run the real VAD cannot run, and
+        # CI never exercised the detector production uses (tests/unit/test_vad.py fails, not
+        # skips, when CI is set).
+        run: bash backend/scripts/fetch_models.sh
+      - name: Install the local synthesiser
+        # eSpeak NG (ADR-0018). The tests that need real speech fail, not skip, when CI is set.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends espeak-ng
+      - name: Lint and types
+        working-directory: backend
+        run: |
+          ruff check .
+          ruff format --check .
+          mypy app eval scripts
+      - name: Unit tests
+        working-directory: backend
+        # A database URL is deliberately NOT provided: if a unit test starts needing one, this
+        # job fails and the tiering claim in EVALUATION.md stays true.
+        run: pytest -q tests/unit
+
+  # Tier T0 (EVALUATION.md §6): the full suite with every external model provider faked. No paid
+  # API call runs here, by design.
+  backend:
+    needs: [unit]
+    name: Backend (lint, types, tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Same image as Compose, so CI and local development cannot diverge, and the Phase 5
+        # pgvector migration needs no CI change.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: vaanios
+          POSTGRES_PASSWORD: vaanios
+          POSTGRES_DB: vaanios_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vaanios -d vaanios_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/constraints.txt
+
+      - name: Install
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints.txt -e ".[dev,rag,eval]"
+
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: backend/models
+          key: models-${{ hashFiles('backend/scripts/fetch_models.sh') }}
+      - name: Fetch model weights
+        # Pinned and checksummed. Without them the tests that run the real VAD cannot run, and
+        # CI never exercised the detector production uses (tests/unit/test_vad.py fails, not
+        # skips, when CI is set).
+        run: bash backend/scripts/fetch_models.sh
+      - name: Install the local synthesiser
+        # eSpeak NG (ADR-0018). The tests that need real speech fail, not skip, when CI is set.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends espeak-ng
+
+      - name: Test
+        working-directory: backend
+        env:
+          VAANIOS_TEST_DATABASE_URL: postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
+        run: pytest -q --cov --cov-report=term-missing --cov-fail-under=80
+
+      - name: Every eval config reproduces its recorded baseline (tier T1 — no external calls)
+        working-directory: backend
+        # Gate 8: each suite is re-run from its committed config over the committed dataset and
+        # must match the summary recorded in eval/baselines/ exactly. A difference is either a
+        # regression or nondeterminism, and both are worth failing on (PHASE_8_AUDIT D8-01).
+        env:
+          VAANIOS_DATABASE_URL: postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
+          VAANIOS_REDIS_URL: redis://localhost:6379/0
+          VAANIOS_JWT_SECRET: ci-secret-that-is-at-least-32-characters
+        run: |
+          alembic upgrade head
+          python -m eval.runner --config eval/configs/*.toml --tier T1 --check-baseline
+
+      - name: Migrations are reversible and match the models
+        working-directory: backend
+        env:
+          VAANIOS_DATABASE_URL: postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test
+          VAANIOS_REDIS_URL: redis://localhost:6379/0
+          VAANIOS_JWT_SECRET: ci-secret-that-is-at-least-32-characters
+        run: |
+          python scripts/reset_schema.py
+          alembic upgrade head
+          # `alembic check` fails if the models have drifted from the migrations — the failure
+          # mode where tests build one schema and production runs another.
+          alembic check
+          alembic downgrade base
+          alembic upgrade head
+
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks scans history, not just the tip
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dependency audit
+        working-directory: backend
+        run: |
+          # setuptools too: the runner's own (79.x) carries PYSEC-2026-3447, fixed in 83.
+          python -m pip install --upgrade pip "setuptools>=83" pip-audit
+          pip install -c constraints.txt -e .
+          # Blocking since Phase 9 (SECURITY.md §6). An advisory with no fix yet, or one that
+          # cannot reach this application, is ignored by ID (--ignore-vuln) with the reason
+          # recorded next to it, never by making the step non-blocking again.
+          pip-audit --progress-spinner off
+
+  frontend:
+    name: Frontend (lint, types, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      # What ships: the dependencies of the built app, not the tools that build and test it.
+      - run: npm audit --omit=dev
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # No provider key, nor any backend setting, may reach the browser (SECURITY.md §6): only
+      # NEXT_PUBLIC_ values are inlined into the bundle, and this keeps it that way.
+      - name: The browser bundle carries no secrets
+        run: "! grep -rIlE 'sk-ant-|ANTHROPIC|VAANIOS_' .next/static"
+
+  build:
+    name: Images, the Compose stack, and end-to-end in a browser
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -f infra/docker/backend.Dockerfile -t vaanios-backend:ci .
+      - name: Image runs as a non-root user
+        run: |
+          uid=$(docker run --rm vaanios-backend:ci id -u)
+          test "$uid" != "0" || { echo "container runs as root"; exit 1; }
+      - name: Image starts with the documented configuration, and loads the VAD
+        # Building is not starting: until Phase 7 this image built fine but could not import the
+        # app (runtime packages lived in extras), shipped without the VAD's weights, and could not
+        # parse the CORS line of .env.example. So: the example configuration, the app, the VAD.
+        run: |
+          docker run --rm --env-file .env.example \
+            -e VAANIOS_JWT_SECRET=ci-secret-that-is-at-least-32-characters \
+            vaanios-backend:ci python -c "import app.asgi; from app.voice.vad import SileroVoiceDetector; SileroVoiceDetector('models/silero_vad.onnx')"
+      - name: The image has no synthesiser, and the local-voice build speaks
+        # ADR-0018: eSpeak NG is for development and demos (infra/compose.local-voice.yaml), so the
+        # default image must not contain it; the opt-in build must start with it and say a sentence.
+        run: |
+          docker run --rm vaanios-backend:ci sh -c '! command -v espeak-ng'
+          docker build --build-arg LOCAL_VOICE=1 -f infra/docker/backend.Dockerfile -t vaanios-backend:local-voice .
+          docker run --rm --env-file .env.example \
+            -e VAANIOS_JWT_SECRET=ci-secret-that-is-at-least-32-characters \
+            -e VAANIOS_TTS_PROVIDER=espeak \
+            vaanios-backend:local-voice python -c "
+          import asyncio
+          from app.core.config import Settings
+          from app.providers.registry import build_tts
+          from app.providers.tts.base import SynthesisRequest
+          tts = build_tts(Settings())
+          async def say():
+              voice = tts.voices()[0]
+              request = SynthesisRequest(text='Hello from the mentor.', voice=voice)
+              return sum([len(frame) async for frame in tts.synthesize_stream(request)])
+          size = asyncio.run(say())
+          print(tts.info.model, size, 'bytes')
+          assert tts.info.name == 'espeak', tts.info
+          assert size > 24000, size
+          "
+      - name: Build frontend image
+        run: docker build -f infra/docker/frontend.Dockerfile -t vaanios-frontend:ci .
+
+      - name: Bring up the stack the way the README does
+        # README "Run it": copy the example, set a secret, compose up. The scripted LLM needs no
+        # key. The per-address limits are raised because every E2E test registers its own student
+        # from this one runner; the limits themselves are tested in the backend suite.
+        run: |
+          cp .env.example .env
+          sed -i \
+            -e "s|^VAANIOS_JWT_SECRET=.*|VAANIOS_JWT_SECRET=$(openssl rand -hex 32)|" \
+            -e "s|^VAANIOS_RATE_LIMIT_ANONYMOUS_PER_MIN=.*|VAANIOS_RATE_LIMIT_ANONYMOUS_PER_MIN=1000|" \
+            -e "s|^VAANIOS_RATE_LIMIT_REFRESH_PER_MIN=.*|VAANIOS_RATE_LIMIT_REFRESH_PER_MIN=1000|" \
+            .env
+          VAANIOS_LLM_PROVIDER=fake docker compose --env-file .env -f infra/compose.yaml up --build --detach
+          for _ in $(seq 60); do
+            if curl -fsS http://localhost:8000/v1/ready | grep -q '"status":"ready"' \
+              && curl -fsS -o /dev/null http://localhost:3000/login; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the stack did not become ready"; exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install the browser
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium firefox webkit
+      - name: End-to-end against the stack
+        # The same suite a developer runs from source, pointed at the shipped images.
+        working-directory: frontend
+        env:
+          E2E_WEB_URL: http://localhost:3000
+          E2E_API_URL: http://localhost:8000
+          E2E_PROMOTE_ADMIN: docker compose --env-file .env -f infra/compose.yaml exec -T backend python scripts/promote_admin.py
+        run: npm run e2e
+
+      - name: Stack logs
+        if: failure()
+        run: docker compose --env-file .env -f infra/compose.yaml logs --no-color --tail 200
+      - name: Keep the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file .env -f infra/compose.yaml down --volumes

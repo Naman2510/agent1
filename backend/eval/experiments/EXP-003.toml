@@ -1,0 +1,30 @@
+# Registered before either run (EVALUATION.md §7). Run with:
+#   python -m eval.runner --experiment eval/experiments/EXP-003.toml --record
+slug = "EXP-003"
+title = "Semantic endpointing"
+hypothesis = """Ending the turn after 250 ms of pause, when the stable transcript already reads as \
+a complete sentence, cuts turn-end latency by at least 100 ms without cutting off more questions."""
+baseline = "voice.toml"
+candidate = "voice-semantic-endpointing.toml"
+
+# Written down with the rule, before the runs, so the result can be compared with it honestly.
+prediction = """Faster on every question's final pause: the transcript completes 300 ms after the \
+last word, with 250 ms of quiet already passed, instead of the gate's 500 ms. But a turn that \
+opens with a complete sentence ("I have a doubt.") is cut at any pause the transcript completes \
+in — about 300 ms and up, not the gate's 500 — so the cut-off guard should fail: reject."""
+
+[decision_rule]
+metric = "endpoint_ms"
+higher_is_better = false
+min_effect = 100.0
+
+# ARCHITECTURE §4.3: rejected unless it wins *without* a rise in premature cut-offs.
+[[decision_rule.guards]]
+metric = "cut_off"
+higher_is_better = false
+max_loss = 0.0
+
+[[decision_rule.guards]]
+metric = "missed"
+higher_is_better = false
+max_loss = 0.0

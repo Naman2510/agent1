@@ -1,0 +1,65 @@
+{
+  "config": {
+    "recogniser": {
+      "beam_size": 5,
+      "compute_type": "int8",
+      "cpu_threads": 4,
+      "language": "auto",
+      "model": "small",
+      "provider": "faster-whisper",
+      "seed": 0,
+      "temperature": 0.0,
+      "tokens_per_second": 20
+    },
+    "suite": "stt",
+    "tier": "T2"
+  },
+  "config_name": "stt-live",
+  "dataset_digest": "1084397f02d7eed9ba859ea73f503cdb002871e8eb890001798fccfc4ddf5bfc",
+  "dataset_version": "v1",
+  "evaluation_run_id": null,
+  "git_dirty": false,
+  "git_sha": "139dab6",
+  "recorded_at": "2026-10-01T12:01:53+00:00",
+  "suite": "stt",
+  "summary": {
+    "by_language": {
+      "en": {
+        "cases": 44,
+        "cer": 0.0641,
+        "exact": 30,
+        "language_detected_as_written": 44,
+        "wer": 0.1227
+      },
+      "hi": {
+        "cases": 11,
+        "cer": 1.1921,
+        "exact": 0,
+        "language_detected_as_written": 0,
+        "wer": 1.383
+      },
+      "hi-Latn": {
+        "cases": 11,
+        "cer": 0.4449,
+        "exact": 0,
+        "language_detected_as_written": 0,
+        "wer": 0.9412
+      }
+    },
+    "cases": 66,
+    "cer": 0.2726,
+    "exact": 30,
+    "language_detected_as_written": 44,
+    "machine": "AMD EPYC 7763 64-Core Processor",
+    "numerics": {
+      "CT2_FORCE_CPU_ISA": "AVX2",
+      "CT2_USE_MKL": "1",
+      "MKL_CBWR": "AVX2",
+      "NPY_DISABLE_CPU_FEATURES": "X86_V4,AVX512_ICL,AVX512_SPR",
+      "ONEDNN_MAX_CPU_ISA": "AVX2",
+      "OPENBLAS_CORETYPE": "Haswell",
+      "OPENBLAS_NUM_THREADS": "4"
+    },
+    "wer": 0.4403
+  }
+}

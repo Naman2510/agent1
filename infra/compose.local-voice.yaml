@@ -1,0 +1,12 @@
+# Opt-in: the mentor speaks with a real, local synthesiser, eSpeak NG (ADR-0018), instead of the
+# fake's silence. It sounds robotic, and it is for development and demos, never the production
+# voice. The recogniser is still Compose's default (the fake) unless .env says otherwise.
+#
+#   docker compose --env-file .env -f infra/compose.yaml -f infra/compose.local-voice.yaml up --build
+services:
+  backend:
+    build:
+      args:
+        LOCAL_VOICE: "1"
+    environment:
+      VAANIOS_TTS_PROVIDER: espeak

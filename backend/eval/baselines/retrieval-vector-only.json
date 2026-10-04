@@ -1,0 +1,51 @@
+{
+  "config": {
+    "embedding": {
+      "heading_prefix": true
+    },
+    "retrieval": {
+      "mode": "vector_only"
+    },
+    "suite": "retrieval"
+  },
+  "config_name": "retrieval-vector-only",
+  "dataset_digest": "73d2058fee4f81eb3015ae8f0ea1daa36f9faf3f9b0aa7cbd9e5fdd2d3dc233c",
+  "dataset_version": "v1",
+  "evaluation_run_id": "4a1da8eb-c4cc-448a-ba23-22c6853224ca",
+  "git_dirty": false,
+  "git_sha": "239e472",
+  "recorded_at": "2026-09-27T10:22:53+00:00",
+  "suite": "retrieval",
+  "summary": {
+    "by_language": {
+      "en": {
+        "hit_rate": 1.0,
+        "mrr": 0.8917,
+        "n": 20,
+        "ndcg@10": 0.9239,
+        "precision@5": 0.22,
+        "queries": 20,
+        "recall@10": 1.0,
+        "recall@5": 0.975
+      },
+      "hi": {
+        "hit_rate": 0.5,
+        "mrr": 0.5,
+        "n": 2,
+        "ndcg@10": 0.5,
+        "precision@5": 0.1,
+        "queries": 2,
+        "recall@10": 0.5,
+        "recall@5": 0.5
+      }
+    },
+    "chunks": 19,
+    "hit_rate": 0.9545,
+    "mrr": 0.8561,
+    "ndcg@10": 0.8854,
+    "precision@5": 0.2091,
+    "queries": 22,
+    "recall@10": 0.9545,
+    "recall@5": 0.9318
+  }
+}

@@ -1,0 +1,3 @@
+eSpeak NG text-to-speech: 1.51
+resampled 22050 -> 16000 Hz with scipy.signal.resample_poly(320, 441)
+trimmed below -45.0 dBFS per 10 ms frame, 5 ms fades, peak -3 dBFS

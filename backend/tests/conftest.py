@@ -1,0 +1,94 @@
+"""Fixtures shared by every test.
+
+Only process-local doubles live here. Anything that needs PostgreSQL is in
+`tests/integration/conftest.py`, so the unit suite runs with no database at all — which is what
+keeps tier-T0 CI fast and hermetic (EVALUATION.md §6).
+"""
+
+import os
+import uuid
+from collections.abc import Iterator
+
+import fakeredis.aioredis
+import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from app.core.config import Settings
+
+# OpenTelemetry's global provider can be set once per process, so the test session sets it here,
+# before any app does: every span any test produces is recorded, and `spans` reads them.
+_SPANS = InMemorySpanExporter()
+_provider = TracerProvider()
+_provider.add_span_processor(SimpleSpanProcessor(_SPANS))
+trace.set_tracer_provider(_provider)
+
+
+@pytest.fixture
+def spans() -> Iterator[InMemorySpanExporter]:
+    """The spans finished during this test, and only those."""
+    _SPANS.clear()
+    yield _SPANS
+    _SPANS.clear()
+
+
+TEST_DB_URL = os.environ.get(
+    "VAANIOS_TEST_DATABASE_URL",
+    "postgresql+asyncpg://vaanios:vaanios@localhost:5432/vaanios_test",
+)
+
+
+@pytest.fixture(autouse=True)
+def _mlflow_outside_the_repository(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recorded eval run also logs to MLflow, whose default store is in the repository root;
+    a test must not write there."""
+    store = tmp_path_factory.getbasetemp() / "mlflow"
+    store.mkdir(exist_ok=True)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{store / 'mlflow.db'}")
+    monkeypatch.setenv("MLFLOW_ARTIFACT_ROOT", (store / "artifacts").as_uri())
+
+
+@pytest.fixture(scope="session")
+def settings() -> Settings:
+    return Settings(
+        environment="test",
+        database_url=TEST_DB_URL,  # type: ignore[arg-type]
+        redis_url="redis://localhost:6379/15",  # type: ignore[arg-type]
+        jwt_secret="test-secret-that-is-long-enough-to-pass-validation",
+        # Argon2 at production cost would dominate the suite. The real parameters are asserted
+        # separately in tests/unit/test_config.py.
+        argon2_time_cost=1,
+        argon2_memory_cost_kib=8,
+        argon2_parallelism=1,
+        # No test may reach a paid API. The fake provider is the only one wired up.
+        llm_provider="fake",
+        llm_refusal_fallback_model="",
+        log_json=False,
+        log_level="WARNING",
+    )
+
+
+@pytest.fixture
+def redis_client() -> fakeredis.aioredis.FakeRedis:
+    """An in-process Redis.
+
+    fakeredis executes the rate limiter's Lua script faithfully, which is the part whose
+    behaviour matters; a real server would add a dependency for no extra coverage.
+    """
+    return fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+
+def unique_email(prefix: str = "student") -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:10]}@example.com"
+
+
+@pytest.fixture
+def auth_headers():  # type: ignore[no-untyped-def]
+    def _headers(tokens: dict) -> dict[str, str]:
+        return {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    return _headers

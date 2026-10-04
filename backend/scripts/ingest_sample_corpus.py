@@ -1,0 +1,75 @@
+"""Ingest the self-authored sample corpus into the RAG pipeline.
+
+    python scripts/ingest_sample_corpus.py
+
+Ingests every document under datasets/v1/corpus/, fits the TF-IDF/SVD embedder on the whole
+corpus, and writes embeddings. Idempotent: re-running skips documents already ingested by content
+hash.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from pathlib import Path
+
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from app.core.config import get_settings
+from app.db.session import create_engine
+from app.providers.embedding.tfidf_svd import TfidfSvdEmbeddingProvider
+from app.providers.reranker.base import NoopReranker
+from app.rag.ingest import DocumentRejectedError, load_corpus_manifest
+from app.rag.service import DocumentTooShortError, RagService
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CORPUS_DIR = REPO_ROOT / "datasets" / "v1" / "corpus"
+
+# Metadata the pipeline does not infer from content (spec §15), as an admin would supply it on
+# upload. It lives with the corpus, so the retrieval suite ingests exactly the same thing.
+MANIFEST = CORPUS_DIR / "documents.json"
+
+
+async def main() -> int:
+    settings = get_settings()
+    engine = create_engine(settings)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        service = RagService(
+            session,
+            embeddings=TfidfSvdEmbeddingProvider(),
+            reranker=NoopReranker(),
+        )
+
+        ingested = skipped = 0
+        for path, metadata in load_corpus_manifest(MANIFEST):
+            filename = path.name
+            if not path.exists():
+                print(f"missing: {path}", file=sys.stderr)
+                continue
+            try:
+                result = await service.ingest_file(path, metadata)
+            except (DocumentTooShortError, DocumentRejectedError) as exc:
+                print(f"skipped {filename}: {exc}", file=sys.stderr)
+                continue
+            if result.already_ingested:
+                print(f"already ingested: {filename}")
+                skipped += 1
+            else:
+                print(f"ingested: {filename} ({result.chunk_count} chunks)")
+                ingested += 1
+
+        await session.commit()
+
+        embedded = await service.fit_and_embed_all()
+        await session.commit()
+        print(f"\nembedded {embedded} chunks with {service.embeddings.info.model}")
+
+    print(f"\n{ingested} ingested, {skipped} already present")
+    await engine.dispose()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main()))
